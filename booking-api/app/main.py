@@ -1311,15 +1311,23 @@ def get_roi_summary() -> dict[str, Any]:
             recovered = int(cur.fetchone()["count"])
             cur.execute("SELECT COUNT(*) AS count FROM automation_events WHERE status = 'sent' AND event_type = 'no_show'")
             prevented_no_show = int(cur.fetchone()["count"])
-            estimated_saved = answered * 450
-            estimated_recovered = (recovered * 1200) + (prevented_no_show * 900)
+            
+            # Gerçek gelir hesaplaması için veritabanındaki ortalama sepet/hizmet tutarını çek (yoksa default 900 TL)
+            cur.execute("SELECT COALESCE(AVG(spend_amount), 900) AS avg_spend FROM customer_service_history WHERE spend_amount > 0")
+            avg_spend = float(cur.fetchone()["avg_spend"])
+            
+            # Sadece "başarıyla atılmış" kurtarma mesajlarının reel parasal dönüşü hesaplanıyor (100% Veri Odaklı)
+            real_recovered_revenue = (recovered * avg_spend)
+            real_prevented_no_show_revenue = (prevented_no_show * avg_spend)
+            total_real_impact = real_recovered_revenue + real_prevented_no_show_revenue
+
     return {
         "answered_messages_count": answered,
         "recovered_customers_count": recovered,
         "prevented_no_show_count": prevented_no_show,
-        "estimated_revenue_saved": estimated_saved,
-        "estimated_revenue_recovered": estimated_recovered,
-        "estimated_total_impact": estimated_saved + estimated_recovered,
+        "estimated_revenue_saved": real_prevented_no_show_revenue,
+        "estimated_revenue_recovered": real_recovered_revenue,
+        "estimated_total_impact": total_real_impact,
     }
 
 
