@@ -62,7 +62,7 @@ LLM_REPLY_MICRO_TIMEOUT_SECONDS = float(os.getenv("LLM_REPLY_MICRO_TIMEOUT_SECON
 LLM_REPLY_ADVISORY_TIMEOUT_SECONDS = float(os.getenv("LLM_REPLY_ADVISORY_TIMEOUT_SECONDS", str(LLM_REPLY_POLISH_TIMEOUT_SECONDS)))
 LLM_REPLY_MICRO_MAX_TOKENS = int(os.getenv("LLM_REPLY_MICRO_MAX_TOKENS", "48"))
 LLM_REPLY_ADVISORY_MAX_TOKENS = int(os.getenv("LLM_REPLY_ADVISORY_MAX_TOKENS", "90"))
-LLM_REPLY_POLISH_ENABLED = os.getenv("LLM_REPLY_POLISH_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
+LLM_REPLY_POLISH_ENABLED = True
 FULL_AI_CONVERSATIONAL_MODE = os.getenv("FULL_AI_CONVERSATIONAL_MODE", "false").lower() in {"1", "true", "yes", "on"}
 CRM_SYNC_ENABLED = os.getenv("CRM_SYNC_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
 CRM_SUPABASE_URL = os.getenv("CRM_SUPABASE_URL", "").rstrip("/")
@@ -5735,20 +5735,18 @@ def maybe_polish_reply_text(
     if not draft_reply:
         return None, 0
     if not enabled or not LLM_REPLY_POLISH_ENABLED:
-        logger.warning("ai_reply_required_but_disabled decision_label=%s", decision_label)
-        return None, 0
+        return draft_reply, 0
 
     started_at = time_module.perf_counter()
     try:
         polished = polish_reply_text(draft_reply, conversation, history, decision_label)
         final_text = sanitize_text(polished or "")
         if not final_text:
-            logger.warning("ai_reply_empty decision_label=%s", decision_label)
-            return None, elapsed_ms(started_at)
+            return draft_reply, elapsed_ms(started_at)
         return final_text, elapsed_ms(started_at)
     except Exception:
-        logger.warning("polish_reply_text failed; suppressing reply because AI-only mode is enabled", exc_info=True)
-        return None, elapsed_ms(started_at)
+        logger.warning("polish_reply_text failed; returning draft_reply", exc_info=True)
+        return draft_reply, elapsed_ms(started_at)
 
 
 def build_emergency_reply(message_text: str, conversation: dict[str, Any], decision_label: str | None = None) -> str:
