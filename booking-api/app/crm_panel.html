@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CRM Panel</title>
+  <style>
+    :root {
+      --bg: #0b1020;
+      --panel: #121933;
+      --panel-soft: #182244;
+      --muted: #97a3c6;
+      --text: #eef2ff;
+      --line: rgba(255,255,255,0.08);
+      --accent: #6ea8fe;
+      --accent-2: #8b5cf6;
+      --good: #22c55e;
+      --warn: #f59e0b;
+      --bad: #ef4444;
+      --shadow: 0 16px 48px rgba(0,0,0,.28);
+      --radius: 18px;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; background: linear-gradient(180deg,#0a1020,#0f1730); color: var(--text); font-family: Inter, Arial, sans-serif; }
+    a { color: inherit; }
+    .app { display: grid; grid-template-columns: 270px 1fr; min-height: 100vh; }
+    .sidebar {
+      border-right: 1px solid var(--line);
+      background: rgba(9,14,29,.82);
+      backdrop-filter: blur(18px);
+      padding: 24px 18px;
+      position: sticky;
+      top: 0;
+      height: 100vh;
+    }
+    .brand { font-size: 22px; font-weight: 800; letter-spacing: .2px; }
+    .brand small { display: block; color: var(--muted); margin-top: 6px; font-size: 12px; font-weight: 500; }
+    .nav { display: grid; gap: 8px; margin-top: 28px; }
+    .nav button {
+      width: 100%; border: 1px solid transparent; background: transparent; color: var(--text);
+      padding: 13px 14px; border-radius: 14px; text-align: left; cursor: pointer; font-weight: 600;
+    }
+    .nav button.active, .nav button:hover { background: var(--panel-soft); border-color: var(--line); }
+    .sidebar-footer { position: absolute; left: 18px; right: 18px; bottom: 18px; color: var(--muted); font-size: 12px; }
+    .main { padding: 26px; }
+    .topbar { display: flex; justify-content: space-between; gap: 16px; align-items: center; flex-wrap: wrap; margin-bottom: 22px; }
+    .title h1 { margin: 0; font-size: 28px; }
+    .title p { margin: 8px 0 0; color: var(--muted); }
+    .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+    .btn, select, input {
+      border: 1px solid var(--line); background: var(--panel); color: var(--text); border-radius: 12px;
+      padding: 11px 14px; font-size: 14px;
+    }
+    .btn { cursor: pointer; font-weight: 700; }
+    .btn.primary { background: linear-gradient(135deg,var(--accent),var(--accent-2)); border: none; }
+    .btn.ghost { background: transparent; }
+    .grid { display: grid; gap: 18px; }
+    .cards { grid-template-columns: repeat(4, minmax(0,1fr)); }
+    .card {
+      background: linear-gradient(180deg, rgba(24,34,68,.9), rgba(16,24,48,.92));
+      border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow);
+      padding: 18px;
+    }
+    .card h3 { margin: 0; font-size: 13px; color: var(--muted); font-weight: 600; }
+    .metric { margin-top: 12px; font-size: 30px; font-weight: 800; }
+    .submetric { margin-top: 8px; color: var(--muted); font-size: 13px; }
+    .content-grid { display: grid; grid-template-columns: 1.3fr .9fr; gap: 18px; margin-top: 18px; }
+    .section-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 16px; }
+    .section-header h2 { margin: 0; font-size: 18px; }
+    .muted { color: var(--muted); }
+    .filters { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
+    .table-wrap { overflow: auto; }
+    table { width: 100%; border-collapse: collapse; min-width: 760px; }
+    th, td { padding: 13px 12px; border-bottom: 1px solid var(--line); text-align: left; font-size: 14px; }
+    th { color: var(--muted); font-weight: 600; }
+    tr:hover td { background: rgba(255,255,255,.02); }
+    .badge {
+      display: inline-flex; align-items: center; padding: 6px 10px; border-radius: 999px;
+      background: rgba(255,255,255,.08); border: 1px solid var(--line); font-size: 12px; font-weight: 700;
+    }
+    .badge.good { color: #b8ffd1; background: rgba(34,197,94,.14); }
+    .badge.warn { color: #ffe1a6; background: rgba(245,158,11,.14); }
+    .badge.bad { color: #ffb2b2; background: rgba(239,68,68,.14); }
+    .list { display: grid; gap: 12px; }
+    .list-item { border: 1px solid var(--line); border-radius: 14px; padding: 14px; background: rgba(255,255,255,.02); }
+    .list-item strong { display: block; margin-bottom: 6px; }
+    .split { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+    .panel { display: none; }
+    .panel.active { display: block; }
+    .kvs { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
+    .kv { padding: 12px; border: 1px solid var(--line); border-radius: 14px; background: rgba(255,255,255,.02); }
+    .kv label { display: block; color: var(--muted); font-size: 12px; margin-bottom: 6px; }
+    .timeline { display: grid; gap: 12px; }
+    .timeline-item { padding: 14px; border-radius: 14px; border: 1px solid var(--line); background: rgba(255,255,255,.02); }
+    .timeline-item small { color: var(--muted); display: block; margin-top: 6px; }
+    .empty { color: var(--muted); padding: 16px 0; }
+    .status-row { display: flex; gap: 8px; flex-wrap: wrap; }
+    .campaign-form { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; }
+    .campaign-form .full { grid-column: 1/-1; }
+    .footer-note { margin-top: 16px; color: var(--muted); font-size: 12px; }
+    @media (max-width: 1100px) {
+      .cards, .content-grid, .split, .campaign-form { grid-template-columns: 1fr 1fr; }
+    }
+    @media (max-width: 900px) {
+      .app { grid-template-columns: 1fr; }
+      .sidebar { position: relative; height: auto; border-right: 0; border-bottom: 1px solid var(--line); }
+      .sidebar-footer { position: static; margin-top: 18px; }
+      .cards, .content-grid, .split, .campaign-form { grid-template-columns: 1fr; }
+      .main { padding: 18px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">CRM Panel<small>Instagram Automation Admin</small></div>
+      <div class="nav">
+        <button class="active" data-panel="dashboard">Dashboard</button>
+        <button data-panel="customers">Customers</button>
+        <button data-panel="detail">Customer Detail</button>
+        <button data-panel="automations">Automation Queue</button>
+        <button data-panel="campaigns">Campaigns</button>
+        <button data-panel="templates">Templates & Rules</button>
+      </div>
+      <div class="sidebar-footer">Doel Digital tarafından tasarlanmıştır</div>
+    </aside>
+
+    <main class="main">
+      <div class="topbar">
+        <div class="title">
+          <h1 id="pageTitle">Dashboard</h1>
+          <p id="pageDesc">Live CRM visibility for customers, automations, campaigns, and recovery flows.</p>
+        </div>
+        <div class="actions">
+          <button class="btn ghost" id="refreshAllBtn">Refresh Data</button>
+          <button class="btn primary" id="openNoShowBtn">Open No-Show List</button>
+        </div>
+      </div>
+
+      <section class="panel active" id="panel-dashboard">
+        <div class="grid cards" id="dashboardCards"></div>
+        <div class="content-grid">
+          <div class="card">
+            <div class="section-header">
+              <h2>Segment Snapshot</h2>
+              <span class="muted">Live</span>
+            </div>
+            <div class="list" id="segmentList"></div>
+          </div>
+          <div class="card">
+            <div class="section-header">
+              <h2>Upcoming Automations</h2>
+              <span class="muted">Priority queue</span>
+            </div>
+            <div class="list" id="upcomingList"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" id="panel-customers">
+        <div class="card">
+          <div class="section-header">
+            <h2>Customers</h2>
+            <span class="muted">Search, filter, inspect</span>
+          </div>
+          <div class="filters">
+            <input id="customerSearch" placeholder="Search by name, phone, instagram" />
+            <select id="segmentFilter">
+              <option value="">All segments</option>
+              <option value="new_customer">New</option>
+              <option value="active_customer">Active</option>
+              <option value="loyal_customer">Loyal</option>
+              <option value="inactive_customer">Inactive</option>
+              <option value="high_value_customer">High value</option>
+              <option value="no_show_customer">No show</option>
+            </select>
+            <select id="sectorFilter">
+              <option value="">All sectors</option>
+              <option value="tattoo">Tattoo</option>
+              <option value="beauty">Beauty</option>
+              <option value="real_estate">Real Estate</option>
+            </select>
+            <select id="attendanceFilter">
+              <option value="">Any attendance</option>
+              <option value="scheduled">Scheduled</option>
+              <option value="completed">Completed</option>
+              <option value="no_show">No show</option>
+              <option value="canceled">Canceled</option>
+            </select>
+            <button class="btn" id="applyCustomerFilters">Apply</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Instagram</th>
+                  <th>Sector</th>
+                  <th>Segment</th>
+                  <th>Visits</th>
+                  <th>Next Automation</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="customerRows"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" id="panel-detail">
+        <div class="split">
+          <div class="card">
+            <div class="section-header">
+              <h2>Customer Card</h2>
+              <span class="muted" id="detailHeaderHint">Select a customer from list</span>
+            </div>
+            <div class="kvs" id="customerCard"></div>
+          </div>
+          <div class="card">
+            <div class="section-header">
+              <h2>Upcoming Automations</h2>
+            </div>
+            <div class="list" id="customerAutomations"></div>
+          </div>
+        </div>
+        <div class="card" style="margin-top:18px;">
+          <div class="section-header">
+            <h2>Merged Timeline</h2>
+            <span class="muted">Messages, appointments, history, automations</span>
+          </div>
+          <div class="timeline" id="customerTimeline"></div>
+        </div>
+      </section>
+
+      <section class="panel" id="panel-automations">
+        <div class="split">
+          <div class="card">
+            <div class="section-header">
+              <h2>Due Queue</h2>
+              <button class="btn" id="refreshQueueBtn">Refresh Queue</button>
+            </div>
+            <div class="list" id="automationQueue"></div>
+          </div>
+          <div class="card">
+            <div class="section-header">
+              <h2>Queue Notes</h2>
+            </div>
+            <div class="list-item">
+              <strong>Worker-safe claim flow</strong>
+              Claimed items are locked with claim metadata. Failed sends can be re-queued with a retry time.
+            </div>
+            <div class="list-item">
+              <strong>Recommended flow</strong>
+              Claim → Send → Mark sent / retry → monitor failures.
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" id="panel-campaigns">
+        <div class="card">
+          <div class="section-header">
+            <h2>Create Campaign</h2>
+            <span class="muted">Recovery, no-show, reactivation</span>
+          </div>
+          <div class="campaign-form">
+            <input id="campaignTitle" placeholder="Campaign title" />
+            <input id="campaignTemplate" placeholder="Template slug" value="no-show-followup" />
+            <select id="campaignSegment">
+              <option value="">Any segment</option>
+              <option value="no_show_customer">No-show</option>
+              <option value="inactive_customer">Inactive</option>
+              <option value="loyal_customer">Loyal</option>
+              <option value="new_customer">New</option>
+            </select>
+            <select id="campaignSector">
+              <option value="">Any sector</option>
+              <option value="tattoo">Tattoo</option>
+              <option value="beauty">Beauty</option>
+              <option value="real_estate">Real Estate</option>
+            </select>
+            <select id="campaignAttendance">
+              <option value="">Any attendance</option>
+              <option value="no_show">No show</option>
+              <option value="scheduled">Scheduled</option>
+              <option value="completed">Completed</option>
+            </select>
+            <input id="campaignInactivity" type="number" min="0" placeholder="Inactivity days" />
+            <div class="full actions">
+              <button class="btn ghost" id="previewCampaignBtn">Preview Audience</button>
+              <button class="btn primary" id="createCampaignBtn">Create Draft</button>
+            </div>
+          </div>
+        </div>
+        <div class="content-grid">
+          <div class="card">
+            <div class="section-header">
+              <h2>Audience Preview</h2>
+            </div>
+            <div class="list" id="campaignPreview"></div>
+          </div>
+          <div class="card">
+            <div class="section-header">
+              <h2>Campaigns</h2>
+            </div>
+            <div class="list" id="campaignList"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" id="panel-templates">
+        <div class="content-grid">
+          <div class="card">
+            <div class="section-header">
+              <h2>Templates</h2>
+            </div>
+            <div class="list" id="templateList"></div>
+          </div>
+          <div class="card">
+            <div class="section-header">
+              <h2>Rules</h2>
+            </div>
+            <div class="list" id="ruleList"></div>
+          </div>
+        </div>
+        <div class="footer-note">Read-only MVP management view. Backend editing can be added in the next phase.</div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    const state = { selectedCustomerId: null, selectedCustomerUserId: null };
+
+    const byId = (id) => document.getElementById(id);
+    const badgeClass = (value = '') => {
+      const v = String(value).toLowerCase();
+      if (['sent','completed','active_customer','loyal_customer','high_value_customer'].includes(v)) return 'good';
+      if (['queued','claimed','scheduled','new_customer','maintenance','control','recovery'].includes(v)) return 'warn';
+      if (['failed','no_show','no_show_customer','canceled'].includes(v)) return 'bad';
+      return '';
+    };
+    const fmt = (value) => value ? new Date(value).toLocaleString('tr-TR') : '-';
+    const safe = (v) => (v === null || v === undefined || v === '') ? '-' : String(v);
+
+    async function api(url, options) {
+      const res = await fetch(url, options);
+      if (!res.ok) throw new Error(await res.text());
+      return res.json();
+    }
+
+    function setPanel(name) {
+      document.querySelectorAll('.nav button').forEach(btn => btn.classList.toggle('active', btn.dataset.panel === name));
+      document.querySelectorAll('.panel').forEach(panel => panel.classList.toggle('active', panel.id === `panel-${name}`));
+      const map = {
+        dashboard: ['Dashboard','Live CRM, segment, and impact visibility.'],
+        customers: ['Customers','Filter, search, and open customer records.'],
+        detail: ['Customer Detail','Profile, automations, and merged timeline.'],
+        automations: ['Automation Queue','Claimed, queued, retry, and send operations.'],
+        campaigns: ['Campaigns','Preview and draft recovery or outreach campaigns.'],
+        templates: ['Templates & Rules','Read-only CRM preset management view.'],
+      };
+      byId('pageTitle').textContent = map[name][0];
+      byId('pageDesc').textContent = map[name][1];
+    }
+
+    async function loadDashboard() {
+      const [roi, segments, upcoming] = await Promise.all([
+        api('/api/roi-summary'),
+        api('/api/crm/segments'),
+        api('/api/customers/ops/upcoming-automations?limit=6'),
+      ]);
+      byId('dashboardCards').innerHTML = [
+        ['Answered Messages', roi.answered_messages_count, 'Total outbound responses'],
+        ['Recovered Customers', roi.recovered_customers_count, 'Sent recovery automations'],
+        ['Prevented No-Shows', roi.prevented_no_show_count, 'No-show recovery sends'],
+        ['Estimated Total Impact', `₺${Number(roi.estimated_total_impact || 0).toLocaleString('tr-TR')}`, 'Saved + recovered value'],
+      ].map(([title, metric, sub]) => `<div class="card"><h3>${title}</h3><div class="metric">${metric}</div><div class="submetric">${sub}</div></div>`).join('');
+
+      byId('segmentList').innerHTML = (segments.segments || []).length
+        ? segments.segments.map(item => `<div class="list-item"><strong>${safe(item.segment)}</strong><span class="badge ${badgeClass(item.segment)}">${item.count} customers</span></div>`).join('')
+        : `<div class="empty">No segment data yet.</div>`;
+
+      byId('upcomingList').innerHTML = (upcoming.customers || []).length
+        ? upcoming.customers.map(item => `<div class="list-item"><strong>${safe(item.full_name || item.instagram_user_id)}</strong><div class="status-row"><span class="badge ${badgeClass(item.segment)}">${safe(item.segment)}</span><span class="badge ${badgeClass(item.next_automation_type)}">${safe(item.next_automation_type)}</span></div><small>${fmt(item.next_automation_at)}</small></div>`).join('')
+        : `<div class="empty">No upcoming automations.</div>`;
+    }
+
+    async function loadCustomers() {
+      const search = encodeURIComponent(byId('customerSearch').value || '');
+      const segment = encodeURIComponent(byId('segmentFilter').value || '');
+      const sector = encodeURIComponent(byId('sectorFilter').value || '');
+      const attendance = encodeURIComponent(byId('attendanceFilter').value || '');
+      const query = `/api/customers?limit=100&search=${search}&segment=${segment}&sector=${sector}&attendance_status=${attendance}`;
+      const data = await api(query);
+      byId('customerRows').innerHTML = (data.customers || []).map(c => `
+        <tr>
+          <td>${safe(c.full_name)}</td>
+          <td>${safe(c.instagram_user_id)}</td>
+          <td>${safe(c.sector)}</td>
+          <td><span class="badge ${badgeClass(c.segment)}">${safe(c.segment)}</span></td>
+          <td>${safe(c.total_visits)}</td>
+          <td>${safe(c.next_automation_type)}<br><small class="muted">${fmt(c.next_automation_at)}</small></td>
+          <td><button class="btn" onclick="window.openCustomer('${c.instagram_user_id}')">Open</button></td>
+        </tr>
+      `).join('') || `<tr><td colspan="7" class="empty">No customers found.</td></tr>`;
+    }
+
+    async function loadCustomerDetail(userId) {
+      if (!userId) return;
+      state.selectedCustomerUserId = userId;
+      const [detail, timeline] = await Promise.all([
+        api(`/api/customers/${encodeURIComponent(userId)}`),
+        api(`/api/customers/${encodeURIComponent(userId)}/timeline?limit=50`),
+      ]);
+      const c = detail.customer || {};
+      byId('detailHeaderHint').textContent = c.full_name || c.instagram_user_id || 'Customer';
+      byId('customerCard').innerHTML = [
+        ['Full Name', c.full_name], ['Instagram', c.instagram_user_id], ['Phone', c.phone], ['Sector', c.sector],
+        ['Segment', c.segment], ['Last Service', c.last_service], ['Visits', c.total_visits], ['No-show Count', c.no_show_count],
+        ['Last Contact', fmt(c.last_contact_at)], ['Next Automation', safe(c.next_automation_type)], ['Next Automation At', fmt(c.next_automation_at)], ['Notes', c.notes]
+      ].map(([k,v]) => `<div class="kv"><label>${k}</label><div>${safe(v)}</div></div>`).join('');
+
+      byId('customerAutomations').innerHTML = (detail.upcoming_automations || []).length
+        ? detail.upcoming_automations.map(a => `<div class="list-item"><strong>${safe(a.template_slug)}</strong><div class="status-row"><span class="badge ${badgeClass(a.event_type)}">${safe(a.event_type)}</span><span class="badge ${badgeClass(a.status)}">${safe(a.status)}</span></div><small>${fmt(a.scheduled_at)}</small></div>`).join('')
+        : `<div class="empty">No automation records.</div>`;
+
+      byId('customerTimeline').innerHTML = (timeline.timeline || []).length
+        ? timeline.timeline.map(item => `<div class="timeline-item"><strong>${safe(item.type)}</strong><div>${safe(item.message_text || item.service || item.service_name || item.template_slug || item.status || item.event_type)}</div><small>${fmt(item.created_at || item.scheduled_at || item.updated_at)}</small></div>`).join('')
+        : `<div class="empty">No timeline data.</div>`;
+      setPanel('detail');
+    }
+
+    async function loadAutomationQueue() {
+      const data = await api('/internal/automation/claim?limit=20');
+      byId('automationQueue').innerHTML = (data.events || []).length
+        ? data.events.map(ev => `<div class="list-item"><strong>${safe(ev.instagram_user_id)}</strong><div>${safe(ev.message_text)}</div><small>${safe(ev.template_slug)} · ${safe(ev.event_type)} · ${fmt(ev.scheduled_at)}</small></div>`).join('')
+        : `<div class="empty">No due automation events right now.</div>`;
+    }
+
+    async function loadCampaigns() {
+      const data = await api('/api/campaigns');
+      byId('campaignList').innerHTML = (data.campaigns || []).length
+        ? data.campaigns.map(c => `<div class="list-item"><strong>${safe(c.title)}</strong><div class="status-row"><span class="badge ${badgeClass(c.status)}">${safe(c.status)}</span><span class="badge">Audience ${safe(c.audience_size)}</span></div><small>${safe(c.template_slug)} · ${fmt(c.created_at)}</small></div>`).join('')
+        : `<div class="empty">No campaigns yet.</div>`;
+    }
+
+    async function previewCampaign() {
+      const params = new URLSearchParams({
+        template_slug: byId('campaignTemplate').value || '',
+        segment: byId('campaignSegment').value || '',
+        sector: byId('campaignSector').value || '',
+        attendance_status: byId('campaignAttendance').value || '',
+        limit: '30'
+      });
+      if (byId('campaignInactivity').value) params.set('inactivity_days', byId('campaignInactivity').value);
+      const data = await api(`/api/campaigns/preview?${params.toString()}`);
+      byId('campaignPreview').innerHTML = (data.customers || []).length
+        ? data.customers.map(c => `<div class="list-item"><strong>${safe(c.full_name || c.instagram_user_id)}</strong><div class="status-row"><span class="badge ${badgeClass(c.segment)}">${safe(c.segment)}</span><span class="badge">${safe(c.sector)}</span></div><small>${safe(c.instagram_user_id)}</small></div>`).join('')
+        : `<div class="empty">No matching customers.</div>`;
+    }
+
+    async function createCampaign() {
+      const payload = {
+        title: byId('campaignTitle').value || 'Untitled Campaign',
+        template_slug: byId('campaignTemplate').value || 'no-show-followup',
+        segment: byId('campaignSegment').value || null,
+        sector: byId('campaignSector').value || null,
+        attendance_status: byId('campaignAttendance').value || null,
+        inactivity_days: byId('campaignInactivity').value ? Number(byId('campaignInactivity').value) : null,
+      };
+      await api('/api/campaigns', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      await loadCampaigns();
+      await previewCampaign();
+    }
+
+    async function loadTemplatesAndRules() {
+      const [templates, rules] = await Promise.all([api('/api/crm/templates'), api('/api/crm/rules')]);
+      byId('templateList').innerHTML = (templates.templates || []).map(t => `<div class="list-item"><strong>${safe(t.title)}</strong><div class="status-row"><span class="badge">${safe(t.slug)}</span><span class="badge">${safe(t.sector)}</span><span class="badge ${badgeClass(t.trigger_type)}">${safe(t.trigger_type)}</span></div><small>${safe(t.content)}</small></div>`).join('') || `<div class="empty">No templates.</div>`;
+      byId('ruleList').innerHTML = (rules.rules || []).map(r => `<div class="list-item"><strong>${safe(r.title)}</strong><div class="status-row"><span class="badge">${safe(r.slug)}</span><span class="badge">${safe(r.sector)}</span><span class="badge ${badgeClass(r.trigger_type)}">${safe(r.trigger_type)}</span><span class="badge">${safe(r.days_after)}d</span></div><small>${safe(r.template_slug)}</small></div>`).join('') || `<div class="empty">No rules.</div>`;
+    }
+
+    window.openCustomer = loadCustomerDetail;
+
+    document.querySelectorAll('.nav button').forEach(btn => btn.addEventListener('click', () => setPanel(btn.dataset.panel)));
+    byId('refreshAllBtn').addEventListener('click', async () => { await Promise.all([loadDashboard(), loadCustomers(), loadCampaigns(), loadTemplatesAndRules()]); if (state.selectedCustomerUserId) await loadCustomerDetail(state.selectedCustomerUserId); });
+    byId('openNoShowBtn').addEventListener('click', async () => { setPanel('customers'); byId('segmentFilter').value = 'no_show_customer'; await loadCustomers(); });
+    byId('applyCustomerFilters').addEventListener('click', loadCustomers);
+    byId('refreshQueueBtn').addEventListener('click', loadAutomationQueue);
+    byId('previewCampaignBtn').addEventListener('click', previewCampaign);
+    byId('createCampaignBtn').addEventListener('click', createCampaign);
+
+    (async function init() {
+      await Promise.all([loadDashboard(), loadCustomers(), loadAutomationQueue(), loadCampaigns(), loadTemplatesAndRules()]);
+      if (location.hash.replace('#','')) setPanel(location.hash.replace('#',''));
+    })().catch(err => {
+      console.error(err);
+      alert('CRM panel load error: ' + err.message);
+    });
+  </script>
+</body>
+</html>

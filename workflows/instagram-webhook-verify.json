@@ -1,0 +1,83 @@
+{
+  "name": "Instagram Webhook Verify",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "instagram/randevu",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "189557b6-f953-4545-81b0-51c7df0da976",
+      "name": "Webhook Verify",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        260,
+        280
+      ],
+      "webhookId": "c7e6a823-f956-4cb9-a93f-7b2a5d21d52e"
+    },
+    {
+      "parameters": {
+        "jsCode": "const query = $json.query || {};\nconst expected = $env.META_VERIFY_TOKEN || '';\nconst mode = query['hub.mode'];\nconst token = query['hub.verify_token'];\nconst challenge = query['hub.challenge'];\nconst ok = mode === 'subscribe' && token && expected && token === expected;\nreturn [{ json: { ok, response_code: ok ? 200 : 403, response_text: ok ? String(challenge || '') : 'Forbidden' } }];"
+      },
+      "id": "b128e96b-9d3b-42ff-81bc-e87d37d6d177",
+      "name": "Check Verify Token",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        520,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{$json.response_text}}",
+        "options": {
+          "responseCode": "={{$json.response_code}}"
+        }
+      },
+      "id": "173a22b5-4ca0-4761-a0cd-98b7d1eab1d3",
+      "name": "Respond Verify",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        780,
+        280
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook Verify": {
+      "main": [
+        [
+          {
+            "node": "Check Verify Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Verify Token": {
+      "main": [
+        [
+          {
+            "node": "Respond Verify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "7a1821f7-d2fa-46fc-9051-75f984ec9ed9",
+  "tags": []
+}

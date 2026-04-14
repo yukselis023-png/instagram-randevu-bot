@@ -1,0 +1,176 @@
+{
+  "name": "Instagram Message Bot",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "instagram/ai-router",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "4b06f10f-6b6c-43fb-9b19-6fcfd0de5d7b",
+      "name": "Webhook Messages",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        220,
+        300
+      ],
+      "webhookId": "3ae5b907-7bb7-4cc0-9f95-23db5c4b85c8"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $json.body || $json;\n\nif (body.sender_id && body.message_text) {\n  return [{\n    json: {\n      sender_id: body.sender_id,\n      recipient_id: body.recipient_id || null,\n      instagram_username: body.instagram_username || null,\n      message_text: body.message_text,\n      raw_event: body.raw_event || body,\n      entry_id: body.entry_id || null,\n      object: body.object || 'internal'\n    }\n  }];\n}\n\nconst output = [];\nfor (const entry of (body.entry || [])) {\n  for (const messaging of (entry.messaging || [])) {\n    const senderId = messaging?.sender?.id;\n    const text = messaging?.message?.text;\n    if (!senderId || !text) continue;\n    if (messaging?.message?.is_echo) continue;\n    output.push({\n      json: {\n        sender_id: senderId,\n        recipient_id: messaging?.recipient?.id || null,\n        instagram_username: messaging?.sender?.username || null,\n        message_text: text,\n        raw_event: messaging,\n        entry_id: entry.id || null,\n        object: body.object || null\n      }\n    });\n  }\n}\n\nif (output.length === 0) {\n  return [{ json: { _skip: true, reason: 'no_valid_messages' } }];\n}\n\nreturn output;"
+      },
+      "id": "ec99ec11-b8da-4e26-9b7b-4fc3432af4d5",
+      "name": "Extract Incoming Messages",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        520,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json._skip }}",
+              "operation": "notEqual",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "a1f2c3d4-e5f6-7890-abcd-ef1234567890",
+      "name": "Has Valid Message",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        740,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.BOOKING_API_BASE_URL}}/api/process-instagram-message",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ sender_id: $json.sender_id, recipient_id: $json.recipient_id, instagram_username: $json.instagram_username, message_text: $json.message_text, raw_event: $json.raw_event }) }}",
+        "options": {
+          "timeout": 90000
+        }
+      },
+      "id": "7452c1f8-3d0f-4f91-8e62-3256fccef370",
+      "name": "Process Booking Message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        980,
+        240
+      ],
+      "onError": "continueErrorOutput",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { _skip: true, reason: 'no_valid_messages', should_reply: false } }];"
+      },
+      "id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+      "name": "Skip Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        980,
+        440
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const error = $json;\nconst inputData = $('Has Valid Message').item.json || {};\nconsole.error('Booking API error for sender_id=' + (inputData.sender_id || 'unknown'), JSON.stringify(error));\nreturn [{\n  json: {\n    should_reply: false,\n    error: true,\n    error_message: 'Backend processing failed',\n    sender_id: inputData.sender_id || null,\n    reply_text: null,\n    handoff: false,\n    decision_path: ['n8n:error_no_reply']\n  }\n}];"
+      },
+      "id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
+      "name": "Handle Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1220,
+        360
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook Messages": {
+      "main": [
+        [
+          {
+            "node": "Extract Incoming Messages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Incoming Messages": {
+      "main": [
+        [
+          {
+            "node": "Has Valid Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Valid Message": {
+      "main": [
+        [
+          {
+            "node": "Process Booking Message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Skip Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Booking Message": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Handle Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "2a4d6278-3529-5f89-c335-g5cbc32798gc",
+  "tags": []
+}

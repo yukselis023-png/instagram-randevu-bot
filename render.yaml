@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: instagram-booking-api
+    runtime: docker
+    rootDir: booking-api
+    plan: starter
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: 8000
+      - key: TIMEZONE
+        value: Europe/Istanbul
+      - key: SLOT_BUFFER_MINUTES
+        value: 10
+      - key: CORS_ALLOW_ORIGINS
+        value: https://doel-crm.vercel.app

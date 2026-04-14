@@ -1,0 +1,891 @@
+import json
+import os
+import re
+import time as time_module
+from datetime import date, datetime, time, timedelta
+from typing import Any
+from zoneinfo import ZoneInfo
+
+import requests
+from dateparser.search import search_dates
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel, Field
+import psycopg
+from psycopg.rows import dict_row
+
+TIMEZONE = os.getenv("TIMEZONE", "Europe/Istanbul")
+TZ = ZoneInfo(TIMEZONE)
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://n8n:n8n@postgres:5432/n8n")
+BUSINESS_NAME = os.getenv("BUSINESS_NAME", "İşletme")
+BUSINESS_PHONE = os.getenv("BUSINESS_PHONE", "+90XXXXXXXXXX")
+DEFAULT_SERVICE_NAME = os.getenv("DEFAULT_SERVICE_NAME", "Ön görüşme")
+WORKING_HOURS_START = os.getenv("WORKING_HOURS_START", "10:00")
+WORKING_HOURS_END = os.getenv("WORKING_HOURS_END", "19:00")
+SLOT_DURATION_MINUTES = int(os.getenv("SLOT_DURATION_MINUTES", "60"))
+APPOINTMENT_LOOKAHEAD_DAYS = int(os.getenv("APPOINTMENT_LOOKAHEAD_DAYS", "30"))
+LLM_BASE_URL = os.getenv("LLM_BASE_URL", "").rstrip("/")
+LLM_API_KEY = os.getenv("LLM_API_KEY", "")
+LLM_MODEL = os.getenv("LLM_MODEL", "gemini-3-flash")
+LLM_FALLBACK_MODEL = os.getenv("LLM_FALLBACK_MODEL", "gemini-2.5-flash-lite")
+LLM_EXTRACT_TIMEOUT_SECONDS = int(os.getenv("LLM_EXTRACT_TIMEOUT_SECONDS", "6"))
+LLM_REPLY_POLISH_TIMEOUT_SECONDS = int(os.getenv("LLM_REPLY_POLISH_TIMEOUT_SECONDS", "6"))
+SERVICES_HINTS = [s.strip() for s in os.getenv("SERVICES_HINTS", "saç kesimi,manikür,pedikür,danışmanlık,görüşme").split(",") if s.strip()]
+
+WORK_START = time.fromisoformat(WORKING_HOURS_START)
+WORK_END = time.fromisoformat(WORKING_HOURS_END)
+
+app = FastAPI(title="Instagram Booking API", version="1.0.0")
+
+SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS conversations (
+    id BIGSERIAL PRIMARY KEY,
+    instagram_user_id TEXT NOT NULL UNIQUE,
+    instagram_username TEXT,
+    full_name TEXT,
+    phone TEXT,
+    service TEXT,
+    requested_date DATE,
+    requested_time TIME,
+    appointment_status TEXT NOT NULL DEFAULT 'collecting',
+    state TEXT NOT NULL DEFAULT 'new',
+    assigned_human BOOLEAN NOT NULL DEFAULT FALSE,
+    last_customer_message TEXT,
+    llm_notes TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS appointments (
+    id BIGSERIAL PRIMARY KEY,
+    instagram_user_id TEXT NOT NULL,
+    instagram_username TEXT,
+    full_name TEXT NOT NULL,
+    phone TEXT NOT NULL,
+    service TEXT NOT NULL,
+    appointment_date DATE NOT NULL,
+    appointment_time TIME NOT NULL,
+    status TEXT NOT NULL DEFAULT 'confirmed',
+    source TEXT NOT NULL DEFAULT 'instagram_dm',
+    notes TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (appointment_date, appointment_time)
+);
+
+CREATE TABLE IF NOT EXISTS message_logs (
+    id BIGSERIAL PRIMARY KEY,
+    instagram_user_id TEXT NOT NULL,
+    direction TEXT NOT NULL,
+    message_text TEXT,
+    raw_payload JSONB,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CHECK (direction IN ('in', 'out', 'system'))
+);
+"""
+
+NAME_PATTERNS = [
+    re.compile(r"\b(?:ben|adım|ismim|ad soyad)\s+([a-zçğıöşü\s]{2,40})", re.IGNORECASE),
+    re.compile(r"\b(?:ismim de)\s+([a-zçğıöşü\s]{2,40})", re.IGNORECASE),
+]
+
+PHONE_PATTERN = re.compile(r"(?:(?:\+?90)|0)?\s*5\d{2}[\s\-]?\d{3}[\s\-]?\d{2}[\s\-]?\d{2}")
+TIME_PATTERN = re.compile(r"\b([01]?\d|2[0-3])[:.]([0-5]\d)\b")
+HOUR_WORD_PATTERN = re.compile(r"\bsaat\s*([01]?\d|2[0-3])\b", re.IGNORECASE)
+DATE_CUE_PATTERN = re.compile(
+    r"\b(bugün|yarın|öbür gün|haftaya|pazartesi|salı|çarşamba|perşembe|cuma|cumartesi|pazar|ocak|şubat|mart|nisan|mayıs|haziran|temmuz|ağustos|eylül|ekim|kasım|aralık|\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?)\b",
+    re.IGNORECASE,
+)
+HUMAN_KEYWORDS = ["temsilci", "insan", "yetkili", "canlı", "biri arasın", "siz arayın", "geri dönüş", "geri donus"]
+CANCEL_KEYWORDS = ["iptal", "ertele", "değiştir", "degistir"]
+NEW_APPOINTMENT_KEYWORDS = ["randevu", "uygun", "saat", "müsait", "musait", "gelmek istiyorum"]
+WEEKDAY_MAP = {
+    "pazartesi": 0,
+    "salı": 1,
+    "sali": 1,
+    "çarşamba": 2,
+    "carsamba": 2,
+    "perşembe": 3,
+    "persembe": 3,
+    "cuma": 4,
+    "cumartesi": 5,
+    "pazar": 6,
+}
+NON_NAME_WORDS = {
+    "merhaba", "selam", "sa", "randevu", "yarın", "bugün", "cumartesi", "pazar", "pazartesi", "salı",
+    "çarşamba", "perşembe", "cuma", "saat", "müsait", "musait", "uygun", "saç", "cilt", "bakım",
+    "botoks", "dolgu", "epilasyon", "lazer", "manikür", "pedikür", "fiyat", "bilgi",
+}
+GREETING_MESSAGES = {
+    "merhaba", "selam", "selamlar", "sa", "hey", "iyi akşamlar", "iyi aksamlar", "iyi günler", "iyi gunler"
+}
+STALE_CONVERSATION_MINUTES = int(os.getenv("STALE_CONVERSATION_MINUTES", "30"))
+
+
+class IncomingMessage(BaseModel):
+    sender_id: str = Field(..., min_length=1)
+    message_text: str | None = ""
+    recipient_id: str | None = None
+    instagram_username: str | None = None
+    raw_event: dict[str, Any] | None = None
+
+
+class ProcessResult(BaseModel):
+    sender_id: str
+    should_reply: bool = True
+    reply_text: str | None = None
+    handoff: bool = False
+    conversation_state: str
+    appointment_created: bool = False
+    appointment_id: int | None = None
+    normalized: dict[str, Any] = Field(default_factory=dict)
+
+
+@app.on_event("startup")
+def on_startup() -> None:
+    wait_for_database()
+    run_migrations()
+
+
+@app.get("/health")
+def health() -> dict[str, Any]:
+    return {"status": "ok", "time": datetime.now(TZ).isoformat()}
+
+
+@app.get("/api/appointments")
+def list_appointments(limit: int = 50) -> dict[str, Any]:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, instagram_user_id, full_name, phone, service, appointment_date, appointment_time, status, created_at
+                FROM appointments
+                WHERE appointment_date >= CURRENT_DATE
+                ORDER BY appointment_date ASC, appointment_time ASC
+                LIMIT %s
+                """,
+                (limit,),
+            )
+            rows = cur.fetchall()
+    return {"appointments": [serialize_row(row) for row in rows]}
+
+
+@app.get("/api/conversations")
+def list_conversations(limit: int = 50) -> dict[str, Any]:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, instagram_user_id, full_name, phone, service, requested_date, requested_time, appointment_status, state, updated_at
+                FROM conversations
+                ORDER BY updated_at DESC
+                LIMIT %s
+                """,
+                (limit,),
+            )
+            rows = cur.fetchall()
+    return {"conversations": [serialize_row(row) for row in rows]}
+
+
+@app.post("/api/process-instagram-message", response_model=ProcessResult)
+def process_instagram_message(payload: IncomingMessage) -> ProcessResult:
+    message_text = sanitize_text(payload.message_text or "")
+    if not message_text:
+        return ProcessResult(sender_id=payload.sender_id, should_reply=False, reply_text=None, handoff=False, conversation_state="ignored", normalized={})
+
+    with get_conn() as conn:
+        conversation = get_or_create_conversation(conn, payload.sender_id, payload.instagram_username)
+        save_message_log(conn, payload.sender_id, "in", message_text, payload.raw_event)
+
+        if should_reset_stale_conversation(conversation, message_text):
+            reset_conversation_for_restart(conversation)
+
+        lower_text = message_text.lower()
+        if conversation.get("state") == "completed" and any(k in lower_text for k in CANCEL_KEYWORDS):
+            reply = (
+                f"Elbette yardımcı olayım. Mevcut randevunuzun değişiklik veya iptal talebi için sizi yetkili ekibimize yönlendiriyorum. "
+                f"İsterseniz {BUSINESS_PHONE} numarası üzerinden de bize ulaşabilirsiniz."
+            )
+            conversation["state"] = "human_handoff"
+            conversation["assigned_human"] = True
+            conversation["last_customer_message"] = message_text
+            reply = polish_reply_text(reply, conversation)
+            upsert_conversation(conn, conversation)
+            save_message_log(conn, payload.sender_id, "out", reply, {"type": "handoff"})
+            return ProcessResult(sender_id=payload.sender_id, reply_text=reply, handoff=True, conversation_state=conversation["state"], normalized=build_normalized(conversation))
+
+        if conversation.get("state") == "completed" and any(k in lower_text for k in NEW_APPOINTMENT_KEYWORDS):
+            conversation["service"] = None
+            conversation["requested_date"] = None
+            conversation["requested_time"] = None
+            conversation["appointment_status"] = "collecting"
+            conversation["state"] = "new"
+
+        llm_data = call_llm_extractor(message_text, conversation)
+
+        detected_phone = extract_phone(message_text)
+        detected_time = extract_time(message_text) or normalize_time_string(llm_data.get("requested_time"))
+        detected_date = extract_date(message_text) or normalize_date_string(llm_data.get("requested_date"))
+        detected_name = conversation.get("full_name") or extract_name(message_text, conversation.get("state", "new")) or titlecase_name(llm_data.get("name"))
+        detected_service = conversation.get("service") or pick_service(message_text, llm_data.get("service"))
+
+        if not conversation.get("full_name") and detected_name:
+            conversation["full_name"] = detected_name
+        if not conversation.get("phone") and detected_phone:
+            conversation["phone"] = detected_phone
+        if not conversation.get("service") and detected_service:
+            conversation["service"] = detected_service
+        if not conversation.get("requested_date") and detected_date:
+            conversation["requested_date"] = detected_date
+        if not conversation.get("requested_time") and detected_time:
+            conversation["requested_time"] = detected_time
+
+        conversation["last_customer_message"] = message_text
+        conversation["llm_notes"] = llm_data.get("notes")
+
+        wants_human = llm_data.get("wants_human") is True or any(k in lower_text for k in HUMAN_KEYWORDS)
+        if wants_human:
+            reply = (
+                "Tabii, sizi yetkili ekibimize yönlendiriyorum. "
+                "Uygunsanız adınızı ve telefon numaranızı bırakın, ekibimiz size kısa sürede dönüş sağlasın."
+            )
+            conversation["state"] = "human_handoff"
+            conversation["assigned_human"] = True
+            conversation["appointment_status"] = "handoff"
+            reply = polish_reply_text(reply, conversation)
+            upsert_conversation(conn, conversation)
+            save_message_log(conn, payload.sender_id, "out", reply, {"type": "handoff"})
+            return ProcessResult(sender_id=payload.sender_id, reply_text=reply, handoff=True, conversation_state=conversation["state"], normalized=build_normalized(conversation))
+
+        reply = None
+        appointment_created = False
+        appointment_id = None
+
+        if not conversation.get("full_name"):
+            conversation["state"] = "collect_name"
+            reply = (
+                f"Merhaba. {BUSINESS_NAME} için size memnuniyetle yardımcı olayım. "
+                f"Randevuyu başlatmak için önce adınızı ve soyadınızı paylaşır mısınız?"
+            )
+        elif not conversation.get("service"):
+            conversation["state"] = "collect_service"
+            reply = "Hangi işlem veya hizmet için randevu talep ettiğinizi yazabilir misiniz?"
+        elif not conversation.get("requested_date"):
+            conversation["state"] = "collect_date"
+            reply = "Hangi gün gelmek istediğinizi paylaşır mısınız? Örnek: yarın, cuma veya 12.04"
+        elif not conversation.get("requested_time"):
+            conversation["state"] = "collect_time"
+            reply = "Uygun olduğunuz saat bilgisini yazar mısınız? Örnek: 14:00"
+        elif not conversation.get("phone"):
+            conversation["state"] = "collect_phone"
+            reply = "Randevuyu netleştirebilmemiz için telefon numaranızı da paylaşır mısınız?"
+        else:
+            validation_error = validate_slot(conversation["requested_date"], conversation["requested_time"])
+            if validation_error:
+                conversation["requested_time"] = None
+                conversation["state"] = "collect_time"
+                reply = validation_error
+            else:
+                existing = find_existing_appointment(conn, conversation["requested_date"], conversation["requested_time"])
+                if existing:
+                    suggestions = suggest_alternatives(conn, conversation["requested_date"], conversation["requested_time"])
+                    suggestion_text = ", ".join(suggestions) if suggestions else "aynı gün içinde başka bir uygun saat"
+                    conversation["requested_time"] = None
+                    conversation["state"] = "collect_time"
+                    reply = (
+                        f"Seçtiğiniz saat ne yazık ki dolu görünüyor. Uygun alternatif saatler: {suggestion_text}. "
+                        f"Size en uygun saati yazarsanız hemen devam edebilirim."
+                    )
+                else:
+                    appointment_id = create_appointment(conn, conversation, payload.instagram_username)
+                    appointment_created = True
+                    conversation["appointment_status"] = "confirmed"
+                    conversation["state"] = "completed"
+                    reply = build_confirmation_message(conversation)
+
+        if reply:
+            reply = polish_reply_text(reply, conversation)
+
+        upsert_conversation(conn, conversation)
+        if reply:
+            save_message_log(conn, payload.sender_id, "out", reply, {"type": "reply"})
+
+    return ProcessResult(
+        sender_id=payload.sender_id,
+        reply_text=reply,
+        handoff=conversation.get("state") == "human_handoff",
+        conversation_state=conversation.get("state", "new"),
+        appointment_created=appointment_created,
+        appointment_id=appointment_id,
+        normalized=build_normalized(conversation),
+    )
+
+
+def wait_for_database(retries: int = 30, sleep_seconds: int = 2) -> None:
+    last_error: Exception | None = None
+    for _ in range(retries):
+        try:
+            with get_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+                    cur.fetchone()
+                return
+        except Exception as exc:  # noqa: BLE001
+            last_error = exc
+            time_module.sleep(sleep_seconds)
+    raise RuntimeError(f"Database connection failed after retries: {last_error}")
+
+
+def run_migrations() -> None:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(SCHEMA_SQL)
+        conn.commit()
+
+
+def get_conn() -> psycopg.Connection:
+    return psycopg.connect(DATABASE_URL, row_factory=dict_row)
+
+
+def serialize_row(row: dict[str, Any]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for key, value in row.items():
+        if isinstance(value, (datetime, date, time)):
+            out[key] = value.isoformat()
+        else:
+            out[key] = value
+    return out
+
+
+def sanitize_text(value: str) -> str:
+    return re.sub(r"\s+", " ", value or "").strip()
+
+
+def is_simple_greeting(text: str) -> bool:
+    lowered = sanitize_text(text).lower().strip(".!?,")
+    return lowered in GREETING_MESSAGES
+
+
+def reset_conversation_for_restart(conversation: dict[str, Any]) -> None:
+    conversation["service"] = None
+    conversation["requested_date"] = None
+    conversation["requested_time"] = None
+    conversation["appointment_status"] = "collecting"
+    conversation["state"] = "new"
+    conversation["assigned_human"] = False
+
+
+def should_reset_stale_conversation(conversation: dict[str, Any], message_text: str) -> bool:
+    if not is_simple_greeting(message_text):
+        return False
+
+    updated_at = conversation.get("updated_at")
+    if not updated_at:
+        return False
+
+    try:
+        updated_dt = datetime.fromisoformat(updated_at)
+    except ValueError:
+        return False
+
+    if conversation.get("state") in {"completed", "human_handoff"}:
+        return True
+
+    now = datetime.now(TZ)
+    return now - updated_dt >= timedelta(minutes=STALE_CONVERSATION_MINUTES)
+
+
+def titlecase_name(value: str | None) -> str | None:
+    if not value:
+        return None
+    clean = sanitize_text(re.sub(r"[^a-zA-ZçğıöşüÇĞİÖŞÜ\s]", "", value))
+    if not clean:
+        return None
+    words = [w for w in clean.split() if w]
+    if not 1 <= len(words) <= 4:
+        return None
+    if any(w.lower() in NON_NAME_WORDS for w in words):
+        return None
+    return " ".join(word[:1].upper() + word[1:].lower() for word in words)
+
+
+def extract_name(text: str, state: str) -> str | None:
+    for pattern in NAME_PATTERNS:
+        match = pattern.search(text)
+        if match:
+            return titlecase_name(match.group(1))
+    clean = sanitize_text(re.sub(r"[^a-zA-ZçğıöşüÇĞİÖŞÜ\s]", "", text))
+    words = clean.split()
+    if state in {"new", "collect_name"} and 1 <= len(words) <= 3 and not any(w.lower() in NON_NAME_WORDS for w in words):
+        return titlecase_name(clean)
+    return None
+
+
+def extract_phone(text: str) -> str | None:
+    match = PHONE_PATTERN.search(text)
+    if not match:
+        return None
+    digits = re.sub(r"\D", "", match.group(0))
+    if digits.startswith("90") and len(digits) == 12:
+        return f"+{digits}"
+    if digits.startswith("0") and len(digits) == 11:
+        return f"+90{digits[1:]}"
+    if len(digits) == 10:
+        return f"+90{digits}"
+    return None
+
+
+def extract_time(text: str) -> str | None:
+    match = TIME_PATTERN.search(text)
+    if match:
+        hour = int(match.group(1))
+        minute = int(match.group(2))
+        return f"{hour:02d}:{minute:02d}"
+    match = HOUR_WORD_PATTERN.search(text)
+    if match:
+        hour = int(match.group(1))
+        return f"{hour:02d}:00"
+    return None
+
+
+def has_date_cue(text: str) -> bool:
+    return DATE_CUE_PATTERN.search(text) is not None
+
+
+def extract_date(text: str) -> str | None:
+    if not has_date_cue(text):
+        return None
+
+    lowered = text.lower()
+    today = datetime.now(TZ).date()
+
+    if "öbür gün" in lowered or "obur gun" in lowered:
+        return (today + timedelta(days=2)).isoformat()
+    if "yarın" in lowered or "yarin" in lowered:
+        return (today + timedelta(days=1)).isoformat()
+    if "bugün" in lowered or "bugun" in lowered:
+        return today.isoformat()
+
+    for word, weekday in WEEKDAY_MAP.items():
+        if re.search(rf"\b{re.escape(word)}\b", lowered):
+            delta = (weekday - today.weekday()) % 7
+            if delta == 0:
+                delta = 7
+            return (today + timedelta(days=delta)).isoformat()
+
+    explicit = re.search(r"\b(\d{1,2})[./-](\d{1,2})(?:[./-](\d{2,4}))?\b", lowered)
+    if explicit:
+        day = int(explicit.group(1))
+        month = int(explicit.group(2))
+        year_raw = explicit.group(3)
+        year = int(year_raw) if year_raw else today.year
+        if year_raw and len(year_raw) == 2:
+            year += 2000
+        try:
+            parsed = date(year, month, day)
+            if not year_raw and parsed < today:
+                parsed = date(today.year + 1, month, day)
+            return parsed.isoformat()
+        except ValueError:
+            pass
+
+    results = search_dates(
+        text,
+        languages=["tr"],
+        settings={
+            "RELATIVE_BASE": datetime.now(TZ),
+            "PREFER_DATES_FROM": "future",
+            "TIMEZONE": TIMEZONE,
+            "DATE_ORDER": "DMY",
+        },
+    )
+    if not results:
+        return None
+    for source_text, dt in results:
+        if isinstance(dt, datetime):
+            snippet = source_text.lower()
+            if any(ch.isdigit() for ch in snippet) or has_date_cue(snippet):
+                return dt.date().isoformat()
+    return None
+
+
+def normalize_date_string(value: str | None) -> str | None:
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(value).isoformat()
+    except ValueError:
+        return None
+
+
+def normalize_time_string(value: str | None) -> str | None:
+    if not value:
+        return None
+    try:
+        parsed = time.fromisoformat(value)
+        return parsed.strftime("%H:%M")
+    except ValueError:
+        match = TIME_PATTERN.search(value)
+        if match:
+            return f"{int(match.group(1)):02d}:{int(match.group(2)):02d}"
+    return None
+
+
+def pick_service(text: str, llm_service: str | None) -> str | None:
+    if llm_service:
+        cleaned = sanitize_text(llm_service)
+        lowered_cleaned = cleaned.lower()
+        if cleaned and not any(keyword in lowered_cleaned for keyword in ["bilgi", "fiyat", "ücret", "ucret", "detay", "merhaba"]):
+            return cleaned[:120]
+    lowered = text.lower()
+    for service in SERVICES_HINTS:
+        if service.lower() in lowered:
+            return service
+    if lowered.strip(".!?,") in GREETING_MESSAGES:
+        return None
+    if any(keyword in lowered for keyword in ["bilgi", "fiyat", "ucret", "ücret", "fiyatlar", "detay"]):
+        return None
+    if any(keyword in lowered for keyword in ["randevu", "gelmek istiyorum", "uygun", "müsait", "musait"]):
+        return DEFAULT_SERVICE_NAME
+    if len(text.split()) <= 6 and not extract_phone(text) and not extract_time(text) and not has_date_cue(text):
+        return sanitize_text(text)[:120]
+    return None
+
+
+def list_llm_models() -> list[str]:
+    models = [LLM_MODEL]
+    if LLM_FALLBACK_MODEL and LLM_FALLBACK_MODEL not in models:
+        models.append(LLM_FALLBACK_MODEL)
+    return [model for model in models if model]
+
+
+def call_llm_content(messages: list[dict[str, str]], temperature: float = 0.1, max_tokens: int = 200, timeout: int = 20) -> str | None:
+    if not LLM_BASE_URL or not LLM_API_KEY:
+        return None
+
+    headers = {
+        "Authorization": f"Bearer {LLM_API_KEY}",
+        "Content-Type": "application/json",
+    }
+
+    payload_base = {
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+    }
+
+    for model in list_llm_models():
+        try:
+            response = requests.post(
+                f"{LLM_BASE_URL}/chat/completions",
+                headers=headers,
+                json={**payload_base, "model": model},
+                timeout=timeout,
+            )
+            if response.status_code >= 400:
+                continue
+            payload = response.json()
+            content = payload.get("choices", [{}])[0].get("message", {}).get("content", "")
+            if content and content.strip():
+                return content.strip()
+        except Exception:  # noqa: BLE001
+            continue
+    return None
+
+
+def normalize_llm_reply_text(content: str | None) -> str | None:
+    if not content:
+        return None
+    text = content.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json|text)?", "", text).strip()
+        text = re.sub(r"```$", "", text).strip()
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    lines = [line.strip() for line in text.split("\n")]
+    cleaned = "\n".join(line for line in lines if line)
+    return cleaned[:2000] if cleaned else None
+
+
+def polish_reply_text(draft_reply: str | None, conversation: dict[str, Any]) -> str | None:
+    if not draft_reply:
+        return draft_reply
+
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                f"You are the Instagram DM appointment assistant for {BUSINESS_NAME}. "
+                "Rewrite the draft reply into natural, warm, professional Turkish for a real business. "
+                "Return plain text only. No markdown, no bullet points, no emojis. "
+                "Keep every factual detail unchanged. Never invent availability, appointment status, dates, times, services, or phone numbers. "
+                "If information is still missing, ask only the single next most important question. Keep the tone concise, helpful, and confident."
+            ),
+        },
+        {
+            "role": "user",
+            "content": json.dumps(
+                {
+                    "business_name": BUSINESS_NAME,
+                    "business_phone": BUSINESS_PHONE,
+                    "conversation": build_normalized(conversation),
+                    "customer_message": conversation.get("last_customer_message"),
+                    "draft_reply": draft_reply,
+                },
+                ensure_ascii=False,
+            ),
+        },
+    ]
+
+    rewritten = call_llm_content(messages, temperature=0.35, max_tokens=260, timeout=LLM_REPLY_POLISH_TIMEOUT_SECONDS)
+    return normalize_llm_reply_text(rewritten) or draft_reply
+
+
+def call_llm_extractor(message_text: str, conversation: dict[str, Any]) -> dict[str, Any]:
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You extract structured data from Turkish Instagram DM appointment messages. "
+                "Return ONLY minified JSON with keys: intent, name, service, requested_date, requested_time, wants_human, notes. "
+                "intent must be one of appointment, info, human, other. requested_date must be ISO YYYY-MM-DD or null. "
+                "requested_time must be HH:MM or null. wants_human must be boolean. Do not include markdown."
+            ),
+        },
+        {
+            "role": "user",
+            "content": json.dumps(
+                {
+                    "today": datetime.now(TZ).date().isoformat(),
+                    "timezone": TIMEZONE,
+                    "known_state": build_normalized(conversation),
+                    "message": message_text,
+                },
+                ensure_ascii=False,
+            ),
+        },
+    ]
+
+    content = call_llm_content(messages, temperature=0.1, max_tokens=200, timeout=LLM_EXTRACT_TIMEOUT_SECONDS)
+    parsed = parse_json_like(content or "")
+    return parsed or {}
+
+
+def parse_json_like(content: str) -> dict[str, Any]:
+    if not content:
+        return {}
+    content = content.strip()
+    if content.startswith("```"):
+        content = re.sub(r"^```(?:json)?", "", content).strip()
+        content = re.sub(r"```$", "", content).strip()
+    start = content.find("{")
+    end = content.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        return {}
+    try:
+        return json.loads(content[start : end + 1])
+    except json.JSONDecodeError:
+        return {}
+
+
+def get_or_create_conversation(conn: psycopg.Connection, sender_id: str, username: str | None) -> dict[str, Any]:
+    with conn.cursor() as cur:
+        cur.execute("SELECT * FROM conversations WHERE instagram_user_id = %s", (sender_id,))
+        row = cur.fetchone()
+        if row:
+            data = serialize_row(row)
+            if username and not data.get("instagram_username"):
+                data["instagram_username"] = username
+            return data
+        cur.execute(
+            """
+            INSERT INTO conversations (instagram_user_id, instagram_username)
+            VALUES (%s, %s)
+            RETURNING *
+            """,
+            (sender_id, username),
+        )
+        created = cur.fetchone()
+        conn.commit()
+        return serialize_row(created)
+
+
+def upsert_conversation(conn: psycopg.Connection, conversation: dict[str, Any]) -> None:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO conversations (
+                instagram_user_id,
+                instagram_username,
+                full_name,
+                phone,
+                service,
+                requested_date,
+                requested_time,
+                appointment_status,
+                state,
+                assigned_human,
+                last_customer_message,
+                llm_notes,
+                updated_at
+            ) VALUES (%s, %s, %s, %s, %s, %s::date, %s::time, %s, %s, %s, %s, %s, NOW())
+            ON CONFLICT (instagram_user_id) DO UPDATE SET
+                instagram_username = EXCLUDED.instagram_username,
+                full_name = EXCLUDED.full_name,
+                phone = EXCLUDED.phone,
+                service = EXCLUDED.service,
+                requested_date = EXCLUDED.requested_date,
+                requested_time = EXCLUDED.requested_time,
+                appointment_status = EXCLUDED.appointment_status,
+                state = EXCLUDED.state,
+                assigned_human = EXCLUDED.assigned_human,
+                last_customer_message = EXCLUDED.last_customer_message,
+                llm_notes = EXCLUDED.llm_notes,
+                updated_at = NOW()
+            """,
+            (
+                conversation.get("instagram_user_id"),
+                conversation.get("instagram_username"),
+                conversation.get("full_name"),
+                conversation.get("phone"),
+                conversation.get("service"),
+                conversation.get("requested_date"),
+                conversation.get("requested_time"),
+                conversation.get("appointment_status", "collecting"),
+                conversation.get("state", "new"),
+                bool(conversation.get("assigned_human")),
+                conversation.get("last_customer_message"),
+                conversation.get("llm_notes"),
+            ),
+        )
+    conn.commit()
+
+
+def save_message_log(conn: psycopg.Connection, sender_id: str, direction: str, message_text: str | None, raw_payload: dict[str, Any] | None) -> None:
+    with conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO message_logs (instagram_user_id, direction, message_text, raw_payload) VALUES (%s, %s, %s, %s::jsonb)",
+            (sender_id, direction, message_text, json.dumps(raw_payload or {}, ensure_ascii=False)),
+        )
+    conn.commit()
+
+
+def validate_slot(date_value: str, time_value: str) -> str | None:
+    try:
+        requested_date = date.fromisoformat(date_value)
+        requested_time = time.fromisoformat(time_value)
+    except ValueError:
+        return "Tarih veya saat formatını anlayamadım. Lütfen örnek olarak 12.04 ve 14:00 şeklinde yazın."
+
+    today = datetime.now(TZ).date()
+    if requested_date < today:
+        return "Geçmiş bir tarih seçilemez. Lütfen bugün veya ileri bir tarih yazın."
+    if requested_date > today + timedelta(days=APPOINTMENT_LOOKAHEAD_DAYS):
+        return f"Şu an en fazla {APPOINTMENT_LOOKAHEAD_DAYS} gün sonrası için randevu açabiliyorum."
+    if requested_time < WORK_START or requested_time >= WORK_END:
+        return f"Çalışma saatlerimiz {WORKING_HOURS_START} - {WORKING_HOURS_END} arası. Bu aralıktan bir saat yazar mısınız?"
+    return None
+
+
+def find_existing_appointment(conn: psycopg.Connection, date_value: str, time_value: str) -> dict[str, Any] | None:
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT id, full_name, appointment_date, appointment_time FROM appointments WHERE appointment_date = %s::date AND appointment_time = %s::time AND status = 'confirmed'",
+            (date_value, time_value),
+        )
+        row = cur.fetchone()
+        return serialize_row(row) if row else None
+
+
+def suggest_alternatives(conn: psycopg.Connection, date_value: str, requested_time_value: str) -> list[str]:
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT appointment_time FROM appointments WHERE appointment_date = %s::date AND status = 'confirmed' ORDER BY appointment_time ASC",
+            (date_value,),
+        )
+        taken = {row["appointment_time"].strftime("%H:%M") for row in cur.fetchall()}
+
+    slots: list[str] = []
+    current = datetime.combine(date.fromisoformat(date_value), WORK_START)
+    end = datetime.combine(date.fromisoformat(date_value), WORK_END)
+    while current < end:
+        slot = current.time().strftime("%H:%M")
+        if slot not in taken:
+            slots.append(slot)
+        current += timedelta(minutes=SLOT_DURATION_MINUTES)
+
+    if not slots:
+        return []
+
+    try:
+        requested_minutes = to_minutes(requested_time_value)
+        slots.sort(key=lambda slot: abs(to_minutes(slot) - requested_minutes))
+    except ValueError:
+        pass
+    return slots[:3]
+
+
+def to_minutes(value: str) -> int:
+    parsed = time.fromisoformat(value)
+    return parsed.hour * 60 + parsed.minute
+
+
+def create_appointment(conn: psycopg.Connection, conversation: dict[str, Any], username: str | None) -> int:
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO appointments (
+                    instagram_user_id,
+                    instagram_username,
+                    full_name,
+                    phone,
+                    service,
+                    appointment_date,
+                    appointment_time,
+                    notes
+                ) VALUES (%s, %s, %s, %s, %s, %s::date, %s::time, %s)
+                RETURNING id
+                """,
+                (
+                    conversation.get("instagram_user_id"),
+                    username or conversation.get("instagram_username"),
+                    conversation.get("full_name"),
+                    conversation.get("phone"),
+                    conversation.get("service"),
+                    conversation.get("requested_date"),
+                    conversation.get("requested_time"),
+                    conversation.get("llm_notes"),
+                ),
+            )
+            row = cur.fetchone()
+        conn.commit()
+        return int(row["id"])
+    except psycopg.errors.UniqueViolation as exc:
+        conn.rollback()
+        raise HTTPException(status_code=409, detail="Bu slot artık dolu.") from exc
+
+
+def build_confirmation_message(conversation: dict[str, Any]) -> str:
+    requested_date = date.fromisoformat(conversation["requested_date"]).strftime("%d.%m.%Y")
+    requested_time = conversation["requested_time"][:5]
+    return (
+        f"Randevunuz oluşturuldu.\n\n"
+        f"Ad Soyad: {conversation['full_name']}\n"
+        f"Hizmet: {conversation['service']}\n"
+        f"Tarih: {requested_date}\n"
+        f"Saat: {requested_time}\n"
+        f"Telefon: {conversation['phone']}\n\n"
+        f"İhtiyacınız olursa {BUSINESS_PHONE} üzerinden bizimle iletişime geçebilirsiniz."
+    )
+
+
+def build_normalized(conversation: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "instagram_user_id": conversation.get("instagram_user_id"),
+        "full_name": conversation.get("full_name"),
+        "phone": conversation.get("phone"),
+        "service": conversation.get("service"),
+        "requested_date": conversation.get("requested_date"),
+        "requested_time": conversation.get("requested_time"),
+        "state": conversation.get("state"),
+        "appointment_status": conversation.get("appointment_status"),
+    }
