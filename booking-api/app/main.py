@@ -1324,6 +1324,43 @@ def get_roi_summary() -> dict[str, Any]:
             estimated_saved = answered * 450
             
             total_real_impact = real_recovered_revenue + real_prevented_no_show_revenue + estimated_saved
+            
+            # Grafikler için son 6 ayın gerçek istatistiği dinamik hesaplanır
+            cur.execute("""
+                WITH months AS (
+                    SELECT to_char(generate_series(CURRENT_DATE - INTERVAL '5 months', CURRENT_DATE, '1 month'), 'Mon') AS month_name,
+                           date_trunc('month', generate_series(CURRENT_DATE - INTERVAL '5 months', CURRENT_DATE, '1 month')) AS month_date
+                ),
+                monthly_stats AS (
+                    SELECT 
+                        date_trunc('month', created_at) AS month_date,
+                        COUNT(CASE WHEN direction = 'out' THEN 1 END) AS msgs,
+                        0 AS recoveries
+                    FROM message_logs 
+                    WHERE created_at >= CURRENT_DATE - INTERVAL '5 months'
+                    GROUP BY 1
+                    
+                    UNION ALL
+                    
+                    SELECT 
+                        date_trunc('month', scheduled_at) AS month_date,
+                        0 AS msgs,
+                        COUNT(*) AS recoveries
+                    FROM automation_events 
+                    WHERE status = 'sent' AND scheduled_at >= CURRENT_DATE - INTERVAL '5 months'
+                    GROUP BY 1
+                )
+                SELECT 
+                    m.month_name AS name,
+                    COALESCE(SUM(s.msgs) * 450 + SUM(s.recoveries) * %s, 0) AS kazanc,
+                    COALESCE(SUM(s.recoveries), 0) AS kurtarilan
+                FROM months m
+                LEFT JOIN monthly_stats s ON m.month_date = s.month_date
+                GROUP BY m.month_name, m.month_date
+                ORDER BY m.month_date ASC
+            """, (avg_spend,))
+            
+            monthly_history = cur.fetchall()
 
     return {
         "answered_messages_count": answered,
@@ -1332,6 +1369,7 @@ def get_roi_summary() -> dict[str, Any]:
         "estimated_revenue_saved": estimated_saved + real_prevented_no_show_revenue,
         "estimated_revenue_recovered": real_recovered_revenue,
         "estimated_total_impact": total_real_impact,
+        "graph_data": monthly_history
     }
 
 
