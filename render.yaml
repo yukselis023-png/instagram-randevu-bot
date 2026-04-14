@@ -1,16 +1,60 @@
+databases:
+  - name: instagram-booking-db
+    plan: free
+    databaseName: instagram_booking
+    user: instagram_booking_user
+    region: frankfurt
 services:
   - type: web
     name: instagram-booking-api
     runtime: docker
+    repo: https://github.com/yukselis023-png/instagram-randevu-bot
+    branch: main
     rootDir: booking-api
-    plan: starter
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: free
+    region: frankfurt
     healthCheckPath: /health
+    autoDeployTrigger: commit
     envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: instagram-booking-db
+          property: connectionString
       - key: PORT
-        value: 8000
+        value: 800
       - key: TIMEZONE
         value: Europe/Istanbul
+      - key: BUSINESS_NAME
+        value: DOEL DIGITAL
+      - key: BUSINESS_EMAIL
+        value: infodoeldigital@gmail.com
+      - key: BUSINESS_WEBSITE
+        value: https://doeldigital.com
+      - key: DEFAULT_SERVICE_NAME
+        value: Strateji Görüşmesi
+      - key: WORKING_HOURS_START
+        value: "10:00"
+      - key: WORKING_HOURS_END
+        value: "19:00"
+      - key: SLOT_DURATION_MINUTES
+        value: 60
       - key: SLOT_BUFFER_MINUTES
         value: 10
+      - key: APPOINTMENT_LOOKAHEAD_DAYS
+        value: 30
       - key: CORS_ALLOW_ORIGINS
         value: https://doel-crm.vercel.app
+      - key: FULL_AI_CONVERSATIONAL_MODE
+        value: "true"
+      - key: LLM_REPLY_POLISH_ENABLED
+        value: "false"
+      - key: CRM_SYNC_ENABLED
+        value: "false"
+      - key: LIVE_CRM_ENABLED
+        value: "false"
+      - key: LLM_BASE_URL
+        sync: false
+      - key: LLM_API_KEY
+        sync: false

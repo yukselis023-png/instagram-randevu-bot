@@ -31,3 +31,7 @@ Deploy sonrası kontrol et:
 - `/api/roi-summary`
 - `/api/customers/ops/no-show`
 - `/api/customers/ops/upcoming-automations`
+
+
+## Blueprint Notu
+`render.yaml` artık web service ile birlikte ücretsiz Render Postgres (`instagram-booking-db`) oluştur ve `DATABASE_URL` otomatik bağlanır.
