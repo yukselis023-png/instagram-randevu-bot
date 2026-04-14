@@ -1361,6 +1361,17 @@ def get_roi_summary() -> dict[str, Any]:
             """, (avg_spend,))
             
             monthly_history = cur.fetchall()
+            
+            # İngilizce ay kısaltmalarını Türkçeye çevirme
+            tr_months = {
+                "Jan": "Oca", "Feb": "Şub", "Mar": "Mar", 
+                "Apr": "Nis", "May": "May", "Jun": "Haz", 
+                "Jul": "Tem", "Aug": "Ağu", "Sep": "Eyl", 
+                "Oct": "Eki", "Nov": "Kas", "Dec": "Ara"
+            }
+            
+            for row in monthly_history:
+                row["name"] = tr_months.get(row["name"], row["name"])
 
     return {
         "answered_messages_count": answered,
