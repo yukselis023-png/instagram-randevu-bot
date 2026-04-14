@@ -1609,6 +1609,9 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
             if should_trace_decline_memory(message_text, conversation):
                 log_decline_memory_trace("before_upsert", payload.sender_id, trace_id, conversation, extra={"decision_label": decision_label, "final_reply": final_reply})
             upsert_conversation(conn, conversation)
+            crm_customer = upsert_customer_from_conversation(conn, conversation)
+            if crm_customer:
+                schedule_customer_automation_events(conn, int(crm_customer["id"]), crm_customer.get("sector"))
             if should_trace_decline_memory(message_text, conversation):
                 persisted_conversation = get_or_create_conversation(conn, payload.sender_id, payload.instagram_username)
                 sanitize_conversation_state(persisted_conversation)
@@ -2370,9 +2373,13 @@ def schedule_customer_automation_events(conn: psycopg.Connection, customer_id: i
                 SELECT %s, id, template_slug, trigger_type, %s, '{}'::jsonb
                 FROM automation_rules
                 WHERE trigger_type = 'no_show' AND active = TRUE
+                  AND NOT EXISTS (
+                      SELECT 1 FROM automation_events e
+                      WHERE e.customer_id = %s AND e.rule_id = automation_rules.id
+                  )
                 ON CONFLICT DO NOTHING
                 """,
-                (customer_id, anchor),
+                (customer_id, anchor, customer_id),
             )
         else:
             allowed_triggers = ['control', 'maintenance', 'recovery', 'aftercare', 'retouch', 'satisfaction', 'interest_followup', 'finance_followup']
@@ -2390,9 +2397,13 @@ def schedule_customer_automation_events(conn: psycopg.Connection, customer_id: i
                     WHERE active = TRUE
                       AND trigger_type = ANY(%s)
                       AND (sector IS NULL OR sector = %s)
+                      AND NOT EXISTS (
+                          SELECT 1 FROM automation_events e
+                          WHERE e.customer_id = %s AND e.rule_id = automation_rules.id
+                      )
                     ON CONFLICT DO NOTHING
                     """,
-                    (customer_id, anchor, allowed_triggers, sector),
+                    (customer_id, anchor, allowed_triggers, sector, customer_id),
                 )
             else:
                 cur.execute(
@@ -2407,9 +2418,13 @@ def schedule_customer_automation_events(conn: psycopg.Connection, customer_id: i
                     FROM automation_rules
                     WHERE active = TRUE
                       AND trigger_type = ANY(%s)
+                      AND NOT EXISTS (
+                          SELECT 1 FROM automation_events e
+                          WHERE e.customer_id = %s AND e.rule_id = automation_rules.id
+                      )
                     ON CONFLICT DO NOTHING
                     """,
-                    (customer_id, anchor, allowed_triggers),
+                    (customer_id, anchor, allowed_triggers, customer_id),
                 )
         cur.execute(
             """
