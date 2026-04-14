@@ -1742,7 +1742,7 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
             if decision_label:
                 final_path.append(decision_label)
             if not final_reply:
-                fallback_reply = sanitize_text(reply_text or "")
+                fallback_reply = (reply_text or "").strip()
                 if not fallback_reply:
                     fallback_reply = build_emergency_reply(message_text, conversation, decision_label)
                 final_reply = fallback_reply
@@ -2011,7 +2011,7 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
                 reply_text,
                 handoff=info_handoff,
                 message_type="handoff" if info_handoff else "info",
-                should_polish=False,
+                should_polish=True,
                 decision_label=f"info:{info_result.get('kind', 'generic')}",
             )
 
@@ -5740,7 +5740,7 @@ def maybe_polish_reply_text(
     started_at = time_module.perf_counter()
     try:
         polished = polish_reply_text(draft_reply, conversation, history, decision_label)
-        final_text = sanitize_text(polished or "")
+        final_text = (polished or "").strip()
         if not final_text:
             return draft_reply, elapsed_ms(started_at)
         return final_text, elapsed_ms(started_at)
