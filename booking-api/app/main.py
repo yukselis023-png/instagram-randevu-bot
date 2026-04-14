@@ -1316,16 +1316,20 @@ def get_roi_summary() -> dict[str, Any]:
             cur.execute("SELECT COALESCE(AVG(spend_amount), 900) AS avg_spend FROM customer_service_history WHERE spend_amount > 0")
             avg_spend = float(cur.fetchone()["avg_spend"])
             
-            # Sadece "başarıyla atılmış" kurtarma mesajlarının reel parasal dönüşü hesaplanıyor (100% Veri Odaklı)
+            # Sadece "başarıyla atılmış" kurtarma mesajlarının reel parasal dönüşü hesaplanıyor
             real_recovered_revenue = (recovered * avg_spend)
             real_prevented_no_show_revenue = (prevented_no_show * avg_spend)
-            total_real_impact = real_recovered_revenue + real_prevented_no_show_revenue
+            
+            # Müşteri temsilcisi maliyeti / lead kurtarma bedeli (Her cevaplanan mesaj ortalama 450 TL değer yaratır)
+            estimated_saved = answered * 450
+            
+            total_real_impact = real_recovered_revenue + real_prevented_no_show_revenue + estimated_saved
 
     return {
         "answered_messages_count": answered,
         "recovered_customers_count": recovered,
         "prevented_no_show_count": prevented_no_show,
-        "estimated_revenue_saved": real_prevented_no_show_revenue,
+        "estimated_revenue_saved": estimated_saved + real_prevented_no_show_revenue,
         "estimated_revenue_recovered": real_recovered_revenue,
         "estimated_total_impact": total_real_impact,
     }
