@@ -728,8 +728,9 @@ class AutomationMarkRequest(BaseModel):
 
 
 class CampaignCreateRequest(BaseModel):
-    title: str = Field(..., min_length=1)
-    template_slug: str = Field(..., min_length=1)
+    title: str = Field(default="Özel Toplu Mesaj")
+    template_slug: str | None = None
+    custom_message: str | None = None
     segment: str | None = None
     sector: str | None = None
     inactivity_days: int | None = None
@@ -1484,6 +1485,26 @@ def list_campaigns() -> dict[str, Any]:
 
 @app.post("/api/campaigns")
 def create_campaign(payload: CampaignCreateRequest) -> dict[str, Any]:
+    if not payload.template_slug and not payload.custom_message:
+        raise HTTPException(status_code=400, detail="Bir şablon seçilmeli veya özel mesaj girilmelidir.")
+
+    # Eğer custom_message geldiyse, arka planda anlık bir şablon yaratalım
+    active_template_slug = payload.template_slug
+    if payload.custom_message:
+        import uuid
+        custom_slug = f"custom_msg_{uuid.uuid4().hex[:8]}"
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO message_templates (slug, title, sector, trigger_type, content, active)
+                    VALUES (%s, 'Özel Mesaj', 'general', 'custom', %s, true)
+                    """,
+                    (custom_slug, payload.custom_message)
+                )
+            conn.commit()
+        active_template_slug = custom_slug
+
     where_clause, params = build_customer_filter_clause(
         segment=payload.segment,
         sector=payload.sector,
@@ -1508,7 +1529,7 @@ def create_campaign(payload: CampaignCreateRequest) -> dict[str, Any]:
                 VALUES (%s, %s, %s, %s, %s, %s, %s, 'draft')
                 RETURNING *
                 """,
-                (payload.title, payload.template_slug, payload.segment, payload.sector, payload.inactivity_days, payload.attendance_status, audience_size),
+                (payload.title, active_template_slug, payload.segment, payload.sector, payload.inactivity_days, payload.attendance_status, audience_size),
             )
             row = cur.fetchone()
         conn.commit()
