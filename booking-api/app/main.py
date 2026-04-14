@@ -1511,6 +1511,64 @@ def create_campaign(payload: CampaignCreateRequest) -> dict[str, Any]:
     return {"campaign": serialize_row(row)}
 
 
+@app.post("/api/campaigns/{campaign_id}/execute")
+def execute_campaign(campaign_id: int) -> dict[str, Any]:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            # 1. Kampanyayı seç
+            cur.execute("SELECT * FROM crm_campaigns WHERE id = %s", (campaign_id,))
+            campaign = cur.fetchone()
+            if not campaign:
+                raise HTTPException(status_code=404, detail="Kampanya bulunamadı")
+            if campaign["status"] != "draft":
+                raise HTTPException(status_code=400, detail="Sadece taslak halindeki kampanyalar başlatılabilir")
+
+            # 2. Uygun müşterileri bul
+            where_clause, params = build_customer_filter_clause(
+                segment=campaign["segment"],
+                sector=campaign["sector"],
+                attendance_status=campaign["attendance_status"],
+            )
+            inactivity_clause = ""
+            if campaign["inactivity_days"]:
+                inactivity_clause = " AND COALESCE(c.last_contact_at, c.created_at) <= NOW() - make_interval(days => %s)"
+                params.append(int(campaign["inactivity_days"]))
+                
+            query = f"SELECT id, instagram_user_id FROM customers c {where_clause if where_clause else 'WHERE TRUE'}{inactivity_clause}"
+            cur.execute(query, tuple(params))
+            targets = cur.fetchall()
+
+            # 3. Automation Events tablosuna bas
+            inserted_count = 0
+            for customer in targets:
+                cur.execute(
+                    """
+                    INSERT INTO automation_events (customer_id, template_slug, event_type, status, scheduled_at, payload)
+                    VALUES (%s, %s, %s, 'queued', NOW(), %s)
+                    ON CONFLICT DO NOTHING
+                    RETURNING id
+                    """,
+                    (customer["id"], campaign["template_slug"], "campaign_blast", json.dumps({"campaign_id": campaign_id}))
+                )
+                if cur.fetchone():
+                    inserted_count += 1
+            
+            # 4. Kampanyayı gönderildi (processing/sent) olarak işaretle
+            cur.execute("UPDATE crm_campaigns SET status = 'processing', updated_at = NOW() WHERE id = %s RETURNING *", (campaign_id,))
+            updated_campaign = cur.fetchone()
+        conn.commit()
+
+    # N8N'e Webhook tetiklemesi yap (Eğer URL varsa, sistemi ateşle)
+    webhook_url = os.getenv("N8N_CRON_WEBHOOK_URL", "")
+    if webhook_url:
+        import requests
+        try:
+            requests.post(webhook_url, json={"trigger": "campaign_execute", "campaign_id": campaign_id}, timeout=3)
+        except Exception:
+            pass
+
+    return {"status": "processing", "targets_queued": inserted_count, "campaign": serialize_row(updated_campaign)}
+
 @app.get("/api/campaigns/preview")
 def preview_campaign_audience(
     template_slug: str,
