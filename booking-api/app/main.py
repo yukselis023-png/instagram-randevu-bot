@@ -2350,8 +2350,18 @@ def build_customer_filter_clause(
     conditions: list[str] = []
     params: list[Any] = []
     if segment:
-        conditions.append("c.segment = %s")
-        params.append(segment)
+        if segment == "prospect":
+            # Hiç randevusu olmayan veya sadece iptal/ön görüşmede kalmış kişiler
+            conditions.append("NOT EXISTS (SELECT 1 FROM appointments a WHERE a.instagram_user_id = c.instagram_user_id AND a.status IN ('completed', 'confirmed'))")
+        elif segment == "loyal_customer":
+            # En az 1 kez başarıyla randevuya gelmiş kişiler
+            conditions.append("EXISTS (SELECT 1 FROM appointments a WHERE a.instagram_user_id = c.instagram_user_id AND a.status IN ('completed', 'confirmed'))")
+        elif segment == "no_show_customer":
+            # İptal veya No-Show durumunda olan biri
+            conditions.append("EXISTS (SELECT 1 FROM appointments a WHERE a.instagram_user_id = c.instagram_user_id AND (a.status = 'cancelled' OR a.attendance_status = 'no_show'))")
+        else:
+            conditions.append("c.segment = %s")
+            params.append(segment)
     if sector:
         conditions.append("c.sector = %s")
         params.append(sector)
