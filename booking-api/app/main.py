@@ -21,6 +21,7 @@ from psycopg.rows import dict_row
 
 TIMEZONE = os.getenv("TIMEZONE", "Europe/Istanbul")
 TZ = ZoneInfo(TIMEZONE)
+APP_BUILD_VERSION = os.getenv("APP_BUILD_VERSION") or os.getenv("RENDER_GIT_COMMIT") or "local"
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://n8n:n8n@postgres:5432/n8n")
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(
@@ -751,6 +752,11 @@ def on_startup() -> None:
 @app.get("/health")
 def health() -> dict[str, Any]:
     return {"status": "ok", "time": datetime.now(TZ).isoformat()}
+
+
+@app.get("/version")
+def version() -> dict[str, Any]:
+    return {"version": APP_BUILD_VERSION, "time": datetime.now(TZ).isoformat()}
 
 
 @app.get("/crm", response_class=HTMLResponse)
