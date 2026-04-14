@@ -575,12 +575,12 @@ SERVICE_FOCUS_MAP = {
     "kreatif-produksiyon": "güçlü video ve kreatif içerik üretmek",
 }
 SERVICE_CLARIFYING_QUESTIONS = {
-    "web-tasarim": "En çok hangi yapıya ihtiyacınız var: kurumsal site mi, ürün/hizmet tanıtımı mı?",
-    "otomasyon-ai": "Şu an en çok hangi taraf yoruyor: DM, randevu yoksa müşteri takibi mi?",
-    "performans-pazarlama": "Önceliğiniz daha çok yeni talep toplamak mı, yoksa mevcut dönüşümü artırmak mı?",
-    "sosyal-medya-yonetimi": "Sizi en çok zorlayan kısım içerik üretimi mi, yoksa düzenli paylaşım ve yönetim mi?",
-    "marka-stratejisi": "Şu an en çok netleşmesini istediğiniz konu marka dili mi, yoksa konumlandırma mı?",
-    "kreatif-produksiyon": "En çok hangi içerik tipine ihtiyacınız var: reel/video mu, yoksa ürün-hizmet görselleri mi?",
+    "web-tasarim": "Detayları konuşmak ve fiyatlandırmayı netleştirmek için kısa bir ön görüşme planlayalım. Hangi gün ve saat uygundur?",
+    "otomasyon-ai": "Size özel otomasyon yapısını netleştirmek için kısa bir ön görüşme planlayalım. Hangi gün ve saat sizin için uygun?",
+    "performans-pazarlama": "Hedeflerinizi dinlemek ve süreci netleştirmek için kısa bir ön görüşme yapalım. Uygun olduğunuz bir gün ve saat yazar mısınız?",
+    "sosyal-medya-yonetimi": "Beklentilerinizi dinlemek için kısa bir ön görüşme yapalım. Hangi gün ve saat uygundur?",
+    "marka-stratejisi": "Detayları kısa bir ön görüşmede netleştirelim. Hangi gün ve saat uygundur?",
+    "kreatif-produksiyon": "İhtiyaçlarınızı dinlemek için kısa bir ön görüşme yapalım. Hangi gün ve saat uygundur?",
 }
 LIVE_CRM_AUTH_CACHE_SECONDS = int(os.getenv("LIVE_CRM_AUTH_CACHE_SECONDS", "3000"))
 LIVE_CRM_SERVICES_CACHE_SECONDS = int(os.getenv("LIVE_CRM_SERVICES_CACHE_SECONDS", "21600"))
@@ -1597,8 +1597,8 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
             final_path = list(decision_path)
             if decision_label:
                 final_path.append(decision_label)
-            if reply_text and not final_reply:
-                fallback_reply = sanitize_text(reply_text)
+            if not final_reply:
+                fallback_reply = sanitize_text(reply_text or "")
                 if not fallback_reply:
                     fallback_reply = build_emergency_reply(message_text, conversation, decision_label)
                 final_reply = fallback_reply
@@ -3169,8 +3169,9 @@ def update_conversation_memory_after_bot_reply(conversation: dict[str, Any], rep
         memory["last_bot_question_type"] = None
         memory["last_priority_choice"] = None
         memory["last_dm_issue_choice"] = None
-    elif memory.get("offer_status") == "declined" and lowered_label in {"service_info_continue", "info:objection", "info:decline_cooldown", "info:smalltalk", "info:greeting", "info:presence_check"}:
+    elif memory.get("offer_status") == "declined" and lowered_label in {"service_info_continue", "info:objection", "info:decline_cooldown", "info:smalltalk", "info:greeting", "info:presence_check", "clarify_next_step", "info:generic", "reply_fallback:guaranteed"}:
         memory["pending_offer"] = None
+        memory["offer_status"] = "declined"
         memory["open_loop"] = "decline_cooldown"
         memory["last_bot_question_type"] = None
         memory["last_priority_choice"] = None
@@ -4110,8 +4111,12 @@ def is_service_overview_question(text: str) -> bool:
     if any(keyword in lowered for keyword in SERVICE_OVERVIEW_KEYWORDS):
         return True
     detail_cues = ["her biri", "herbir", "tek tek", "ayri ayri", "ayrı ayrı", "tum hizmet", "tüm hizmet", "hepsi icin", "hepsi için"]
-    service_cues = ["hizmet", "hizmetler", "web", "otomasyon", "reklam", "sosyal medya"]
-    return any(cue in lowered for cue in detail_cues) and any(cue in lowered for cue in service_cues)
+    service_cues = ["hizmet", "hizmetler", "web", "otomasyon", "reklam", "sosyal medya", "bilgi"]
+    if any(cue in lowered for cue in detail_cues) and any(cue in lowered for cue in service_cues):
+        return True
+    if any(token in lowered for token in ["detayli bilgi", "detaylı bilgi", "hakkinda bilgi", "hakkında bilgi"]) and any(cue in lowered for cue in detail_cues):
+        return True
+    return False
 
 
 def is_price_question(text: str) -> bool:
@@ -4237,18 +4242,19 @@ def is_invalid_service_candidate(text: str | None) -> bool:
 
 def build_services_overview_reply() -> str:
     return (
-        f"{BUSINESS_NAME} olarak web tasarım, otomasyon, reklam yönetimi ve sosyal medya alanlarında hizmet veriyoruz. "
-        "Kısaca hangi başlıkla ilgilendiğinizi yazın, size en uygun tarafı netleştirip kısa bir ön görüşme planlayalım."
+        "Merhaba 👋\n"
+        "Web Sitesi kurulumu • Mesaj Otomasyonu • Reklamcılık\n"
+        "Hangi hizmetimiz hakkında bilgi almak istersiniz?"
     )
 
 
 def build_detailed_services_overview_reply() -> str:
     return (
-        "Elbette, kısaca özetleyeyim: Web tasarım tarafında mobil uyumlu ve dönüşüm odaklı siteler kuruyoruz. "
-        "Otomasyon tarafında DM, müşteri takibi ve görüşme planlama süreçlerini AI destekli şekilde otomatikleştiriyoruz. "
-        "Reklam tarafında doğru hedef kitleye yönelik kampanyalar kurup başvuru ve müşteri kazanımını artırmaya odaklanıyoruz. "
-        "Sosyal medya tarafında ise içerik planlama, hesap yönetimi ve marka görünürlüğünü düzenli şekilde yönetiyoruz. "
-        "İsterseniz size en uygun başlığı netleştirip kısa bir ön görüşme planlayalım; en çok hangisi ilginizi çekiyor?"
+        "Elbette. Kısaca özetleyeyim:\n\n"
+        "Web Tasarım: Markanıza özel, mobil uyumlu ve dönüşüm odaklı siteler.\n"
+        "Otomasyon: Müşteri mesajlarını karşılayan, bilgi veren ve görüşme planlayan AI sistemleri.\n"
+        "Reklam: Yeni başvuru kazanmanızı sağlayan sponsorlu reklamlar.\n\n"
+        "Size en uygun hizmeti netleştirmek için çok kısa bir telefon görüşmesi planlayabiliriz. Hangi gün ve saat uygundur?"
     )
 
 
@@ -4306,18 +4312,18 @@ def build_combined_intro_reply(*, include_identity: bool = True, include_service
 def build_service_context_intro(service: dict[str, Any]) -> str:
     slug = service.get("slug") or ""
     if slug == "web-tasarim":
-        return "Güven veren, dönüşüm alan kurumsal siteler yapıyoruz."
+        return "İşletmenizin değerini yansıtan, yeni müşteriler kazanmanızı sağlayacak özel web siteleri kuruyoruz."
     if slug == "otomasyon-ai":
-        return "DM, randevu ve tekrar eden işlerinizi otomatikleştiriyoruz."
+        return "Gelen mesajları anında yanıtlayan ve sizi bekletmeden görüşme planlayan DOEL AI sistemimizi sisteme entegre ediyoruz."
     if slug == "performans-pazarlama":
-        return "Reklam bütçenizi verimli kullanıp nitelikli müşteri kazandırıyoruz."
+        return "Doğru hedef kitleye çıkılan sponsorlu reklamlarla işletmenize yeni başvurular ve satışlar kazandırıyor, bunu yaparken dilereseniz AI mesaj otomasyonu ile süreci destekliyoruz."
     if slug == "sosyal-medya-yonetimi":
-        return "Sosyal medya hesaplarınızı profesyonelce yönetiyoruz."
+        return "Sosyal medya görünürlüğünüzü profesyonelce yönetip marka değerinizi artırıyoruz."
     if slug == "marka-stratejisi":
-        return "Markanızın konumlandırmasını ve büyüme yolunu netleştiriyoruz."
+        return "Markanızın büyüme hedeflerini netleştiriyoruz."
     if slug == "kreatif-produksiyon":
-        return "Dikkat çeken güçlü görsel içerikler üretiyoruz."
-    return "Bu alanda ihtiyacınıza göre en doğru çözümü sunuyoruz."
+        return "İlgi çekici kreatif içerikler üretiyoruz."
+    return "Bu alanda işinize değer katacak profesyonel çözümler üretiyoruz."
 
 
 def build_service_info_reply(service: dict[str, Any], conversation: dict[str, Any] | None = None) -> str:
@@ -4791,7 +4797,7 @@ def build_service_focus(service: dict[str, Any]) -> str:
 def build_service_clarifying_question(service: dict[str, Any]) -> str:
     return SERVICE_CLARIFYING_QUESTIONS.get(
         service.get("slug") or "",
-        "Detayları kısa bir ön görüşmede netleştirelim mi?",
+        "Detayları kısa bir ön görüşmede netleştirelim. Hangi gün ve saat sizin için uygundur?",
     )
 
 
@@ -4804,13 +4810,13 @@ def build_contextual_service_followup(service: dict[str, Any], conversation: dic
     slug = service.get("slug") or ""
 
     if memory.get("pending_offer") == "preconsultation_offer" and memory.get("offer_status") in {"offered", "hesitant"}:
-        return "Uygunsanız bunu kısa bir ön görüşmede netleştirebiliriz."
+        return "Süreci netleştirmek için çok kısa bir ön görüşme yapabiliriz. Hangi gün ve saat sizin için uygundur?"
 
     if slug == "otomasyon-ai":
         priority = memory.get("last_priority_choice")
         dm_issue = memory.get("last_dm_issue_choice")
         if "message_volume" in answered or dm_issue or memory.get("message_volume_estimate"):
-            return "Burada en mantıklı çözüm DM, randevu ve müşteri takibini tek akışta toplamak olur. Uygunsanız bunu kısa bir ön görüşmede netleştirebiliriz."
+            return "Burada en mantıklı çözüm DM, randevu ve müşteri takibini tek akışta toplamak olur. Uygunsanız bunu kısa bir ön görüşmede netleştirelim. Hangi gün ve saat uygundur?"
         if priority == "dm" and "dm_issue" not in answered:
             return "DM tarafında sizi en çok geç dönüş mü zorluyor, yoksa tekrar eden sorular mı?"
         if priority == "appointment":
@@ -5283,9 +5289,9 @@ def should_call_llm_extractor(message_text: str, conversation: dict[str, Any]) -
         return False
     if is_low_signal_message(message_text):
         return False
-    if memory.get("offer_status") == "declined" and word_count <= 6 and "?" not in cleaned:
+    if memory.get("offer_status") == "declined" and word_count <= 3 and "?" not in cleaned:
         return False
-    if sanitize_text(str(memory.get("customer_goal") or "")).lower() in {"ilgilenmiyor", "kapanış onayı", "kapanis onayi", "süreci devam ettirmek istemiyor", "sureci devam ettirmek istemiyor"} and word_count <= 6 and "?" not in cleaned:
+    if sanitize_text(str(memory.get("customer_goal") or "")).lower() in {"ilgilenmiyor", "kapanış onayı", "kapanis onayi", "süreci devam ettirmek istemiyor", "sureci devam ettirmek istemiyor"} and word_count <= 3 and "?" not in cleaned:
         return False
     if state in {"collect_service", "collect_name", "collect_phone", "collect_date", "collect_period", "collect_time"} and word_count <= 5:
         if conversation.get("service") and any(token in lowered for token in ["otomasyon", "yapay zeka", "web", "reklam", "sosyal medya", "crm", "randevu", "dm"]):
@@ -5607,7 +5613,10 @@ def build_emergency_reply(message_text: str, conversation: dict[str, Any], decis
         service_meta = match_service_catalog(conversation.get("service"), conversation.get("service"))
         if service_meta:
             return build_service_info_reply(service_meta, conversation)
-    return "Mesajınızı aldım. Size en doğru şekilde yardımcı olabilmem için web tasarım, otomasyon, reklam veya sosyal medya taraflarından hangisiyle ilgilendiğinizi kısaca yazar mısınız?"
+    contact = build_contact_text()
+    if conversation.get("appointment_status") == "confirmed":
+        return f"Şu an teknik bir yoğunluk var, işleminiz için yetkili ekibe yönlendiriyorum. Dilerseniz {contact} ulaşabilirsiniz."
+    return "Size en doğru şekilde yardımcı olabilmem için kısaca ilgilendiğiniz hizmeti (web, otomasyon, reklam vb.) yazar mısınız?"
 
 
 def summarize_memory_trace(memory: dict[str, Any] | None) -> dict[str, Any]:
