@@ -1498,6 +1498,10 @@ def create_campaign(payload: CampaignCreateRequest) -> dict[str, Any]:
         with conn.cursor() as cur:
             cur.execute(query, tuple(params))
             audience_size = int(cur.fetchone()["count"])
+            
+            if audience_size == 0:
+                raise HTTPException(status_code=400, detail="Bu kriterlere uyan müşteri bulunamadı.")
+                
             cur.execute(
                 """
                 INSERT INTO crm_campaigns (title, template_slug, segment, sector, inactivity_days, attendance_status, audience_size, status)
