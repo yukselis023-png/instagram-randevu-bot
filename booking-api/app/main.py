@@ -799,7 +799,7 @@ def build_morning_reminder_text(appointment: dict[str, Any]) -> str:
     return (
         f"Günaydın, bugün saat {requested_time}'teki {booking_label} için küçük bir hatırlatma bırakmak istedim{service_line}. "
         f"Lütfen {requested_date} {requested_time} için müsaitliğinizi ayarlayın. "
-            "reply": "Tabii, acelesi yok. Aklınıza takılan bir şey olursa ya da ilerleyen günlerde bakmak isterseniz buradayım.",
+        "Bir degisiklik ihtiyaciniz olursa buradan yazabilirsiniz."
     )
 
 
@@ -2076,7 +2076,7 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
 
         memory = ensure_conversation_memory(conversation)
         if memory.get("offer_status") == "declined" and (is_closeout_message(message_text) or is_low_signal_message(message_text)):
-                reply = "Tabii, acelesi yok. Aklınıza takılan bir şey olursa ya da ilerleyen günlerde bakmak isterseniz buradayım."
+            reply = "Tabii, acelesi yok. Aklınıza takılan bir şey olursa ya da ilerleyen günlerde bakmak isterseniz buradayım."
             final_decision = "info:decline_cooldown"
             return finalize_result(reply, message_type="reply", decision_label=final_decision)
 
@@ -5705,7 +5705,7 @@ def get_ai_compose_profile(decision_label: str | None, conversation: dict[str, A
             "max_tokens": max(36, min(LLM_REPLY_MICRO_MAX_TOKENS, 40)),
             "temperature": 0.15,
             "models": [micro_model] if micro_model else [reply_model],
-            "history_limit": 1,
+            "history_limit": 4,
             "include_fallback": False,
             "include_contact": False,
             "prefer_plain_prompt": True,
@@ -5751,16 +5751,16 @@ def get_ai_compose_profile(decision_label: str | None, conversation: dict[str, A
             advisory_timeout = max(advisory_timeout, 5.8)
     return {
         "profile": "advisory",
-        "timeout": advisory_timeout,
-        "max_tokens": max(56, min(LLM_REPLY_ADVISORY_MAX_TOKENS, 72)) if fast_service_label else max(100, LLM_REPLY_ADVISORY_MAX_TOKENS),
-        "temperature": 0.15,
+        "timeout": max(advisory_timeout, 7.0),
+        "max_tokens": max(120, LLM_REPLY_ADVISORY_MAX_TOKENS),
+        "temperature": 0.2,
         "models": [advisory_model] if advisory_model else [reply_model],
-        "history_limit": 2 if fast_service_label else 4,
-        "include_fallback": True,
+        "history_limit": 6,
+        "include_fallback": False,
         "include_contact": False,
         "prefer_plain_prompt": True,
-        "allow_retry": False,
-        "fast_path": fast_service_label,
+        "allow_retry": True,
+        "fast_path": False,
     }
 
 
@@ -6235,12 +6235,12 @@ def apply_reply_guardrails(
 
 
 def polish_reply_text(
-    draft_reply: str | None,
-    conversation: dict[str, Any],
-    history: list[dict[str, Any]] | None = None,
-    decision_label: str | None = None,
-) -> str | None:
-    if not draft_reply:
+    draft_reply,
+    conversation,
+    history=None,
+    decision_label=None,
+):
+    if not draft_reply and not FULL_AI_CONVERSATIONAL_MODE:
         return draft_reply
 
     label = sanitize_text(decision_label or "").lower()
@@ -6249,130 +6249,52 @@ def polish_reply_text(
     reply_goal = build_ai_reply_goal(decision_label, conversation)
     known_facts = build_compact_known_facts(conversation, include_contact=profile["include_contact"])
     customer_message = sanitize_text(conversation.get("last_customer_message") or "")
-    understanding = build_reply_understanding_snapshot(customer_message, conversation, history)
 
-    if profile["prefer_plain_prompt"]:
-        if profile.get("fast_path"):
-            history_text = " | ".join(compact_history) if compact_history else "yok"
-            fallback_text = f"\nGerçekler: {draft_reply}" if profile["include_fallback"] else ""
-            if profile.get("background_fast"):
-                messages = [
-                    {
-                        "role": "system",
-                        "content": (
-                            "Türkçe müşteri mesajı şirket/hakkımızda/deneyim sorusu içeriyor. "
-                            "Müşterinin sorduğu şeyi doğrudan cevaplayan çok kısa ve doğal bir Instagram DM cevabı yaz. "
-                            "Düz metin kullan. Emojisiz ol. Yeni bilgi uydurma. "
-                            "Eğer kesin yıl veya süre bilgisi verilmemişse bunu uydurma; bunun yerine işletmenin ne yaptığı ve nasıl bir destek sunduğu hakkında dürüst, net ve dolu bir cevap ver. "
-                            "Müşteriyi yanlış şekilde hizmet seçimine yönlendirme."
-                        ),
-                    },
-                    {
-                        "role": "user",
-                        "content": (
-                            f"Müşteri mesajı: {customer_message or '-'}\n"
-                            f"Gerçek bilgiler: {draft_reply or '-'}"
-                        ),
-                    },
-                ]
-            else:
-                messages = [
-                    {
-                        "role": "system",
-                        "content": (
-                            f"{BUSINESS_NAME} için tek kısa Türkçe Instagram DM cevabı yaz. "
-                            "Düz metin kullan. Emojisiz ol. Doğal ve insan gibi yaz. "
-                            "Gereksiz uzatma yapma. Yeni bilgi uydurma. Satışı zorlamadan doğru sonraki adımı ver."
-                        ),
-                    },
-                    {
-                        "role": "user",
-                        "content": (
-                            f"Mesaj: {customer_message or '-'}\n"
-                            f"Amaç: {reply_goal}\n"
-                            f"Yakın geçmiş: {history_text}{fallback_text}"
-                        ),
-                    },
-                ]
-        else:
-            facts_text = json.dumps(known_facts, ensure_ascii=False) if known_facts else "{}"
-            understanding_text = json.dumps(understanding, ensure_ascii=False)
-            history_text = " | ".join(compact_history) if compact_history else "yok"
-            user_prompt = (
-                f"Amaç: {reply_goal}\n"
-                f"Müşteri mesajı: {customer_message or '-'}\n"
-                f"Mesaj analizi: {understanding_text}\n"
-                f"Bilinenler: {facts_text}\n"
-                f"Yakın geçmiş: {history_text}"
-            )
-            if profile["include_fallback"]:
-                user_prompt += f"\nFallback gerçekleri: {draft_reply}"
-            messages = [
-                {
-                    "role": "system",
-                    "content": (
-                        f"You write one short Turkish Instagram DM reply for {BUSINESS_NAME}. "
-                        "Rules: "
-                        "1. Natural, warm, professional tone — like a real human business consultant, not a bot or brochure. "
-                        "2. Plain text only. No markdown, no emojis, no bullet points. "
-                        "3. Do not invent facts. Never fabricate prices, dates, times, or services. "
-                        "4. Steer toward the next step, but do not force a meeting on simple greetings, early discovery, clarification turns, or cooldown moments after the customer has declined interest. "
-                        "5. Keep it extremely concise: prefer 1 short sentence; use 2 only if necessary. "
-                        "6. First respond to what the customer actually said or implied. "
-                        "7. If they answered your previous question, continue forward and never ask the same thing again. "
-                        "8. Do not dump service descriptions or feature lists. Mention only what is directly relevant. "
-                        "9. Use simple everyday Turkish. Avoid corporate wording. "
-                        "10. Do not repeat the same discovery loop. "
-                        "11. For greetings or smalltalk, respond socially first; do not turn them into a consultation pitch. "
-                        "12. Do not list services unless the customer explicitly asks for options. "
-                        "13. If the context says the customer recently declined or cooled the conversation, stay low-pressure and do not reopen the sales pitch unless the customer clearly re-engages. "
-                        "14. Keep the wording short, clear, and direct."
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": user_prompt,
-                },
-            ]
-    else:
-        payload = {
-            "reply_goal": reply_goal,
-            "customer_message": customer_message,
-            "message_understanding": understanding,
-            "known_facts": known_facts,
-        }
-        if compact_history:
-            payload["recent_history"] = compact_history
-        if profile["include_fallback"]:
-            payload["fallback_reply"] = draft_reply
-        messages = [
-            {
-                "role": "system",
-                "content": (
-                    f"You are the Instagram DM assistant for {BUSINESS_NAME}. "
-                    "Write the final customer-facing reply in natural, short, human Turkish. "
-                    "Rules: "
-                    "1. Sound like a real, confident business consultant — not a template, bot, or brochure. "
-                    "2. Plain text only. No markdown, no emojis, no bullet points. "
-                    "3. Never invent facts. Keep every date, time, service, phone number and appointment status exactly correct. "
-                    "4. If fallback text is provided, treat it only as factual guardrails — rewrite it naturally. "
-                    "5. First answer what the customer is really asking or implying. "
-                    "6. Steer the conversation toward the next logical step, but do not force a meeting on simple greetings, early discovery, clarification turns, or cooldown moments after the customer has declined interest. "
-                    "7. If the customer answered your previous question, move forward and never repeat the same question. "
-                    "8. Keep it extremely concise: prefer 1 short sentence; use 2 only if necessary. No long explanations. "
-                    "9. Use simple everyday Turkish. Avoid corporate wording. "
-                    "10. Do not repeat the same discovery loop. "
-                    "11. For greetings or smalltalk, respond socially first; do not turn them into a consultation pitch. "
-                    "12. Do not list services unless the customer explicitly asks for options. "
-                    "13. If the context says the customer recently declined or cooled the conversation, stay low-pressure and do not reopen the sales pitch unless the customer clearly re-engages. "
-                    "14. Keep the wording short, clear, and direct."
-                ),
-            },
-            {
-                "role": "user",
-                "content": json.dumps(payload, ensure_ascii=False),
-            },
-        ]
+    history_text = " | ".join(compact_history) if compact_history else "yok"
+    facts_text = json.dumps(known_facts, ensure_ascii=False) if known_facts else "{}"
+
+    is_guarded = label in GUARDED_COMPOSE_LABELS
+
+    catalog = (
+        "HIZMETLER VE FIYATLAR: "
+        "1) Web Tasarim KOBi: 12.900 TL (tek seferlik). "
+        "2) Otomasyon ve Yapay Zeka: 5.000 TL/ay. "
+        "3) Performans Pazarlama: 7.500 TL/ay (reklam butcesi haric). "
+        "4) Sosyal Medya Yonetimi: Ozel teklif. "
+        "5) Marka Stratejisi: Ozel teklif. "
+        "6) Kreatif Produksiyon: Ozel teklif."
+    )
+
+    sys_prompt = " ".join([
+        f"Sen {BUSINESS_NAME} adina Instagram DM yaniti veren bir satis asistanisin.",
+        "Doel Digital, markalara web tasarim, otomasyon, performans pazarlama ve sosyal medya alanlarinda destek veren bir dijital ajansidir.",
+        catalog,
+        "KESIN KURALLAR:",
+        "1. SIFIRDAN yaz, hazir sablon dili kullanma.",
+        "2. Sadece duz metin, emoji yok, markdown yok.",
+        "3. Maksimum 2 cumle.",
+        "4. Once soruyu cevapla, sonra tek adim oner.",
+        "5. Onceki soruyu tekrarlama.",
+        "6. Selaslasma ise kisa sosyal cevap ver, satis yapmaya kalkma.",
+        "7. Fiyat sorarsa direkt soyler.",
+        "8. Musteri kararsizsa baski yapma.",
+        "9. Sadece sorulan hizmet hakkinda yaz.",
+        "10. Randevu onayinda context den gelen bilgileri birebir kullan, uydurma.",
+    ])
+
+    user_parts = [
+        "Musteri mesaji: " + (customer_message or "-"),
+        "Konusma gecmisi: " + history_text,
+        "Bilinen bilgiler: " + facts_text,
+    ]
+    if is_guarded and draft_reply:
+        user_parts.append("Guvence bilgileri (tarihleri, saatleri, adlari AYNEN kullan): " + draft_reply)
+    user_msg = chr(10).join(user_parts)
+
+    messages = [
+        {"role": "system", "content": sys_prompt},
+        {"role": "user", "content": user_msg},
+    ]
 
     rewritten = call_llm_content(
         messages,
@@ -6388,18 +6310,17 @@ def polish_reply_text(
                 "role": "system",
                 "content": (
                     f"You write exactly one very short Turkish Instagram DM reply for {BUSINESS_NAME}. "
-                    "Plain text only. No markdown. No emojis. No bullets. "
-                    "Use only the facts given. Keep it to one short natural sentence if possible. "
-                    "Reply like a real human. Do not explain your reasoning."
+                    "Plain text only. No markdown. No emojis. "
+                    "Keep it to one short natural sentence. Reply like a real human."
                 ),
             },
             {
                 "role": "user",
-                "content": (
-                    f"Customer message: {customer_message}\n"
-                    f"Goal: {reply_goal}\n"
-                    f"Facts: {draft_reply}"
-                ),
+                "content": chr(10).join([
+                    "Customer message: " + customer_message,
+                    "Goal: " + reply_goal,
+                    "History: " + history_text,
+                ]),
             },
         ]
         rewritten = call_llm_content(
@@ -6411,21 +6332,21 @@ def polish_reply_text(
         )
         normalized = normalize_llm_reply_text(rewritten)
     if not normalized:
-        final_retry_messages = [
+        final_messages = [
             {
                 "role": "system",
                 "content": (
-                    "Aşağıdaki Türkçe mesajı müşteriye gönderilecek çok kısa doğal bir Instagram DM cevabı olarak yeniden yaz. "
-                    "Düz metin kullan. Emojisiz ol. Yeni bilgi ekleme. Tek cümle tercih et."
+                    "Asagidaki Turkce mesaji musteriye gonderilecek cok kisa dogal bir Instagram DM cevabi olarak yeniden yaz. "
+                    "Duz metin kullan. Emojisiz ol. Tek cumle tercih et."
                 ),
             },
             {
                 "role": "user",
-                "content": draft_reply or customer_message or "Merhaba, size nasıl yardımcı olabiliriz?",
+                "content": draft_reply or customer_message or "Merhaba, nasil yardimci olabilirim?",
             },
         ]
         rewritten = call_llm_content(
-            final_retry_messages,
+            final_messages,
             temperature=0.0,
             max_tokens=max(18, min(32, profile["max_tokens"])),
             timeout=max(5.5, profile["timeout"]),
