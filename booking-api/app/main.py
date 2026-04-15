@@ -409,7 +409,16 @@ FATIGUE_PAINPOINT_KEYWORDS = ["sıkıldım", "sikildim", "yoruldum", "çok yoğu
 TECHNICAL_ISSUE_CONTEXT_KEYWORDS = ["api", "apı", "istek", "request", "webhook", "chat", "chatte", "chatinde", "instagram chat", "bot", "chatbot", "otomatik mesaj", "otomatik cevap"]
 TECHNICAL_ISSUE_PROBLEM_KEYWORDS = ["gitmiyor", "gitmiyo", "gitmedi", "göndermiyor", "gondermiyor", "çalışmıyor", "calismiyor", "bozuk", "olmuyor", "olmuo", "yanlış", "yanlis", "hata", "bug", "sorun", "sıkıntı", "sikinti", "saçmalıyor", "sacmaliyor"]
 TECHNICAL_ISSUE_DIRECT_PHRASES = ["apiye istek gitmiyor", "api'ye istek gitmiyor", "api istek gitmiyor", "otomatik mesaj atıyor", "otomatik cevap atıyor", "yanlış cevap veriyor", "yanlis cevap veriyor", "chatte sıkıntı", "chatte sikinti", "chatinde sıkıntı", "chatinde sikinti", "instagram chatinde", "instagram chatte"]
-BUSINESS_NEED_ANALYSIS_KEYWORDS = ["bana ne lazım", "bana ne lazim", "bana ne gerekir", "neye ihtiyacım var", "neye ihtiyacim var", "bana ne lazım sizce", "ne önerirsin", "ne onerirsin"]
+BUSINESS_NEED_ANALYSIS_KEYWORDS = [
+    "bana ne lazım", "bana ne lazim", "bana ne gerekir", "neye ihtiyacım var", "neye ihtiyacim var",
+    "bana ne lazım sizce", "ne önerirsin", "ne onerirsin",
+    "işimi görür mü", "isimi gorur mu", "işime yarar mı", "isime yarar mi",
+    "bana yarar mı", "bana yarar mi", "benim için uygun mu", "benim icin uygun mu",
+    "bana uygun mu", "bana uygun olur mu", "bana göre mi", "bana gore mi",
+    "işe yarar mı", "ise yarar mi", "faydası var mı", "faydasi var mi",
+    "ne kadar etkili", "gerçekten işe yarıyor mu", "işe yarıyor mu",
+    "sektörüme uygun mu", "sektorume uygun mu", "benim sektörüm için",
+]
 BUSINESS_CONTEXT_INTRO_KEYWORDS = ["işletiyorum", "isletiyorum", "salonum var", "merkezim var", "işletmem var", "isletmem var", "kliniğim var", "klinigim var"]
 BEAUTY_BUSINESS_KEYWORDS = ["güzellik salonu", "guzellik salonu", "güzellik merkezi", "guzellik merkezi", "kuaför", "kuafor", "cilt bakım", "cilt bakımı", "cilt bakimi", "protez tırnak", "protez tirnak", "epilasyon", "lazer", "bakım merkezi", "bakim merkezi", "dövme", "dovme", "dövmeci", "dovmeci", "dövmeciyim", "dovmeciyim", "tattoo", "tattoo studio", "tattoo stüdyo", "tattoo studyo"]
 REAL_ESTATE_BUSINESS_KEYWORDS = ["emlak", "gayrimenkul", "ilan", "portföy", "portfoy", "arsa", "daire", "konut", "kiralık", "kiralik", "satılık", "satilik", "yer gösterme", "yer gosterme"]
@@ -462,8 +471,13 @@ PHONE_REFUSAL_KEYWORDS = [
     "gerek yok", "şimdilik vermeyeyim", "simdilik vermeyeyim", "buradan konuşalım", "burdan konusalim",
 ]
 OFFER_HESITATION_KEYWORDS = [
-    "bilmiyorum", "bilmiyom", "emin değilim", "emin degilim", "kararsızım", "kararsizim", "şu an emin değilim", "su an emin degilim",
-    "bir düşüneyim", "bir dusuneyim", "bakarız", "bakariz", "şimdilik bilmiyorum", "simdilik bilmiyorum",
+    "bilmiyorum", "bilmiyom", "emin degilim", "kararsizim", "su an emin degilim",
+    "bir dusuneyim", "bakariz", "simdilik bilmiyorum",
+    "sonra belki", "belki sonra", "belki ileride", "ileride belki",
+    "dusunecegim", "dusuneyim", "dusunmek istiyorum", "dusunmem lazim",
+    "su an belli degil", "belli degil", "belli degilim",
+    "acelem yok", "acelemiz yok", "vakit var", "henuzerken", "erken daha",
+    "sonra konusalim", "sonra gorusuruz", "sonra yazarim", "sonra yazarim",
 ]
 BOOKING_RESET_KEYWORDS = [
     "ne randevusu", "hangi randevu", "ben randevu istemedim", "randevu istemedim", "ne görüşmesi", "hangi görüşme",
@@ -785,7 +799,7 @@ def build_morning_reminder_text(appointment: dict[str, Any]) -> str:
     return (
         f"Günaydın, bugün saat {requested_time}'teki {booking_label} için küçük bir hatırlatma bırakmak istedim{service_line}. "
         f"Lütfen {requested_date} {requested_time} için müsaitliğinizi ayarlayın. "
-        "Bir değişiklik ihtiyacınız olursa buradan yazabilirsiniz."
+            "reply": "Tabii, acelesi yok. Aklınıza takılan bir şey olursa ya da ilerleyen günlerde bakmak isterseniz buradayım.",
     )
 
 
@@ -1905,7 +1919,7 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
         if memory.get("offer_status") == "declined" and (is_closeout_message(message_text) or is_low_signal_message(message_text)):
             conversation["last_customer_message"] = message_text
             return finalize_result(
-                "Rica ederiz, ne zaman isterseniz buradayız.",
+                "Tabii, acelesi yok. Aklınıza takılan bir şey olursa ya da ilerleyen günlerde bakmak isterseniz buradayım.",
                 message_type="reply",
                 decision_label="info:decline_cooldown",
             )
@@ -2034,7 +2048,7 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
             memory = ensure_conversation_memory(conversation)
             if memory.get("offer_status") == "declined" or (conversation.get("service") and sanitize_text(message_text).lower() in {"tesekkurler", "tesekkur", "sag ol", "sagol", "eyvallah", "tamam", "peki", "pekala"}):
                 conversation["last_customer_message"] = message_text
-                reply = "Rica ederiz, ne zaman isterseniz buradayız."
+                reply = "Tabii, acelesi yok. Aklınıza takılan bir şey olursa ya da ilerleyen günlerde bakmak isterseniz buradayım."
                 return finalize_result(reply, message_type="reply", decision_label="info:decline_cooldown")
             reply = build_next_step_reply(conn, conversation)
             return finalize_result(reply, message_type="clarify", decision_label="clarify_next_step")
@@ -2062,7 +2076,7 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
 
         memory = ensure_conversation_memory(conversation)
         if memory.get("offer_status") == "declined" and (is_closeout_message(message_text) or is_low_signal_message(message_text)):
-            reply = "Rica ederiz, ne zaman isterseniz buradayız."
+                reply = "Tabii, acelesi yok. Aklınıza takılan bir şey olursa ya da ilerleyen günlerde bakmak isterseniz buradayım."
             final_decision = "info:decline_cooldown"
             return finalize_result(reply, message_type="reply", decision_label=final_decision)
 
@@ -3021,10 +3035,23 @@ def build_fatigue_painpoint_reply(conversation: dict[str, Any], history: list[di
 
 def build_business_owner_need_reply(sector: str | None = None) -> str:
     if sector == "beauty":
-        return "Güzellik salonlarında en çok farkı hızlı DM dönüşü, düzenli randevu akışı ve müşteri takibinin dağılmaması yaratır. Sizin tarafta en çok hangisi aksıyor?"
+        return (
+            "Guzellik salonlarinda en buyuk kayip gec donulen DM'lerden ve plansiz randevulardan geliyor. "
+            "Bir musteri sabah yazar, aksam baska salona gider. Sistemi kurduktan sonra "
+            "her mesaj 2 dakika icinde karsilanir, randevular otomatik planlanir. "
+            "Sizin tarafta su an en cok hangisi sorun: mesajlara yetisememe mi, randevu duzeninin dagılması mi?"
+        )
     if sector == "real_estate":
-        return "Emlakta en çok farkı hızlı mesaj dönüşü, sıcak talebi ayırmak ve yer gösterme planını düzenli yürütmek yaratır. Sizin tarafta en çok hangisi aksıyor?"
-    return "Genelde en çok faydayı mesaj yanıtı, randevu akışı ve müşteri takibini toparlamak sağlar. Sizde en çok hangi taraf yük oluyor?"
+        return (
+            "Emlakta sicak talep cok cabuk soguyor; bir saat gec dondunuz, musteri rakibe gitti. "
+            "Otomasyonla gelen her talep aninda karsilanir, yer gosterme plani otomatik olusur. "
+            "Su an sizi en cok ne yoruyor: mesaj trafiği mi, yoksa gorusme planlaması mi?"
+        )
+    return (
+        "Cogu isletme ayni problemle karsilasiyor: mesajlara yetisememe, randevu karmasasi, musteri takibinin dagılması. "
+        "Bunlarin hepsini tek bir otomasyonla toparlayabiliriz. "
+        "Sizde hangisi en buyuk yuk olusturuyor, oradan baslayalim?"
+    )
 
 
 def build_sector_intro_reply(sector: str | None = None, conversation: dict[str, Any] | None = None) -> str:
@@ -4605,9 +4632,21 @@ def build_missing_phone_for_booking_reply(conversation: dict[str, Any]) -> str:
 
 def build_offer_hesitation_reply(conversation: dict[str, Any], history: list[dict[str, Any]] | None = None) -> str:
     sector = detect_business_sector(conversation.get("last_customer_message") or "", history)
+    service = sanitize_text(conversation.get("service") or "")
+    service_hint = f" {service} konusunda" if service else ""
     if sector == "beauty":
-        return "Çok normal, hemen karar vermek zor olabilir. Zaten ön görüşmeyi de bunun için öneriyorum; salon tarafında size gerçekten fayda sağlar mı, 10 dakikada netleştiriyoruz. Yani bir satış baskısı değil, önce sizin tarafta işe yarar mı ona bakıyoruz."
-    return "Çok normal, hemen karar vermek zor olabilir. Ön görüşmeyi de zaten bunun için öneriyorum; size gerçekten uygun mu, kısa bir görüşmede netleştiriyoruz. Yani önce mantıklı olup olmadığına bakıyoruz."
+        return (
+            f"Cok normal{service_hint}, hemen karar vermek zor olabilir. "
+            "On gorusmeyi de tam bu yuzden oneriyorum: salonunuza gercekten ne kadar katki saglar, "
+            "10 dakikada somut rakamlarla gosteririm. Satis baskisi yok, once anlayalim, "
+            "sonra siz karar verin. Hangi gun muygun?"
+        )
+    return (
+        f"Anlasildı{service_hint}. Hemen karar vermenizi beklemiyorum. "
+        "On gorusmede size gercekten ne kadar fayda saglar, somut olarak aktaririm; "
+        "sonra siz degerlendirirsiniz. 15 dakikanizi alirim, baskisi olmaz. "
+        "Hangi gun size uyar?"
+    )
 
 
 def build_booking_resume_hint(conversation: dict[str, Any]) -> str:
@@ -5050,7 +5089,7 @@ def maybe_build_information_reply(message_text: str, llm_data: dict[str, Any], m
         }
     if ensure_conversation_memory(conversation).get("offer_status") == "declined" and (is_closeout_message(message_text) or is_low_signal_message(message_text)):
         return {
-            "reply": "Rica ederiz, ihtiyaç olursa yine yazabilirsiniz.",
+            "reply": "Tabii, acelesi yok. Aklınıza takılan bir şey olursa ya da ilerleyen günlerde bakmak isterseniz buradayım.",
             "kind": "decline_cooldown",
             "next_state": conversation.get("state", "collect_service") or "collect_service",
             "set_service": conversation.get("service"),
@@ -5760,7 +5799,7 @@ def build_emergency_reply(message_text: str, conversation: dict[str, Any], decis
     if is_simple_greeting(message_text):
         return "Merhaba, yardımcı olayım. Web tasarım, otomasyon, reklam veya sosyal medya tarafında hangi konuyla ilgileniyorsunuz?"
     if ensure_conversation_memory(conversation).get("offer_status") == "declined" and (is_closeout_message(message_text) or is_low_signal_message(message_text)):
-        return "Rica ederiz, ne zaman isterseniz buradayız."
+        return "Tabii, acelesi yok. Aklınıza takılan bir şey olursa ya da ilerleyen günlerde bakmak isterseniz buradayım."
     if conversation.get("service"):
         service_meta = match_service_catalog(conversation.get("service"), conversation.get("service"))
         if service_meta:
