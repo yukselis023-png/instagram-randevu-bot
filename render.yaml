@@ -49,12 +49,22 @@ services:
       - key: FULL_AI_CONVERSATIONAL_MODE
         value: "true"
       - key: LLM_REPLY_POLISH_ENABLED
-        value: "false"
+        value: "true"
+      - key: LLM_BASE_URL
+        value: https://api.groq.com/openai/v1
+      - key: LLM_MODEL
+        value: meta-llama/llama-4-scout-17b-16e-instruct
+      - key: LLM_REPLY_MICRO_MODEL
+        value: llama-3.1-8b-instant
+      - key: LLM_REPLY_ADVISORY_MODEL
+        value: meta-llama/llama-4-scout-17b-16e-instruct
+      - key: LLM_REPLY_QUALITY_MODEL
+        value: llama-3.3-70b-versatile
+      - key: LLM_FALLBACK_MODEL
+        value: llama-3.1-8b-instant
       - key: CRM_SYNC_ENABLED
         value: "false"
       - key: LIVE_CRM_ENABLED
         value: "false"
-      - key: LLM_BASE_URL
-        sync: false
       - key: LLM_API_KEY
         sync: false

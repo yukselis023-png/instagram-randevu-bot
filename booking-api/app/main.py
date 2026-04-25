@@ -50,19 +50,24 @@ WORKING_HOURS_END = os.getenv("WORKING_HOURS_END", "19:00")
 SLOT_DURATION_MINUTES = int(os.getenv("SLOT_DURATION_MINUTES", "60"))
 SLOT_BUFFER_MINUTES = int(os.getenv("SLOT_BUFFER_MINUTES", "10"))
 APPOINTMENT_LOOKAHEAD_DAYS = int(os.getenv("APPOINTMENT_LOOKAHEAD_DAYS", "30"))
-LLM_BASE_URL = os.getenv("LLM_BASE_URL", "http://127.0.0.1:8045/v1").rstrip("/")
+LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://api.groq.com/openai/v1").rstrip("/")
 LLM_API_KEY = os.getenv("LLM_API_KEY", "")
-LLM_MODEL = os.getenv("LLM_MODEL", "gemini-3-flash")
-LLM_FALLBACK_MODEL = os.getenv("LLM_FALLBACK_MODEL", "gemini-2.5-flash-lite")
+LLM_MODEL = os.getenv("LLM_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct")
+LLM_FALLBACK_MODEL = os.getenv("LLM_FALLBACK_MODEL", "llama-3.1-8b-instant")
 LLM_EXTRACT_TIMEOUT_SECONDS = float(os.getenv("LLM_EXTRACT_TIMEOUT_SECONDS", "6"))
 LLM_REPLY_POLISH_TIMEOUT_SECONDS = float(os.getenv("LLM_REPLY_POLISH_TIMEOUT_SECONDS", "8"))
-LLM_REPLY_MICRO_MODEL = os.getenv("LLM_REPLY_MICRO_MODEL", "gemini-3-flash").strip() or LLM_MODEL
-LLM_REPLY_ADVISORY_MODEL = os.getenv("LLM_REPLY_ADVISORY_MODEL", "gemini-3-flash").strip() or LLM_MODEL
+LLM_REPLY_MICRO_MODEL = os.getenv("LLM_REPLY_MICRO_MODEL", "llama-3.1-8b-instant").strip() or LLM_MODEL
+LLM_REPLY_ADVISORY_MODEL = os.getenv("LLM_REPLY_ADVISORY_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct").strip() or LLM_MODEL
+LLM_REPLY_QUALITY_MODEL = (
+    os.getenv("LLM_REPLY_QUALITY_MODEL")
+    or os.getenv("LLM_QUALITY_MODEL")
+    or "llama-3.3-70b-versatile"
+).strip()
 LLM_REPLY_MICRO_TIMEOUT_SECONDS = float(os.getenv("LLM_REPLY_MICRO_TIMEOUT_SECONDS", "6.5"))
 LLM_REPLY_ADVISORY_TIMEOUT_SECONDS = float(os.getenv("LLM_REPLY_ADVISORY_TIMEOUT_SECONDS", str(LLM_REPLY_POLISH_TIMEOUT_SECONDS)))
 LLM_REPLY_MICRO_MAX_TOKENS = int(os.getenv("LLM_REPLY_MICRO_MAX_TOKENS", "48"))
 LLM_REPLY_ADVISORY_MAX_TOKENS = int(os.getenv("LLM_REPLY_ADVISORY_MAX_TOKENS", "90"))
-LLM_REPLY_POLISH_ENABLED = True
+LLM_REPLY_POLISH_ENABLED = os.getenv("LLM_REPLY_POLISH_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
 FULL_AI_CONVERSATIONAL_MODE = os.getenv("FULL_AI_CONVERSATIONAL_MODE", "false").lower() in {"1", "true", "yes", "on"}
 CRM_SYNC_ENABLED = os.getenv("CRM_SYNC_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
 CRM_SUPABASE_URL = os.getenv("CRM_SUPABASE_URL", "").rstrip("/")
@@ -342,10 +347,29 @@ CREATE INDEX IF NOT EXISTS idx_automation_events_status_scheduled_at ON automati
 """
 
 NAME_PATTERNS = [
-    re.compile(r"\b(?:ben|adım|ismim|ad soyad)\s+([a-zçğıöşü\s]{2,40})", re.IGNORECASE),
-    re.compile(r"\b(?:ismim de)\s+([a-zçğıöşü\s]{2,40})", re.IGNORECASE),
+    re.compile(r"(?:benim\s+adım(?:\s+soyadım)?|adım(?:\s+soyadım)?|ad\s*soyad(?:ım)?|ismim|isim\s*soyisim|adım\s*:)\s+([a-zçğıöşü\s]{2,60})", re.IGNORECASE),
+    re.compile(r"(?:ismim\s+de|müşteri\s+adı|musteri\s+adi)\s+([a-zçğıöşü\s]{2,60})", re.IGNORECASE),
 ]
-
+MONTH_NAME_MAP = {
+    "ocak": 1,
+    "şubat": 2,
+    "subat": 2,
+    "mart": 3,
+    "nisan": 4,
+    "mayıs": 5,
+    "mayis": 5,
+    "haziran": 6,
+    "temmuz": 7,
+    "ağustos": 8,
+    "agustos": 8,
+    "eylül": 9,
+    "eylul": 9,
+    "ekim": 10,
+    "kasım": 11,
+    "kasim": 11,
+    "aralık": 12,
+    "aralik": 12,
+}
 PHONE_PATTERN = re.compile(r"(?:(?:\+?90)|0)?\s*5\d{2}[\s\-]?\d{3}[\s\-]?\d{2}[\s\-]?\d{2}")
 EMAIL_PATTERN = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
 TIME_PATTERN = re.compile(r"\b([01]?\d|2[0-3])[:.]([0-5]\d)\b")
@@ -589,12 +613,12 @@ SERVICE_FOCUS_MAP = {
     "kreatif-produksiyon": "güçlü video ve kreatif içerik üretmek",
 }
 SERVICE_CLARIFYING_QUESTIONS = {
-    "web-tasarim": "Detayları konuşmak ve fiyatlandırmayı netleştirmek için kısa bir ön görüşme planlayalım. Hangi gün ve saat uygundur?",
-    "otomasyon-ai": "Size özel otomasyon yapısını netleştirmek için kısa bir ön görüşme planlayalım. Hangi gün ve saat sizin için uygun?",
-    "performans-pazarlama": "Hedeflerinizi dinlemek ve süreci netleştirmek için kısa bir ön görüşme yapalım. Uygun olduğunuz bir gün ve saat yazar mısınız?",
-    "sosyal-medya-yonetimi": "Beklentilerinizi dinlemek için kısa bir ön görüşme yapalım. Hangi gün ve saat uygundur?",
-    "marka-stratejisi": "Detayları kısa bir ön görüşmede netleştirelim. Hangi gün ve saat uygundur?",
-    "kreatif-produksiyon": "İhtiyaçlarınızı dinlemek için kısa bir ön görüşme yapalım. Hangi gün ve saat uygundur?",
+    "web-tasarim": "Projeniz kurumsal site mi, satış odaklı bir landing page mi?",
+    "otomasyon-ai": "Günlük mesaj yoğunluğunuz yaklaşık kaç?",
+    "performans-pazarlama": "Önceliğiniz yeni müşteri kazanımı mı, dönüşüm maliyetini düşürmek mi?",
+    "sosyal-medya-yonetimi": "İçerik üretimi mi, hesap yönetimi mi sizin için daha kritik?",
+    "marka-stratejisi": "Marka tarafında en çok konumlandırma mı, satış dili mi netleşsin?",
+    "kreatif-produksiyon": "Video mu, reklam kreatifi mi, sosyal medya görselleri mi öncelikli?",
 }
 LIVE_CRM_AUTH_CACHE_SECONDS = int(os.getenv("LIVE_CRM_AUTH_CACHE_SECONDS", "3000"))
 LIVE_CRM_SERVICES_CACHE_SECONDS = int(os.getenv("LIVE_CRM_SERVICES_CACHE_SECONDS", "21600"))
@@ -1947,19 +1971,25 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
         inferred_booking_kind = infer_booking_kind(message_text, llm_data, conversation)
         explicit_booking_intent = message_shows_booking_intent(message_text, llm_data)
 
-        if extracted_name and (not conversation.get("full_name") or conversation.get("state") == "collect_name"):
+        current_name = sanitize_text(conversation.get("full_name") or "")
+        username_like_name = bool(current_name) and current_name.lower() in {
+            sanitize_text(payload.instagram_username or "").lower(),
+            sanitize_text(payload.sender_id or "").lower(),
+            sanitize_text(conversation.get("instagram_user_id") or "").lower(),
+        }
+        if extracted_name and (not current_name or conversation.get("state") == "collect_name" or username_like_name):
             conversation["full_name"] = extracted_name
-        elif not conversation.get("full_name") and detected_name:
+        elif not current_name and detected_name:
             conversation["full_name"] = detected_name
-        if not conversation.get("phone") and detected_phone:
+        if detected_phone and canonical_phone(conversation.get("phone")) != canonical_phone(detected_phone):
             conversation["phone"] = detected_phone
         if picked_service and (not conversation.get("service") or conversation.get("state") == "collect_service"):
             conversation["service"] = picked_service
         elif not conversation.get("service") and detected_service:
             conversation["service"] = detected_service
-        if not conversation.get("requested_date") and detected_date:
+        if detected_date and normalize_date_string(conversation.get("requested_date")) != detected_date:
             conversation["requested_date"] = detected_date
-        if not conversation.get("requested_time") and detected_time:
+        if detected_time and normalize_time_string(conversation.get("requested_time")) != detected_time:
             conversation["requested_time"] = detected_time
         if detected_time and not conversation.get("preferred_period"):
             conversation["preferred_period"] = infer_period_from_time(detected_time)
@@ -4068,7 +4098,27 @@ def titlecase_name(value: str | None) -> str | None:
 
 
 def extract_name(text: str, state: str) -> str | None:
-    if "?" in text or is_service_overview_question(text) or is_price_question(text) or match_faq_response(text):
+    normalized = sanitize_text(text)
+    lowered = normalized.lower()
+    explicit_prefixes = [
+        'benim adim soyadim ',
+        'adim soyadim ',
+        'benim adim ',
+        'adim ',
+        'ismim de ',
+        'ismim ',
+        'isim soyisim ',
+        'musteri adi ',
+    ]
+    for prefix in explicit_prefixes:
+        idx = lowered.find(prefix)
+        if idx != -1:
+            tail = normalized[idx + len(prefix):]
+            tail = re.split(r'[,.!?]| telefon| tel no| numaram| numara| işlet| islet| sektör| sektor| kuaför| kuafor| randevu| ön görüş| on gorus', tail, maxsplit=1, flags=re.IGNORECASE)[0]
+            candidate = titlecase_name(sanitize_text(tail).strip(' :-'))
+            if candidate and len(candidate.split()) <= 4:
+                return candidate
+    if '?' in text or is_service_overview_question(text) or is_price_question(text) or match_faq_response(text):
         return None
     if is_assistant_identity_question(text) or is_owner_check_message(text) or is_booking_assumption_rejection(text):
         return None
@@ -4084,16 +4134,23 @@ def extract_name(text: str, state: str) -> str | None:
         return None
     if extract_phone(text) or extract_date(text) or extract_time_for_state(text, state) or extract_preferred_period(text):
         return None
-    for pattern in NAME_PATTERNS:
-        match = pattern.search(text)
-        if match:
-            return titlecase_name(match.group(1))
-    clean = sanitize_text(re.sub(r"[^a-zA-ZçğıöşüÇĞİÖŞÜ\s]", "", text))
+    clean = sanitize_text(re.sub(r'[^a-zA-ZçğıöşüÇĞİÖŞÜ\s]', '', text))
     words = clean.split()
-    if state != "collect_name":
+    if state != 'collect_name':
         return None
     if 1 <= len(words) <= 3 and not any(w.lower() in NON_NAME_WORDS for w in words):
         return titlecase_name(clean)
+    return None
+def canonical_phone(value: Any) -> str | None:
+    if not value:
+        return None
+    digits = re.sub(r"\D", "", str(value))
+    if digits.startswith("90") and len(digits) == 12:
+        return "+" + digits
+    if digits.startswith("0") and len(digits) == 11:
+        return "+90" + digits[1:]
+    if len(digits) == 10:
+        return "+90" + digits
     return None
 
 
@@ -4175,6 +4232,26 @@ def extract_date(text: str) -> str | None:
 
     lowered = text.lower()
     today = datetime.now(TZ).date()
+
+    month_named = re.search(
+        r"(\d1,2})\s+(ocak|şubat|subat|mart|nisan|mayıs|mayis|haziran|temmuz|ağustos|agustos|eylül|eylul|ekim|kasım|kasim|aralık|aralik)(?:\s+(\d2,4}))?",
+        lowered,
+        re.IGNORECASE,
+    )
+    if month_named:
+        day = int(month_named.group(1))
+        month = MONTH_NAME_MAP[month_named.group(2).lower()]
+        year_raw = month_named.group(3)
+        year = int(year_raw) if year_raw else today.year
+        if year_raw and len(year_raw) == 2:
+            year += 200
+        try:
+            parsed = date(year, month, day)
+            if not year_raw and parsed < today:
+                parsed = date(today.year + 1, month, day)
+            return parsed.isoformat()
+        except ValueError:
+            pass
 
     if re.search(r"evvelsi\s+gün\w*|evvelsi\s+gun\w*|evelsi\s+gün\w*|evelsi\s+gun\w*", lowered):
         return (today + timedelta(days=3)).isoformat()
@@ -4990,7 +5067,7 @@ def build_service_focus(service: dict[str, Any]) -> str:
 def build_service_clarifying_question(service: dict[str, Any]) -> str:
     return SERVICE_CLARIFYING_QUESTIONS.get(
         service.get("slug") or "",
-        "Detayları kısa bir ön görüşmede netleştirelim. Hangi gün ve saat sizin için uygundur?",
+        "İhtiyacınızı biraz daha açarsanız size en doğru yönü net söyleyebilirim.",
     )
 
 
@@ -5559,6 +5636,64 @@ GUARDED_COMPOSE_LABELS = {
     "confirmed_change_handoff",
     "confirmed_identity_mismatch_handoff",
 }
+QUALITY_COMPOSE_LABELS = {
+    "info:business_owner_need_analysis",
+    "info:comparison",
+    "info:dm_issue_detail",
+    "info:fatigue_painpoint",
+    "info:message_volume",
+    "info:multi_need_confirmed",
+    "info:objection",
+    "info:offer_hesitation",
+    "info:price_negotiation",
+    "info:priority_choice",
+    "info:service_advice",
+    "info:technical_issue",
+}
+
+
+def unique_model_chain(*models: str | None) -> list[str]:
+    chain: list[str] = []
+    for model in models:
+        model = (model or "").strip()
+        if model and model not in chain:
+            chain.append(model)
+    return chain
+
+
+def is_quality_model_question(text: str | None) -> bool:
+    lowered = sanitize_text(text or "").lower()
+    if not lowered:
+        return False
+    if any(phrase in lowered for phrase in ["hangisi daha mantikli", "hangisi mantikli", "ne daha mantikli", "bana hangisi"]):
+        return True
+    strategic_terms = ["dm", "randevu", "musteri takibi", "crm", "otomasyon", "fatura", "teklif"]
+    if sum(1 for term in strategic_terms if term in lowered) >= 2 and any(term in lowered for term in ["karis", "toparla", "birlikte", "hepsi", "oner", "oneri"]):
+        return True
+    return False
+
+
+def is_normal_model_question(text: str | None) -> bool:
+    lowered = sanitize_text(text or "").lower()
+    if not lowered:
+        return False
+    if is_quality_model_question(lowered):
+        return True
+    if len(lowered.split()) >= 4:
+        return True
+    return any(term in lowered for term in ["nasil", "fiyat", "ucret", "sistem", "otomasyon", "web", "reklam", "sosyal medya"])
+
+
+def explicitly_starts_consultation_collection(text: str) -> bool:
+    lowered = sanitize_text(text or "").lower()
+    phrases = [
+        "randevu almak", "randevu alalım", "randevu alalim", "randevu oluştur",
+        "randevu olustur", "görüşme planla", "gorusme planla", "görüşelim",
+        "goruselim", "konuşalım", "konusalim", "toplantı yapalım", "toplanti yapalim",
+        "başlayalım", "baslayalim", "devam edelim", "beni arayın", "beni arayin",
+        "telefonla konuşalım", "telefonla konusalim",
+    ]
+    return any(phrase in lowered for phrase in phrases)
 
 
 def build_ai_reply_goal(decision_label: str | None, conversation: dict[str, Any]) -> str:
@@ -5622,6 +5757,9 @@ def build_ai_reply_goal(decision_label: str | None, conversation: dict[str, Any]
         "slot_conflict_race": "Explain the slot just got taken and present alternatives.",
         "info:smalltalk": "Reply to smalltalk naturally in one short Turkish sentence. Be social first, simple, and human. Do not propose a meeting or consultation on smalltalk.",
     }
+    customer_message = conversation.get("last_customer_message") or ""
+    if label == "collect_service" and is_quality_model_question(customer_message):
+        return "Recommend the most logical solution in Turkish, explain why briefly, and ask one discovery question. Do not ask for phone, date, time, meeting, or appointment unless the customer explicitly asked to start booking."
     if label in goal_map:
         return goal_map[label]
     if conversation.get("state") == "collect_name":
@@ -5690,9 +5828,43 @@ def build_recent_history_lines(history: list[dict[str, Any]] | None, limit: int)
 
 def get_ai_compose_profile(decision_label: str | None, conversation: dict[str, Any]) -> dict[str, Any]:
     label = sanitize_text(decision_label or "").lower()
-    reply_model = LLM_MODEL or "gemini-3-flash"
+    customer_message = conversation.get("last_customer_message") or ""
+    reply_model = LLM_MODEL or "meta-llama/llama-4-scout-17b-16e-instruct"
     micro_model = LLM_REPLY_MICRO_MODEL or reply_model
     advisory_model = LLM_REPLY_ADVISORY_MODEL or reply_model
+    fallback_model = LLM_FALLBACK_MODEL or micro_model
+    quality_model = LLM_REPLY_QUALITY_MODEL or advisory_model
+    micro_chain = unique_model_chain(micro_model)
+    normal_chain = unique_model_chain(advisory_model, fallback_model, micro_model)
+    quality_chain = unique_model_chain(quality_model, advisory_model, fallback_model, micro_model)
+    if label == "collect_service" and is_quality_model_question(customer_message):
+        return {
+            "profile": "quality_collect_service",
+            "timeout": max(LLM_REPLY_ADVISORY_TIMEOUT_SECONDS, 7.0),
+            "max_tokens": max(120, LLM_REPLY_ADVISORY_MAX_TOKENS),
+            "temperature": 0.2,
+            "models": quality_chain,
+            "history_limit": 6,
+            "include_fallback": False,
+            "include_contact": False,
+            "prefer_plain_prompt": True,
+            "allow_retry": True,
+            "fast_path": False,
+        }
+    if label == "collect_service" and is_normal_model_question(customer_message):
+        return {
+            "profile": "normal_collect_service",
+            "timeout": max(LLM_REPLY_ADVISORY_TIMEOUT_SECONDS, 7.0),
+            "max_tokens": max(96, LLM_REPLY_ADVISORY_MAX_TOKENS),
+            "temperature": 0.2,
+            "models": normal_chain,
+            "history_limit": 5,
+            "include_fallback": False,
+            "include_contact": False,
+            "prefer_plain_prompt": True,
+            "allow_retry": True,
+            "fast_path": False,
+        }
     if label in MICRO_COMPOSE_LABELS:
         micro_timeout = LLM_REPLY_MICRO_TIMEOUT_SECONDS
         if label == "collect_service":
@@ -5702,9 +5874,9 @@ def get_ai_compose_profile(decision_label: str | None, conversation: dict[str, A
         return {
             "profile": "micro",
             "timeout": micro_timeout,
-            "max_tokens": max(36, min(LLM_REPLY_MICRO_MAX_TOKENS, 40)),
+            "max_tokens": max(48, min(LLM_REPLY_MICRO_MAX_TOKENS, 64)),
             "temperature": 0.15,
-            "models": [micro_model] if micro_model else [reply_model],
+            "models": micro_chain or normal_chain,
             "history_limit": 4,
             "include_fallback": False,
             "include_contact": False,
@@ -5718,7 +5890,7 @@ def get_ai_compose_profile(decision_label: str | None, conversation: dict[str, A
             "timeout": max(9.5, LLM_REPLY_ADVISORY_TIMEOUT_SECONDS),
             "max_tokens": 28,
             "temperature": 0.0,
-            "models": [micro_model or advisory_model or reply_model],
+            "models": micro_chain or normal_chain,
             "history_limit": 0,
             "include_fallback": True,
             "include_contact": False,
@@ -5733,7 +5905,7 @@ def get_ai_compose_profile(decision_label: str | None, conversation: dict[str, A
             "timeout": LLM_REPLY_ADVISORY_TIMEOUT_SECONDS,
             "max_tokens": max(100, LLM_REPLY_ADVISORY_MAX_TOKENS),
             "temperature": 0.2,
-            "models": [advisory_model] if advisory_model else [reply_model],
+            "models": normal_chain,
             "history_limit": 4,
             "include_fallback": True,
             "include_contact": True,
@@ -5754,7 +5926,7 @@ def get_ai_compose_profile(decision_label: str | None, conversation: dict[str, A
         "timeout": max(advisory_timeout, 7.0),
         "max_tokens": max(120, LLM_REPLY_ADVISORY_MAX_TOKENS),
         "temperature": 0.2,
-        "models": [advisory_model] if advisory_model else [reply_model],
+        "models": quality_chain if label in QUALITY_COMPOSE_LABELS else normal_chain,
         "history_limit": 6,
         "include_fallback": False,
         "include_contact": False,
@@ -5942,7 +6114,70 @@ def normalize_llm_reply_text(content: str | None) -> str | None:
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     lines = [line.strip() for line in text.split("\n")]
     cleaned = "\n".join(line for line in lines if line)
+    cleaned = restore_common_turkish_reply_words(cleaned)
     return cleaned[:2000] if cleaned else None
+
+
+def _preserve_case_replacement(replacement: str, original: str) -> str:
+    if original.isupper():
+        return replacement.upper()
+    if original[:1].isupper():
+        return replacement[:1].upper() + replacement[1:]
+    return replacement
+
+
+def restore_common_turkish_reply_words(text: str) -> str:
+    replacements = {
+        "yarin": "yarın",
+        "tasarim": "tasarım",
+        "fiyati": "fiyatı",
+        "detayli": "detaylı",
+        "yardimci": "yardımcı",
+        "yardim": "yardım",
+        "icin": "için",
+        "kisa": "kısa",
+        "musteri": "müşteri",
+        "musteriler": "müşteriler",
+        "musterilere": "müşterilere",
+        "mesajlarıza": "mesajlarınıza",
+        "mesajlariniza": "mesajlarınıza",
+        "mesajlarini": "mesajlarını",
+        "calisiyor": "çalışıyor",
+        "calisir": "çalışır",
+        "gorusme": "görüşme",
+        "gorusmeyi": "görüşmeyi",
+        "gorusmek": "görüşmek",
+        "goruselim": "görüşelim",
+        "gorusebiliriz": "görüşebiliriz",
+        "gorusebilir": "görüşebilir",
+        "gorus": "görüş",
+    }
+    result = text
+    for source, replacement in replacements.items():
+        result = re.sub(
+            rf"\b{re.escape(source)}\b",
+            lambda match: _preserve_case_replacement(replacement, match.group(0)),
+            result,
+            flags=re.IGNORECASE,
+        )
+    return result
+
+
+def extract_price_number_tokens(text: str | None) -> set[str]:
+    if not text:
+        return set()
+    tokens: set[str] = set()
+    for match in re.finditer(r"\b\d{1,3}(?:[.,]\d{3})+\b", text):
+        tokens.add(re.sub(r"\D", "", match.group(0)))
+    for match in re.finditer(r"\b\d+(?:[.,]\d+)?\s*(?:tl|₺)\b", text, flags=re.IGNORECASE):
+        tokens.add(re.sub(r"\D", "", match.group(0)))
+    return {token for token in tokens if token}
+
+
+def reply_has_truncated_price_number(text: str | None) -> bool:
+    if not text:
+        return False
+    return bool(re.search(r"\b\d{1,3}\.(?!\d)", text))
 
 
 def reply_mentions_price(text: str) -> bool:
@@ -5960,6 +6195,16 @@ def reply_requests_booking_details(text: str) -> bool:
         "telefon numarası", "telefon numarasi"
     ]
     return any(pattern in lowered for pattern in patterns)
+
+
+def can_collect_booking_details_from_message(text: str, conversation: dict[str, Any], history: list[dict[str, Any]] | None = None) -> bool:
+    return bool(
+        explicitly_starts_consultation_collection(text)
+        or accepts_pending_consultation_offer(text, conversation, history, {})
+        or extract_phone(text)
+        or extract_date(text)
+        or extract_time_for_state(text, conversation.get("state", "new"))
+    )
 
 
 def is_service_info_dump_reply(text: str) -> bool:
@@ -6157,6 +6402,12 @@ def apply_reply_guardrails(
     if is_price_question(message):
         if not reply_mentions_price(candidate_reply):
             return draft_reply
+        draft_prices = extract_price_number_tokens(draft_reply)
+        candidate_prices = extract_price_number_tokens(candidate_reply)
+        if reply_has_truncated_price_number(candidate_reply):
+            return draft_reply
+        if draft_prices and not draft_prices.intersection(candidate_prices):
+            return draft_reply
         if any(token in lowered for token in ["aylık", "aylik", "tek sefer", "tek seferlik"]) and not any(token in candidate_lower for token in ["aylık", "aylik", "tek sefer", "tek seferlik", "ilk 3 ay"]):
             return draft_reply
 
@@ -6167,6 +6418,11 @@ def apply_reply_guardrails(
 
     if label != "collect_service" and not has_booking_signal and reply_requests_booking_details(candidate_reply):
         return draft_reply
+
+    explicit_collection_signal = can_collect_booking_details_from_message(message, conversation, history)
+    if label == "collect_service" and reply_requests_booking_details(candidate_reply) and not explicit_collection_signal:
+        if is_quality_model_question(message) or is_business_need_analysis_message(message) or is_service_advice_request(message, {}):
+            return draft_reply
 
     if label != "collect_service" and match_service_candidates(message, conversation.get("service")) and len(message.split()) <= 3 and reply_requests_booking_details(candidate_reply):
         return draft_reply
@@ -6256,39 +6512,42 @@ def polish_reply_text(
     is_guarded = label in GUARDED_COMPOSE_LABELS
 
     catalog = (
-        "HIZMETLER VE FIYATLAR: "
-        "1) Web Tasarim KOBi: 12.900 TL (tek seferlik). "
+        "HİZMETLER VE FİYATLAR: "
+        "1) Web Tasarım KOBİ: 12.900 TL (tek seferlik). "
         "2) Otomasyon ve Yapay Zeka: 5.000 TL/ay. "
-        "3) Performans Pazarlama: 7.500 TL/ay (reklam butcesi haric). "
-        "4) Sosyal Medya Yonetimi: Ozel teklif. "
-        "5) Marka Stratejisi: Ozel teklif. "
-        "6) Kreatif Produksiyon: Ozel teklif."
+        "3) Performans Pazarlama: 7.500 TL/ay (reklam bütçesi hariç). "
+        "4) Sosyal Medya Yönetimi: Özel teklif. "
+        "5) Marka Stratejisi: Özel teklif. "
+        "6) Kreatif Prodüksiyon: Özel teklif."
     )
 
     sys_prompt = " ".join([
-        f"Sen {BUSINESS_NAME} adina Instagram DM yaniti veren bir satis asistanisin.",
-        "Doel Digital, markalara web tasarim, otomasyon, performans pazarlama ve sosyal medya alanlarinda destek veren bir dijital ajansidir.",
+        f"Sen {BUSINESS_NAME} adına Instagram DM yanıtı veren doğal bir satış destek asistanısın.",
+        "Doel Digital, markalara web tasarım, otomasyon, performans pazarlama ve sosyal medya alanlarında destek veren bir dijital ajanstır.",
         catalog,
-        "KESIN KURALLAR:",
-        "1. SIFIRDAN yaz, hazir sablon dili kullanma.",
-        "2. Sadece duz metin, emoji yok, markdown yok.",
-        "3. Maksimum 2 cumle.",
-        "4. Once soruyu cevapla, sonra tek adim oner.",
-        "5. Onceki soruyu tekrarlama.",
-        "6. Selaslasma ise kisa sosyal cevap ver, satis yapmaya kalkma.",
-        "7. Fiyat sorarsa direkt soyler.",
-        "8. Musteri kararsizsa baski yapma.",
-        "9. Sadece sorulan hizmet hakkinda yaz.",
-        "10. Randevu onayinda context den gelen bilgileri birebir kullan, uydurma.",
+        "KESİN KURALLAR:",
+        "1. Türkçe karakter kullan: ç, ğ, ı, ö, ş, ü. 'tasarim', 'icin', 'gorusme', 'yarin' gibi Latinleştirilmiş kelimeler yasak.",
+        "2. Sadece düz metin yaz; emoji, markdown, madde işareti ve tırnak kullanma.",
+        "3. Maksimum 2 kısa cümle yaz; selamlaşma veya küçük sohbet ise 1 kısa cümle yeterli.",
+        "4. Önce soruyu cevapla, sonra sadece bir net sonraki adım öner.",
+        "5. Önceki soruyu tekrarlama ve müşteri istemedikçe hizmet listesi dökme.",
+        "6. Selamlaşma ise satış yapma; kısa ve insani cevap ver.",
+        "7. Fiyat sorarsa fiyatı tam yaz: 12.900 TL, 5.000 TL/ay, 7.500 TL/ay. Asla '12.' gibi yarım fiyat yazma.",
+        "8. Müşteri kararsızsa baskı yapma; 'ödemelisiniz' gibi sert ifadeler kullanma.",
+        "9. Sadece sorulan hizmet hakkında yaz.",
+        "10. Telefon gerekiyorsa kısa sor: 'Telefon numaranızı paylaşır mısınız?'",
+        "11. Randevu onayında context'ten gelen bilgileri birebir kullan, uydurma.",
     ])
 
     user_parts = [
-        "Musteri mesaji: " + (customer_message or "-"),
-        "Konusma gecmisi: " + history_text,
+        "Müşteri mesajı: " + (customer_message or "-"),
+        "Konuşma geçmişi: " + history_text,
         "Bilinen bilgiler: " + facts_text,
+        "Güvenli taslak cevap: " + (draft_reply or "-"),
+        "Cevap hedefi: " + reply_goal,
     ]
     if is_guarded and draft_reply:
-        user_parts.append("Guvence bilgileri (tarihleri, saatleri, adlari AYNEN kullan): " + draft_reply)
+        user_parts.append("Güvence bilgileri (tarihleri, saatleri, adları AYNEN kullan): " + draft_reply)
     user_msg = chr(10).join(user_parts)
 
     messages = [
@@ -6310,7 +6569,7 @@ def polish_reply_text(
                 "role": "system",
                 "content": (
                     f"You write exactly one very short Turkish Instagram DM reply for {BUSINESS_NAME}. "
-                    "Plain text only. No markdown. No emojis. "
+                    "Use Turkish characters: ç, ğ, ı, ö, ş, ü. Plain text only. No markdown. No emojis. "
                     "Keep it to one short natural sentence. Reply like a real human."
                 ),
             },
@@ -6336,8 +6595,8 @@ def polish_reply_text(
             {
                 "role": "system",
                 "content": (
-                    "Asagidaki Turkce mesaji musteriye gonderilecek cok kisa dogal bir Instagram DM cevabi olarak yeniden yaz. "
-                    "Duz metin kullan. Emojisiz ol. Tek cumle tercih et."
+                    "Aşağıdaki Türkçe mesajı müşteriye gönderilecek çok kısa, doğal bir Instagram DM cevabı olarak yeniden yaz. "
+                    "Türkçe karakter kullan. Düz metin kullan. Emojisiz ol. Tek cümle tercih et."
                 ),
             },
             {

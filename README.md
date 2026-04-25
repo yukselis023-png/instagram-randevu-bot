@@ -22,11 +22,12 @@ Bu klasör, Instagram DM üzerinden randevu toplamak için hazırlanmış bir **
 - Şifre: `.env` dosyasındaki `N8N_BASIC_AUTH_PASSWORD` ile aynı ayarlandı
 
 ## LLM notu
-Yerel OpenAI-uyumlu endpointte stabil çalışan model sırası kullanılmaktadır:
-- birincil: `gemini-3-flash`
-- fallback: `gemini-2.5-flash-lite`
-
-Daha önce denenen `gemini-3.1-flash-lite` gateway tarafında kararsız / hatalı davrandığı için aktif yol olarak bırakılmadı.
+Aktif AI sağlayıcısı Groq OpenAI-compatible endpointidir:
+- base URL: `https://api.groq.com/openai/v1`
+- basit cevaplar: `llama-3.1-8b-instant`
+- normal/önemli cevaplar: `meta-llama/llama-4-scout-17b-16e-instruct`
+- kalite gereken cevaplar: `llama-3.3-70b-versatile`
+- fallback: 70B -> Scout -> 8B, Scout -> 8B
 
 ## Instagram token durumu
 Gerçek Instagram business login akışı tamamlandı:

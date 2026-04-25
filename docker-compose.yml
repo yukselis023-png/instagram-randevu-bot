@@ -43,6 +43,7 @@ services:
       LLM_REPLY_POLISH_TIMEOUT_SECONDS: ${LLM_REPLY_POLISH_TIMEOUT_SECONDS}
       LLM_REPLY_MICRO_MODEL: ${LLM_REPLY_MICRO_MODEL}
       LLM_REPLY_ADVISORY_MODEL: ${LLM_REPLY_ADVISORY_MODEL}
+      LLM_REPLY_QUALITY_MODEL: ${LLM_REPLY_QUALITY_MODEL}
       LLM_REPLY_MICRO_TIMEOUT_SECONDS: ${LLM_REPLY_MICRO_TIMEOUT_SECONDS}
       LLM_REPLY_ADVISORY_TIMEOUT_SECONDS: ${LLM_REPLY_ADVISORY_TIMEOUT_SECONDS}
       LLM_REPLY_MICRO_MAX_TOKENS: ${LLM_REPLY_MICRO_MAX_TOKENS}
@@ -96,8 +97,8 @@ services:
       IG_LOGIN_USERNAME: ${IG_LOGIN_USERNAME}
       IG_LOGIN_PASSWORD: ${IG_LOGIN_PASSWORD}
       BOOKING_API_BASE_URL: http://booking-api:8000
-      N8N_PROCESS_WEBHOOK_URL:
-      REQUEST_TIMEOUT_SECONDS: 20
+      N8N_PROCESS_WEBHOOK_URL: http://n8n:5678/webhook/instagram/ai-router
+      REQUEST_TIMEOUT_SECONDS: 90
       IG_POLL_INTERVAL_SECONDS: 1
       IG_THREAD_FETCH_LIMIT: ${IG_THREAD_FETCH_LIMIT}
       IG_MESSAGE_FETCH_LIMIT: ${IG_MESSAGE_FETCH_LIMIT}
@@ -177,7 +178,7 @@ services:
     depends_on:
       booking-api:
         condition: service_healthy
-    command: tunnel --no-autoupdate --url http://booking-api:800
+    command: tunnel --no-autoupdate --url http://booking-api:8000
 
 volumes:
   postgres_data:
