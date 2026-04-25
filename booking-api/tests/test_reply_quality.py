@@ -13,6 +13,12 @@ class ReplyQualityTests(unittest.TestCase):
             "Gelen mesajlarınıza otomatik cevap verir.",
         )
 
+    def test_normalize_strips_internal_safe_draft_prefix(self):
+        self.assertEqual(
+            main.normalize_llm_reply_text("Güvenli taslak cevap: Telefon numaranızı paylaşır mısınız?"),
+            "Telefon numaranızı paylaşır mısınız?",
+        )
+
     def test_guardrails_reject_truncated_price_reply(self):
         draft = "Web Tasarım - KOBİ Paketi 12.900 TL (tek seferlik). Projeniz kurumsal site mi, satış odaklı landing page mi?"
         candidate = "Web tasarim fiyati 12."
@@ -61,6 +67,76 @@ class ReplyQualityTests(unittest.TestCase):
 
         self.assertNotIn("Hangi gün", reply)
         self.assertIn("mesaj yoğunluğunuz", reply)
+
+    def test_consultation_acceptance_enters_booking_collection(self):
+        conversation = {
+            "service": "Otomasyon ve Yapay Zeka",
+            "state": "collect_service",
+            "booking_kind": None,
+            "memory_state": {},
+        }
+
+        self.assertTrue(main.explicitly_starts_consultation_collection("Tamam görüşelim"))
+        self.assertTrue(
+            main.should_enter_booking_collection(
+                "Tamam görüşelim",
+                {},
+                asks_availability=False,
+                detected_phone=None,
+                detected_date=None,
+                detected_time=None,
+                conversation=conversation,
+                history=[],
+            )
+        )
+        self.assertEqual(main.infer_booking_kind("Tamam görüşelim", {}, conversation, []), "preconsultation")
+
+    def test_advisory_question_with_randevu_word_does_not_enter_booking_collection(self):
+        message = "Instagram DM otomasyonu istiyorum. Günde yaklaşık 80 DM geliyor, randevu ve takip kaçırıyoruz. Hangisi mantıklı?"
+        conversation = {
+            "service": None,
+            "state": "collect_service",
+            "booking_kind": None,
+            "memory_state": {},
+        }
+
+        self.assertTrue(main.is_service_advice_request(message, {}))
+        self.assertFalse(main.message_shows_booking_intent(message, {}))
+        self.assertFalse(
+            main.should_enter_booking_collection(
+                message,
+                {},
+                asks_availability=False,
+                detected_phone=None,
+                detected_date=None,
+                detected_time=None,
+                conversation=conversation,
+                history=[],
+            )
+        )
+
+    def test_randevu_painpoint_does_not_count_as_booking_intent(self):
+        message = "Günde yaklaşık 80 DM geliyor, tekrar eden sorular ve randevu kaçıyor."
+        conversation = {
+            "service": "Otomasyon & Yapay Zeka Çözümleri",
+            "state": "collect_service",
+            "booking_kind": None,
+            "memory_state": {},
+        }
+
+        self.assertFalse(main.message_shows_booking_intent(message, {}))
+        self.assertFalse(
+            main.should_enter_booking_collection(
+                message,
+                {},
+                asks_availability=False,
+                detected_phone=None,
+                detected_date=None,
+                detected_time=None,
+                conversation=conversation,
+                history=[],
+            )
+        )
 
     def test_model_routing_uses_8b_for_simple_replies(self):
         profile = main.get_ai_compose_profile("info:greeting", {})

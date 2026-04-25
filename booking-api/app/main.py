@@ -2021,9 +2021,20 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
         direct_service_match = bool(picked_service or direct_matched_services)
         matched_services = match_service_candidates(message_text, conversation.get("service") or llm_service_hint)
         matched_service = matched_services[0] if matched_services else None
+        asks_availability = wants_availability_information(message_text, llm_data)
+        booking_transition_allowed = should_enter_booking_collection(
+            message_text,
+            llm_data,
+            asks_availability=asks_availability,
+            detected_phone=detected_phone,
+            detected_date=detected_date,
+            detected_time=detected_time,
+            conversation=conversation,
+            history=recent_history,
+        )
         info_result = maybe_build_information_reply(message_text, llm_data, matched_services, conversation, recent_history, direct_service_match=direct_service_match)
 
-        if info_result and not detected_date and not detected_time and not detected_phone and llm_data.get("intent") != "appointment":
+        if info_result and not booking_transition_allowed and not detected_date and not detected_time and not detected_phone and llm_data.get("intent") != "appointment":
             if info_result.get("clear_booking"):
                 clear_booking_assumption(conversation)
             set_service = sanitize_text(info_result.get("set_service") or "")
@@ -2083,17 +2094,6 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
             reply = build_next_step_reply(conn, conversation)
             return finalize_result(reply, message_type="clarify", decision_label="clarify_next_step")
 
-        asks_availability = wants_availability_information(message_text, llm_data)
-        booking_transition_allowed = should_enter_booking_collection(
-            message_text,
-            llm_data,
-            asks_availability=asks_availability,
-            detected_phone=detected_phone,
-            detected_date=detected_date,
-            detected_time=detected_time,
-            conversation=conversation,
-            history=recent_history,
-        )
         if not conversation.get("booking_kind") and conversation.get("service") and booking_transition_allowed:
             conversation["booking_kind"] = infer_booking_kind(message_text, llm_data, conversation, matched_services) or ("appointment" if asks_availability else "preconsultation")
         booking_label = get_booking_label(conversation)
@@ -4909,9 +4909,13 @@ def llm_booking_confidence(llm_data: dict[str, Any] | None = None) -> float:
 def message_shows_booking_intent(text: str, llm_data: dict[str, Any] | None = None) -> bool:
     lowered = sanitize_text(text).lower()
     llm_data = llm_data or {}
+    if (is_service_advice_request(text, llm_data) or is_comparison_request(text, None, llm_data)) and not explicitly_starts_consultation_collection(text):
+        return False
     non_booking_priority_answers = [
         "randevu tarafı", "randevu tarafi", "randevu takibi", "dm cevapları", "dm cevaplari",
         "crm takibi", "müşteri takibi", "musteri takibi", "teklif/fatura",
+        "randevu kaçıyor", "randevu kaciyor", "randevu kaçır", "randevu kacir",
+        "randevu ve takip", "randevu takip",
     ]
     if any(phrase in lowered for phrase in non_booking_priority_answers):
         return False
@@ -4993,6 +4997,8 @@ def infer_booking_kind(message_text: str, llm_data: dict[str, Any] | None = None
     if existing:
         return existing
     if accepts_pending_consultation_offer(message_text, conversation, None, llm_data):
+        return "preconsultation"
+    if explicitly_starts_consultation_collection(message_text):
         return "preconsultation"
     lowered = sanitize_text(message_text).lower()
     has_preconsultation_intent = any(keyword in lowered for keyword in PRECONSULTATION_INTENT_KEYWORDS)
@@ -6114,6 +6120,12 @@ def normalize_llm_reply_text(content: str | None) -> str | None:
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     lines = [line.strip() for line in text.split("\n")]
     cleaned = "\n".join(line for line in lines if line)
+    cleaned = re.sub(
+        r"^(?:güvenli\s+taslak\s+cevap|guvenli\s+taslak\s+cevap|taslak\s+cevap|cevap)\s*:\s*",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    ).strip()
     cleaned = restore_common_turkish_reply_words(cleaned)
     return cleaned[:2000] if cleaned else None
 
