@@ -289,5 +289,42 @@ class ReplyQualityTests(unittest.TestCase):
         self.assertEqual(calls, ["first-model", "second-model"])
 
 
+    def test_service_capacity_defaults_allow_two_preconsultations(self):
+        self.assertEqual(main.get_default_service_capacity("Ön Görüşme"), 2)
+        self.assertEqual(main.get_default_service_capacity("Otomasyon & Yapay Zeka Çözümleri"), 2)
+        self.assertEqual(main.get_default_service_capacity("Web Tasarım - KOBİ Paketi"), 1)
+
+    def test_capacity_rule_allows_until_service_limit(self):
+        self.assertTrue(main.is_slot_capacity_available_from_counts(1, 2))
+        self.assertFalse(main.is_slot_capacity_available_from_counts(2, 2))
+        self.assertFalse(main.is_slot_capacity_available_from_counts(3, 2))
+
+    def test_call_suggestion_scores_due_support_and_renewal(self):
+        today = main.date(2026, 5, 1)
+        customer = {
+            "id": 10,
+            "instagram_user_id": "lead-1",
+            "full_name": "Ayşe Demir",
+            "next_automation_at": "2026-05-01T09:00:00+03:00",
+            "subscription_renewal_date": "2026-05-01",
+            "no_show_count": 1,
+            "segment": "new_customer",
+        }
+        work_items = [
+            {"kind": "support", "status": "open", "due_at": "2026-05-01T10:00:00+03:00"},
+            {"kind": "refund", "status": "open", "due_at": "2026-05-02T10:00:00+03:00"},
+        ]
+        appointments = [
+            {"status": "preconsultation", "appointment_date": "2026-05-01", "appointment_time": "14:00"},
+        ]
+
+        suggestion = main.build_call_suggestion(customer, work_items, appointments, today)
+
+        self.assertGreaterEqual(suggestion["score"], 100)
+        self.assertIn("Açık destek talebi", suggestion["reasons"])
+        self.assertIn("Bugün abonelik yenileme", suggestion["reasons"])
+        self.assertIn("Bugün ön görüşme", suggestion["reasons"])
+
+
 if __name__ == "__main__":
     unittest.main()

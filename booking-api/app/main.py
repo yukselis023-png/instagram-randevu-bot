@@ -216,9 +216,16 @@ CREATE TABLE IF NOT EXISTS appointments (
     status TEXT NOT NULL DEFAULT 'confirmed',
     source TEXT NOT NULL DEFAULT 'instagram_dm',
     notes TEXT,
+    approval_status TEXT,
+    approval_reason TEXT,
+    rejection_reason TEXT,
+    cancellation_reason TEXT,
+    refund_status TEXT,
+    refund_amount NUMERIC(12,2),
+    refund_reason TEXT,
+    capacity_units INTEGER NOT NULL DEFAULT 1,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE (appointment_date, appointment_time)
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS message_logs (
@@ -259,6 +266,16 @@ CREATE TABLE IF NOT EXISTS customers (
     segment TEXT,
     notes TEXT,
     preferences JSONB NOT NULL DEFAULT '{}'::jsonb,
+    discount_code TEXT,
+    custom_offer TEXT,
+    subscription_renewal_date DATE,
+    consent_status TEXT,
+    consent_updated_at TIMESTAMPTZ,
+    voice_note_url TEXT,
+    customer_type TEXT,
+    approval_status TEXT,
+    approval_reason TEXT,
+    rejection_reason TEXT,
     last_visit_at TIMESTAMPTZ,
     last_service TEXT,
     total_visits INTEGER NOT NULL DEFAULT 0,
@@ -326,6 +343,33 @@ CREATE TABLE IF NOT EXISTS automation_events (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS service_capacity_rules (
+    id BIGSERIAL PRIMARY KEY,
+    service_slug TEXT NOT NULL UNIQUE,
+    service_name TEXT NOT NULL,
+    capacity INTEGER NOT NULL DEFAULT 1,
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CHECK (capacity >= 1 AND capacity <= 20)
+);
+
+CREATE TABLE IF NOT EXISTS customer_work_items (
+    id BIGSERIAL PRIMARY KEY,
+    customer_id BIGINT REFERENCES customers(id) ON DELETE CASCADE,
+    instagram_user_id TEXT,
+    kind TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'open',
+    reason TEXT,
+    note TEXT,
+    due_at TIMESTAMPTZ,
+    resolved_at TIMESTAMPTZ,
+    assigned_to TEXT,
+    payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS crm_campaigns (
     id BIGSERIAL PRIMARY KEY,
     title TEXT NOT NULL,
@@ -344,6 +388,9 @@ CREATE INDEX IF NOT EXISTS idx_customers_segment ON customers(segment);
 CREATE INDEX IF NOT EXISTS idx_customers_next_automation_at ON customers(next_automation_at);
 CREATE INDEX IF NOT EXISTS idx_customer_service_history_customer_id ON customer_service_history(customer_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_automation_events_status_scheduled_at ON automation_events(status, scheduled_at);
+CREATE INDEX IF NOT EXISTS idx_appointments_date_time_status ON appointments(appointment_date, appointment_time, status);
+CREATE INDEX IF NOT EXISTS idx_customer_work_items_status_due ON customer_work_items(status, due_at);
+CREATE INDEX IF NOT EXISTS idx_customer_work_items_customer_id ON customer_work_items(customer_id, created_at DESC);
 """
 
 NAME_PATTERNS = [
@@ -709,6 +756,16 @@ class CustomerCard(BaseModel):
     sector: str | None = None
     segment: str | None = None
     notes: str | None = None
+    discount_code: str | None = None
+    custom_offer: str | None = None
+    subscription_renewal_date: str | None = None
+    consent_status: str | None = None
+    consent_updated_at: str | None = None
+    voice_note_url: str | None = None
+    customer_type: str | None = None
+    approval_status: str | None = None
+    approval_reason: str | None = None
+    rejection_reason: str | None = None
     last_service: str | None = None
     total_visits: int = 0
     total_spend: float = 0
@@ -737,11 +794,59 @@ class CustomerTimelineResponse(BaseModel):
 class CustomerNoteUpdateRequest(BaseModel):
     notes: str | None = None
     preferences: dict[str, Any] | None = None
+    discount_code: str | None = None
+    custom_offer: str | None = None
+    subscription_renewal_date: str | None = None
+    consent_status: str | None = None
+    voice_note_url: str | None = None
+    customer_type: str | None = None
+    approval_status: str | None = None
+    approval_reason: str | None = None
+    rejection_reason: str | None = None
 
 
 class AttendanceUpdateRequest(BaseModel):
     attendance_status: str = Field(..., min_length=1)
     note: str | None = None
+
+
+class AppointmentUpdateRequest(BaseModel):
+    status: str | None = None
+    note: str | None = None
+    approval_status: str | None = None
+    approval_reason: str | None = None
+    rejection_reason: str | None = None
+    cancellation_reason: str | None = None
+    refund_status: str | None = None
+    refund_amount: float | None = None
+    refund_reason: str | None = None
+
+
+class ServiceCapacityUpdateRequest(BaseModel):
+    capacity: int = Field(..., ge=1, le=20)
+    service_name: str | None = None
+
+
+class CustomerWorkItemCreateRequest(BaseModel):
+    instagram_user_id: str | None = None
+    customer_id: int | None = None
+    kind: str = Field(..., min_length=1)
+    status: str | None = "open"
+    reason: str | None = None
+    note: str | None = None
+    due_at: str | None = None
+    assigned_to: str | None = None
+    payload: dict[str, Any] | None = None
+
+
+class CustomerWorkItemUpdateRequest(BaseModel):
+    status: str | None = None
+    reason: str | None = None
+    note: str | None = None
+    due_at: str | None = None
+    resolved_at: str | None = None
+    assigned_to: str | None = None
+    payload: dict[str, Any] | None = None
 
 
 class AutomationClaimItem(BaseModel):
@@ -1013,21 +1118,58 @@ def record_voice_fallback(payload: VoiceFallbackEvent, background_tasks: Backgro
 
 
 @app.get("/api/appointments")
-def list_appointments(limit: int = 50) -> dict[str, Any]:
+def list_appointments(
+    limit: int = 50,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    status: str | None = None,
+    kind: str | None = None,
+) -> dict[str, Any]:
+    conditions = ["TRUE"]
+    params: list[Any] = []
+    if date_from:
+        conditions.append("appointment_date >= %s::date")
+        params.append(date_from)
+    else:
+        conditions.append("appointment_date >= CURRENT_DATE")
+    if date_to:
+        conditions.append("appointment_date <= %s::date")
+        params.append(date_to)
+    if status:
+        conditions.append("status = %s")
+        params.append(sanitize_text(status).lower())
+    if kind == "preconsultation":
+        conditions.append("status = 'preconsultation'")
+    elif kind == "appointment":
+        conditions.append("status <> 'preconsultation'")
+    where_sql = " AND ".join(conditions)
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """
-                SELECT id, instagram_user_id, full_name, phone, service, appointment_date, appointment_time, status, created_at
+                f"""
+                SELECT id, instagram_user_id, instagram_username, full_name, phone, service,
+                       appointment_date, appointment_time, status, source, notes,
+                       attendance_status, attendance_marked_at, approval_status, approval_reason,
+                       rejection_reason, cancellation_reason, refund_status, refund_amount,
+                       refund_reason, capacity_units, created_at, updated_at
                 FROM appointments
-                WHERE appointment_date >= CURRENT_DATE
+                WHERE {where_sql}
                 ORDER BY appointment_date ASC, appointment_time ASC
                 LIMIT %s
                 """,
-                (limit,),
+                (*params, max(1, min(limit, 300))),
             )
             rows = cur.fetchall()
     return {"appointments": [serialize_row(row) for row in rows]}
+
+
+@app.get("/api/appointments/calendar")
+def get_appointment_calendar(date: str) -> dict[str, Any]:
+    normalized_date = normalize_date_string(date)
+    if not normalized_date:
+        raise HTTPException(status_code=400, detail="Invalid date")
+    with get_conn() as conn:
+        return build_calendar_slots(conn, normalized_date)
 
 
 @app.get("/api/conversations")
@@ -1067,6 +1209,8 @@ def list_customers(
     )
     query = f"""
         SELECT c.id, c.instagram_user_id, c.instagram_username, c.full_name, c.phone, c.sector, c.segment, c.notes,
+               c.discount_code, c.custom_offer, c.subscription_renewal_date, c.consent_status, c.consent_updated_at,
+               c.voice_note_url, c.customer_type, c.approval_status, c.approval_reason, c.rejection_reason,
                c.last_service, c.total_visits, c.total_spend, c.no_show_count, c.last_contact_at, c.last_visit_at,
                c.next_automation_at, c.next_automation_type
         FROM customers c
@@ -1098,6 +1242,8 @@ def list_customer_operations(list_slug: str, limit: int = 50) -> CustomerListRes
                 cur.execute(
                     """
                     SELECT id, instagram_user_id, instagram_username, full_name, phone, sector, segment, notes,
+                           discount_code, custom_offer, subscription_renewal_date, consent_status, consent_updated_at,
+                           voice_note_url, customer_type, approval_status, approval_reason, rejection_reason,
                            last_service, total_visits, total_spend, no_show_count, last_contact_at, last_visit_at,
                            next_automation_at, next_automation_type
                     FROM customers
@@ -1215,6 +1361,7 @@ def get_customer_timeline(instagram_user_id: str, limit: int = 100) -> CustomerT
 
 @app.patch("/api/customers/{instagram_user_id}")
 def update_customer_notes(instagram_user_id: str, payload: CustomerNoteUpdateRequest) -> dict[str, Any]:
+    preferences_json = json.dumps(payload.preferences) if payload.preferences is not None else None
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -1222,14 +1369,34 @@ def update_customer_notes(instagram_user_id: str, payload: CustomerNoteUpdateReq
                 UPDATE customers
                 SET notes = COALESCE(%s, notes),
                     preferences = CASE WHEN %s::jsonb IS NULL THEN preferences ELSE preferences || %s::jsonb END,
+                    discount_code = COALESCE(%s, discount_code),
+                    custom_offer = COALESCE(%s, custom_offer),
+                    subscription_renewal_date = COALESCE(%s::date, subscription_renewal_date),
+                    consent_status = COALESCE(%s, consent_status),
+                    consent_updated_at = CASE WHEN %s IS NULL THEN consent_updated_at ELSE NOW() END,
+                    voice_note_url = COALESCE(%s, voice_note_url),
+                    customer_type = COALESCE(%s, customer_type),
+                    approval_status = COALESCE(%s, approval_status),
+                    approval_reason = COALESCE(%s, approval_reason),
+                    rejection_reason = COALESCE(%s, rejection_reason),
                     updated_at = NOW()
                 WHERE instagram_user_id = %s
                 RETURNING *
                 """,
                 (
                     sanitize_text(payload.notes or "") or None,
-                    json.dumps(payload.preferences) if payload.preferences is not None else None,
-                    json.dumps(payload.preferences) if payload.preferences is not None else None,
+                    preferences_json,
+                    preferences_json,
+                    sanitize_text(payload.discount_code or "") or None,
+                    sanitize_text(payload.custom_offer or "") or None,
+                    normalize_date_string(payload.subscription_renewal_date),
+                    sanitize_text(payload.consent_status or "") or None,
+                    sanitize_text(payload.consent_status or "") or None,
+                    sanitize_text(payload.voice_note_url or "") or None,
+                    sanitize_text(payload.customer_type or "") or None,
+                    sanitize_text(payload.approval_status or "") or None,
+                    sanitize_text(payload.approval_reason or "") or None,
+                    sanitize_text(payload.rejection_reason or "") or None,
                     instagram_user_id,
                 ),
             )
@@ -1292,6 +1459,251 @@ def mark_appointment_attendance(appointment_id: int, payload: AttendanceUpdateRe
         if customer_row and status_value == "no_show":
             schedule_customer_automation_events(conn, int(customer_row["id"]), serialize_row(customer_row).get("sector"), no_show=True)
     return {"appointment": serialize_row(appointment), "customer": serialize_row(customer_row) if customer_row else None}
+
+
+@app.patch("/api/appointments/{appointment_id}")
+def update_appointment(appointment_id: int, payload: AppointmentUpdateRequest) -> dict[str, Any]:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            note_value = sanitize_text(payload.note or "") or None
+            appended_note = f"\n{note_value}" if note_value else ""
+            cur.execute(
+                """
+                UPDATE appointments
+                SET status = COALESCE(%s, status),
+                    notes = COALESCE(notes, '') || %s,
+                    approval_status = COALESCE(%s, approval_status),
+                    approval_reason = COALESCE(%s, approval_reason),
+                    rejection_reason = COALESCE(%s, rejection_reason),
+                    cancellation_reason = COALESCE(%s, cancellation_reason),
+                    refund_status = COALESCE(%s, refund_status),
+                    refund_amount = COALESCE(%s::numeric, refund_amount),
+                    refund_reason = COALESCE(%s, refund_reason),
+                    updated_at = NOW()
+                WHERE id = %s
+                RETURNING *
+                """,
+                (
+                    sanitize_text(payload.status or "").lower() or None,
+                    appended_note,
+                    sanitize_text(payload.approval_status or "") or None,
+                    sanitize_text(payload.approval_reason or "") or None,
+                    sanitize_text(payload.rejection_reason or "") or None,
+                    sanitize_text(payload.cancellation_reason or "") or None,
+                    sanitize_text(payload.refund_status or "") or None,
+                    payload.refund_amount,
+                    sanitize_text(payload.refund_reason or "") or None,
+                    appointment_id,
+                ),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Appointment not found")
+        conn.commit()
+    return {"appointment": serialize_row(row)}
+
+
+@app.get("/api/service-capacity")
+def list_service_capacity() -> dict[str, Any]:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT service_slug, service_name, capacity, active, updated_at
+                FROM service_capacity_rules
+                ORDER BY service_name ASC
+                """
+            )
+            rows = cur.fetchall()
+    rules = [serialize_row(row) for row in rows]
+    return {"rules": rules, "service_capacity": rules}
+
+
+@app.patch("/api/service-capacity/{service_slug}")
+def update_service_capacity(service_slug: str, payload: ServiceCapacityUpdateRequest) -> dict[str, Any]:
+    cleaned_slug = sanitize_service_slug(service_slug)
+    service_name = sanitize_text(payload.service_name or service_slug) or cleaned_slug
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO service_capacity_rules (service_slug, service_name, capacity, active)
+                VALUES (%s, %s, %s, true)
+                ON CONFLICT (service_slug) DO UPDATE SET
+                    service_name = EXCLUDED.service_name,
+                    capacity = EXCLUDED.capacity,
+                    active = true,
+                    updated_at = NOW()
+                RETURNING *
+                """,
+                (cleaned_slug, service_name, int(payload.capacity)),
+            )
+            row = cur.fetchone()
+        conn.commit()
+    serialized = serialize_row(row)
+    return {"rule": serialized, "service_capacity": serialized}
+
+
+@app.get("/api/customer-work-items")
+def list_customer_work_items(
+    status: str | None = None,
+    kind: str | None = None,
+    due: str | None = None,
+    limit: int = 100,
+) -> dict[str, Any]:
+    conditions = ["TRUE"]
+    params: list[Any] = []
+    if status:
+        conditions.append("w.status = %s")
+        params.append(sanitize_text(status).lower())
+    if kind:
+        conditions.append("w.kind = %s")
+        params.append(sanitize_text(kind).lower())
+    if due == "today":
+        conditions.append("w.due_at::date = CURRENT_DATE")
+    where_sql = " AND ".join(conditions)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT w.*, c.full_name, c.phone, c.segment, c.subscription_renewal_date
+                FROM customer_work_items w
+                LEFT JOIN customers c ON c.id = w.customer_id
+                WHERE {where_sql}
+                ORDER BY w.due_at ASC NULLS LAST, w.created_at DESC
+                LIMIT %s
+                """,
+                (*params, max(1, min(limit, 300))),
+            )
+            rows = cur.fetchall()
+    items = [serialize_row(row) for row in rows]
+    return {"items": items, "work_items": items}
+
+
+@app.post("/api/customer-work-items")
+def create_customer_work_item(payload: CustomerWorkItemCreateRequest) -> dict[str, Any]:
+    kind = sanitize_text(payload.kind).lower()
+    status_value = sanitize_text(payload.status or "open").lower() or "open"
+    payload_json = json.dumps(payload.payload or {})
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            customer_id = payload.customer_id
+            instagram_user_id = sanitize_text(payload.instagram_user_id or "") or None
+            if not customer_id and instagram_user_id:
+                cur.execute("SELECT id FROM customers WHERE instagram_user_id = %s", (instagram_user_id,))
+                customer = cur.fetchone()
+                customer_id = int(customer["id"]) if customer else None
+            cur.execute(
+                """
+                INSERT INTO customer_work_items (
+                    customer_id, instagram_user_id, kind, status, reason, note,
+                    due_at, assigned_to, payload
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s::timestamptz, %s, %s::jsonb)
+                RETURNING *
+                """,
+                (
+                    customer_id,
+                    instagram_user_id,
+                    kind,
+                    status_value,
+                    sanitize_text(payload.reason or "") or None,
+                    sanitize_text(payload.note or "") or None,
+                    payload.due_at,
+                    sanitize_text(payload.assigned_to or "") or None,
+                    payload_json,
+                ),
+            )
+            row = cur.fetchone()
+        conn.commit()
+    serialized = serialize_row(row)
+    return {"item": serialized, "work_item": serialized}
+
+
+@app.patch("/api/customer-work-items/{item_id}")
+def update_customer_work_item(item_id: int, payload: CustomerWorkItemUpdateRequest) -> dict[str, Any]:
+    payload_json = json.dumps(payload.payload) if payload.payload is not None else None
+    resolved_at = payload.resolved_at
+    status_value = sanitize_text(payload.status or "") or None
+    if status_value and status_value.lower() in {"done", "resolved", "closed"} and not resolved_at:
+        resolved_at = datetime.now(TZ).isoformat()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE customer_work_items
+                SET status = COALESCE(%s, status),
+                    reason = COALESCE(%s, reason),
+                    note = COALESCE(%s, note),
+                    due_at = COALESCE(%s::timestamptz, due_at),
+                    resolved_at = COALESCE(%s::timestamptz, resolved_at),
+                    assigned_to = COALESCE(%s, assigned_to),
+                    payload = CASE WHEN %s::jsonb IS NULL THEN payload ELSE payload || %s::jsonb END,
+                    updated_at = NOW()
+                WHERE id = %s
+                RETURNING *
+                """,
+                (
+                    status_value.lower() if status_value else None,
+                    sanitize_text(payload.reason or "") or None,
+                    sanitize_text(payload.note or "") or None,
+                    payload.due_at,
+                    resolved_at,
+                    sanitize_text(payload.assigned_to or "") or None,
+                    payload_json,
+                    payload_json,
+                    item_id,
+                ),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Work item not found")
+        conn.commit()
+    serialized = serialize_row(row)
+    return {"item": serialized, "work_item": serialized}
+
+
+@app.get("/api/call-suggestions")
+def get_call_suggestions(date: str | None = None, limit: int = 20) -> dict[str, Any]:
+    target_date = parse_date_like(date) or datetime.now(TZ).date()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM customers ORDER BY updated_at DESC LIMIT 300")
+            customers = [serialize_row(row) for row in cur.fetchall()]
+            cur.execute(
+                """
+                SELECT *
+                FROM customer_work_items
+                WHERE status NOT IN ('done', 'resolved', 'closed', 'cancelled', 'canceled')
+                """
+            )
+            work_items = [serialize_row(row) for row in cur.fetchall()]
+            cur.execute(
+                """
+                SELECT id, instagram_user_id, full_name, phone, service, appointment_date, appointment_time, status
+                FROM appointments
+                WHERE appointment_date BETWEEN %s::date AND %s::date
+                """,
+                (target_date.isoformat(), target_date.isoformat()),
+            )
+            appointments = [serialize_row(row) for row in cur.fetchall()]
+
+    items_by_customer: dict[Any, list[dict[str, Any]]] = {}
+    appts_by_customer: dict[str, list[dict[str, Any]]] = {}
+    for item in work_items:
+        key = item.get("customer_id") or item.get("instagram_user_id")
+        items_by_customer.setdefault(key, []).append(item)
+    for appointment in appointments:
+        appts_by_customer.setdefault(str(appointment.get("instagram_user_id") or ""), []).append(appointment)
+
+    suggestions = []
+    for customer in customers:
+        customer_items = items_by_customer.get(customer.get("id"), []) + items_by_customer.get(customer.get("instagram_user_id"), [])
+        customer_appointments = appts_by_customer.get(str(customer.get("instagram_user_id") or ""), [])
+        suggestion = build_call_suggestion(customer, customer_items, customer_appointments, target_date)
+        if suggestion["score"] > 0:
+            suggestions.append(suggestion)
+    suggestions.sort(key=lambda item: (-int(item["score"]), str(item.get("full_name") or "")))
+    return {"date": target_date.isoformat(), "suggestions": suggestions[: max(1, min(limit, 100))]}
 
 
 @app.get("/api/crm/templates")
@@ -2113,12 +2525,12 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
         if not conversation.get("service") and get_booking_kind(conversation) != "preconsultation":
             conversation["state"] = "collect_service"
             if conversation.get("requested_date") and asks_availability:
-                open_slots = get_available_slots_for_date(conn, conversation["requested_date"])
+                open_slots = get_available_slots_for_date(conn, conversation["requested_date"], conversation.get("service"))
                 if open_slots:
                     reply = build_availability_reply(conversation["requested_date"], open_slots, ask_service=True)
                     final_decision = "collect_service_with_availability"
                 else:
-                    next_days = find_next_available_days(conn, conversation["requested_date"])
+                    next_days = find_next_available_days(conn, conversation["requested_date"], service_name=conversation.get("service"))
                     reply = build_no_availability_reply(conversation["requested_date"], next_days, ask_service=True)
                     final_decision = "collect_service_no_availability"
             elif is_simple_greeting(message_text):
@@ -2171,7 +2583,7 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
                 final_decision = "collect_period"
             elif not conversation.get("requested_time"):
                 conversation["state"] = "collect_time"
-                open_slots = get_available_slots_for_date(conn, conversation["requested_date"])
+                open_slots = get_available_slots_for_date(conn, conversation["requested_date"], conversation.get("service"))
                 filtered_slots = filter_slots_by_period(open_slots, conversation.get("preferred_period"))
                 if filtered_slots:
                     reply = build_availability_reply(conversation["requested_date"], filtered_slots, period=conversation.get("preferred_period"))
@@ -2180,7 +2592,7 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
                     reply = f"{format_human_date(conversation['requested_date'])} için {get_period_label(conversation.get('preferred_period'))} tarafında boşluk görünmüyor. İsterseniz diğer zaman dilimine de bakabilirim."
                     final_decision = "collect_time_period_full"
                 else:
-                    next_days = find_next_available_days(conn, conversation["requested_date"])
+                    next_days = find_next_available_days(conn, conversation["requested_date"], service_name=conversation.get("service"))
                     reply = build_no_availability_reply(conversation["requested_date"], next_days)
                     final_decision = "collect_time_no_availability"
             else:
@@ -2191,9 +2603,9 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
                     reply = validation_error
                     final_decision = "invalid_slot"
                 else:
-                    existing = find_existing_appointment(conn, conversation["requested_date"], conversation["requested_time"])
+                    existing = find_existing_appointment(conn, conversation["requested_date"], conversation["requested_time"], conversation.get("service"))
                     if existing:
-                        suggestions = suggest_alternatives(conn, conversation["requested_date"], conversation["requested_time"])
+                        suggestions = suggest_alternatives(conn, conversation["requested_date"], conversation["requested_time"], conversation.get("service"))
                         suggestion_text = ", ".join(suggestions) if suggestions else "aynı gün içinde başka bir uygun saat"
                         conversation["requested_time"] = None
                         conversation["state"] = "collect_time"
@@ -2260,7 +2672,7 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
                             elif exc.status_code == 409 and isinstance(exc.detail, dict) and exc.detail.get("type") == "slot_conflict":
                                 conversation["requested_time"] = None
                                 conversation["state"] = "collect_time"
-                                alternatives = suggest_alternatives(conn, conversation["requested_date"], conversation.get("requested_time"))
+                                alternatives = suggest_alternatives(conn, conversation["requested_date"], conversation.get("requested_time"), conversation.get("service"))
                                 if alternatives:
                                     alt_text = ", ".join(alternatives)
                                     reply = f"Seçtiğiniz saat tam o sırada dolmuş. Uygun alternatifler: {alt_text}. Hangisi size uyar?"
@@ -2373,6 +2785,31 @@ def seed_default_automation_rules(conn: psycopg.Connection) -> None:
             )
 
 
+def seed_default_service_capacity_rules(conn: psycopg.Connection) -> None:
+    defaults = [
+        ("on-gorusme", LIVE_CRM_PRECONSULTATION_SERVICE, 2),
+        ("otomasyon-ai", "Otomasyon & Yapay Zeka Çözümleri", 2),
+    ]
+    for service in DOEL_SERVICE_CATALOG:
+        defaults.append((str(service.get("slug") or ""), str(service.get("display") or ""), get_default_service_capacity(str(service.get("display") or ""))))
+    with conn.cursor() as cur:
+        for slug, service_name, capacity in defaults:
+            cleaned_slug = sanitize_service_slug(slug or service_name)
+            cleaned_name = sanitize_text(service_name) or cleaned_slug
+            cur.execute(
+                """
+                INSERT INTO service_capacity_rules (service_slug, service_name, capacity, active)
+                VALUES (%s, %s, %s, true)
+                ON CONFLICT (service_slug) DO UPDATE SET
+                    service_name = EXCLUDED.service_name,
+                    capacity = GREATEST(service_capacity_rules.capacity, EXCLUDED.capacity),
+                    active = true,
+                    updated_at = NOW()
+                """,
+                (cleaned_slug, cleaned_name, int(capacity)),
+            )
+
+
 def run_migrations() -> None:
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -2382,10 +2819,30 @@ def run_migrations() -> None:
             cur.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS memory_state JSONB NOT NULL DEFAULT '{}'::jsonb")
             cur.execute("ALTER TABLE appointments ADD COLUMN IF NOT EXISTS attendance_status TEXT NOT NULL DEFAULT 'scheduled'")
             cur.execute("ALTER TABLE appointments ADD COLUMN IF NOT EXISTS attendance_marked_at TIMESTAMPTZ")
+            cur.execute("ALTER TABLE appointments ADD COLUMN IF NOT EXISTS approval_status TEXT")
+            cur.execute("ALTER TABLE appointments ADD COLUMN IF NOT EXISTS approval_reason TEXT")
+            cur.execute("ALTER TABLE appointments ADD COLUMN IF NOT EXISTS rejection_reason TEXT")
+            cur.execute("ALTER TABLE appointments ADD COLUMN IF NOT EXISTS cancellation_reason TEXT")
+            cur.execute("ALTER TABLE appointments ADD COLUMN IF NOT EXISTS refund_status TEXT")
+            cur.execute("ALTER TABLE appointments ADD COLUMN IF NOT EXISTS refund_amount NUMERIC(12,2)")
+            cur.execute("ALTER TABLE appointments ADD COLUMN IF NOT EXISTS refund_reason TEXT")
+            cur.execute("ALTER TABLE appointments ADD COLUMN IF NOT EXISTS capacity_units INTEGER NOT NULL DEFAULT 1")
+            cur.execute("ALTER TABLE appointments DROP CONSTRAINT IF EXISTS appointments_appointment_date_appointment_time_key")
+            cur.execute("ALTER TABLE customers ADD COLUMN IF NOT EXISTS discount_code TEXT")
+            cur.execute("ALTER TABLE customers ADD COLUMN IF NOT EXISTS custom_offer TEXT")
+            cur.execute("ALTER TABLE customers ADD COLUMN IF NOT EXISTS subscription_renewal_date DATE")
+            cur.execute("ALTER TABLE customers ADD COLUMN IF NOT EXISTS consent_status TEXT")
+            cur.execute("ALTER TABLE customers ADD COLUMN IF NOT EXISTS consent_updated_at TIMESTAMPTZ")
+            cur.execute("ALTER TABLE customers ADD COLUMN IF NOT EXISTS voice_note_url TEXT")
+            cur.execute("ALTER TABLE customers ADD COLUMN IF NOT EXISTS customer_type TEXT")
+            cur.execute("ALTER TABLE customers ADD COLUMN IF NOT EXISTS approval_status TEXT")
+            cur.execute("ALTER TABLE customers ADD COLUMN IF NOT EXISTS approval_reason TEXT")
+            cur.execute("ALTER TABLE customers ADD COLUMN IF NOT EXISTS rejection_reason TEXT")
             cur.execute("ALTER TABLE automation_events ADD COLUMN IF NOT EXISTS claim_token TEXT")
             cur.execute("ALTER TABLE automation_events ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMPTZ")
         seed_default_crm_templates(conn)
         seed_default_automation_rules(conn)
+        seed_default_service_capacity_rules(conn)
         conn.commit()
 
 
@@ -2610,6 +3067,8 @@ def schedule_customer_automation_events(conn: psycopg.Connection, customer_id: i
                     (customer_id, anchor, allowed_triggers, sector, customer_id),
                 )
             else:
+                if not is_slot_capacity_available(conn, requested_date, requested_time, requested_service):
+                    raise HTTPException(status_code=409, detail={"type": "slot_conflict", "message": "Bu slot artik dolu."})
                 cur.execute(
                     """
                     INSERT INTO automation_events (customer_id, rule_id, template_slug, event_type, scheduled_at, payload)
@@ -2665,6 +3124,117 @@ def sanitize_text(value: str) -> str:
         "Ç": "C", "ç": "c",
     })
     return text.translate(replacements)
+
+
+def sanitize_service_slug(value: str | None) -> str:
+    cleaned = sanitize_text(value or "").lower()
+    if not cleaned:
+        return "general"
+    normalized = unicodedata.normalize("NFKD", cleaned).encode("ascii", "ignore").decode("ascii")
+    normalized = re.sub(r"[^a-z0-9]+", "-", normalized).strip("-")
+    return normalized or "general"
+
+
+def get_default_service_capacity(service_name: str | None) -> int:
+    slug = sanitize_service_slug(service_name)
+    if slug in {"on-gorusme", "preconsultation"}:
+        return 2
+    if "otomasyon" in slug or "yapay-zeka" in slug or slug == "otomasyon-ai":
+        return 2
+    return 1
+
+
+def is_slot_capacity_available_from_counts(current_count: int, capacity: int) -> bool:
+    return max(0, int(current_count or 0)) < max(1, int(capacity or 1))
+
+
+def parse_date_like(value: Any) -> date | None:
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value.astimezone(TZ).date() if value.tzinfo else value.date()
+    if isinstance(value, date):
+        return value
+    text = str(value)
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        return parsed.astimezone(TZ).date() if parsed.tzinfo else parsed.date()
+    except ValueError:
+        try:
+            return date.fromisoformat(text[:10])
+        except ValueError:
+            return None
+
+
+def work_item_is_open(item: dict[str, Any]) -> bool:
+    return sanitize_text(str(item.get("status") or "open")).lower() not in {"done", "resolved", "closed", "cancelled", "canceled"}
+
+
+def build_call_suggestion(
+    customer: dict[str, Any],
+    work_items: list[dict[str, Any]] | None,
+    appointments: list[dict[str, Any]] | None,
+    target_date: date,
+) -> dict[str, Any]:
+    score = 0
+    reasons: list[str] = []
+    instagram_user_id = customer.get("instagram_user_id")
+
+    if parse_date_like(customer.get("subscription_renewal_date")) == target_date:
+        score += 35
+        reasons.append("Bugün abonelik yenileme")
+    if parse_date_like(customer.get("next_automation_at")) == target_date:
+        score += 15
+        reasons.append("Bugün otomasyon takibi")
+    if int(customer.get("no_show_count") or 0) > 0:
+        score += 15
+        reasons.append("No-show geçmişi")
+    if sanitize_text(str(customer.get("segment") or "")).lower() in {"new_customer", "hot_lead", "lead"}:
+        score += 10
+        reasons.append("Sıcak lead")
+
+    for item in work_items or []:
+        if not work_item_is_open(item):
+            continue
+        kind = sanitize_text(str(item.get("kind") or "")).lower()
+        due_today = parse_date_like(item.get("due_at")) == target_date
+        if due_today and kind == "support":
+            score += 45
+            reasons.append("Açık destek talebi")
+        elif due_today and kind == "refund":
+            score += 40
+            reasons.append("Refund takibi")
+        elif due_today and kind in {"reminder", "followup"}:
+            score += 25
+            reasons.append("Sonraya hatırlatma")
+        elif due_today:
+            score += 20
+            reasons.append("Bugün aksiyon bekliyor")
+        elif kind == "refund":
+            score += 20
+            reasons.append("Açık refund takibi")
+
+    for appointment in appointments or []:
+        if parse_date_like(appointment.get("appointment_date") or appointment.get("date")) != target_date:
+            continue
+        status = sanitize_text(str(appointment.get("status") or "")).lower()
+        if status == "preconsultation":
+            score += 30
+            reasons.append("Bugün ön görüşme")
+        elif status in {"confirmed", "scheduled"}:
+            score += 25
+            reasons.append("Bugün randevu")
+
+    deduped_reasons = list(dict.fromkeys(reasons))
+    return {
+        "customer_id": customer.get("id"),
+        "instagram_user_id": instagram_user_id,
+        "full_name": customer.get("full_name") or instagram_user_id or "Müşteri",
+        "phone": customer.get("phone"),
+        "score": score,
+        "reasons": deduped_reasons,
+        "next_action": deduped_reasons[0] if deduped_reasons else "Genel kontrol",
+    }
 
 
 def is_simple_greeting(text: str) -> bool:
@@ -3836,17 +4406,17 @@ def try_reschedule_confirmed_appointment(conn: psycopg.Connection, conversation:
         booking_label = get_booking_label(conversation)
         return True, f"{booking_label.capitalize()} kaydiniz zaten {format_human_date(detected_date)} saat {detected_time} icin onayli gorunuyor.", "confirmed_followup"
 
-    slot_conflict = find_existing_appointment(conn, detected_date, detected_time)
+    slot_conflict = find_existing_appointment(conn, detected_date, detected_time, conversation.get("service"))
     if slot_conflict:
         memory["reschedule_requested_date"] = detected_date
         memory["reschedule_requested_time"] = detected_time
         memory["open_loop"] = "reschedule_date_or_time_followup"
         memory["last_bot_question_type"] = "date"
-        alternatives = suggest_alternatives(conn, detected_date, detected_time)
+        alternatives = suggest_alternatives(conn, detected_date, detected_time, conversation.get("service"))
         if alternatives:
             alt_text = ", ".join(alternatives)
             return False, f"{format_human_date(detected_date)} icin {detected_time} dolu gorunuyor. Uygun saatler: {alt_text}. Isterseniz bunlardan birini ya da baska bir gunu yazabilirsiniz.", None
-        next_days = find_next_available_days(conn, detected_date)
+        next_days = find_next_available_days(conn, detected_date, service_name=conversation.get("service"))
         return False, build_no_availability_reply(detected_date, next_days), None
 
     with conn.cursor() as cur:
@@ -3985,13 +4555,13 @@ def build_next_step_reply(conn: psycopg.Connection, conversation: dict[str, Any]
 
     if not conversation.get("requested_time"):
         conversation["state"] = "collect_time"
-        open_slots = get_available_slots_for_date(conn, conversation["requested_date"])
+        open_slots = get_available_slots_for_date(conn, conversation["requested_date"], conversation.get("service"))
         filtered_slots = filter_slots_by_period(open_slots, conversation.get("preferred_period"))
         if filtered_slots:
             return build_availability_reply(conversation["requested_date"], filtered_slots, period=conversation.get("preferred_period"))
         if open_slots:
             return f"{format_human_date(conversation['requested_date'])} için {get_period_label(conversation.get('preferred_period'))} tarafında boşluk görünmüyor. İsterseniz diğer zaman dilimine de bakabilirim."
-        next_days = find_next_available_days(conn, conversation["requested_date"])
+        next_days = find_next_available_days(conn, conversation["requested_date"], service_name=conversation.get("service"))
         return build_no_availability_reply(conversation["requested_date"], next_days)
 
     return "Devam edebilmem için eksik kalan bilgiyi yazabilirsiniz."
@@ -6868,6 +7438,130 @@ def get_taken_slots_for_date(conn: psycopg.Connection, date_value: str) -> set[s
     return taken
 
 
+ACTIVE_SLOT_STATUSES = {"confirmed", "preconsultation", "scheduled"}
+INACTIVE_ATTENDANCE_STATUSES = {"completed", "no_show", "canceled", "cancelled"}
+
+
+def resolve_service_capacity_slug(service_name: str | None) -> str:
+    if not service_name:
+        return sanitize_service_slug(LIVE_CRM_PRECONSULTATION_SERVICE)
+    catalog_match = match_service_catalog(service_name, service_name)
+    if catalog_match and catalog_match.get("slug"):
+        return sanitize_service_slug(str(catalog_match["slug"]))
+    return sanitize_service_slug(service_name)
+
+
+def get_service_capacity(conn: psycopg.Connection, service_name: str | None) -> int:
+    slug = resolve_service_capacity_slug(service_name)
+    fallback = get_default_service_capacity(service_name)
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT capacity
+            FROM service_capacity_rules
+            WHERE service_slug = %s AND active = TRUE
+            LIMIT 1
+            """,
+            (slug,),
+        )
+        row = cur.fetchone()
+    if not row:
+        return fallback
+    return max(1, int(row.get("capacity") or fallback or 1))
+
+
+def get_slot_service_usage(conn: psycopg.Connection, date_value: str, time_value: str, service_name: str | None) -> int:
+    requested_slug = resolve_service_capacity_slug(service_name)
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT service, capacity_units
+            FROM appointments
+            WHERE appointment_date = %s::date
+              AND appointment_time = %s::time
+              AND status IN ('confirmed', 'preconsultation', 'scheduled')
+              AND COALESCE(attendance_status, 'scheduled') NOT IN ('completed', 'no_show', 'canceled', 'cancelled')
+            """,
+            (date_value, time_value),
+        )
+        rows = cur.fetchall()
+    total = 0
+    for row in rows:
+        if resolve_service_capacity_slug(row.get("service")) == requested_slug:
+            total += max(1, int(row.get("capacity_units") or 1))
+    return total
+
+
+def is_slot_capacity_available(conn: psycopg.Connection, date_value: str, time_value: str, service_name: str | None) -> bool:
+    capacity = get_service_capacity(conn, service_name)
+    current_count = get_slot_service_usage(conn, date_value, time_value, service_name)
+    return is_slot_capacity_available_from_counts(current_count, capacity)
+
+
+def lock_capacity_slot(cur: Any, date_value: str, time_value: str, service_name: str | None) -> None:
+    slug = resolve_service_capacity_slug(service_name)
+    cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (f"{date_value}|{time_value}|{slug}",))
+
+
+def build_calendar_slots(conn: psycopg.Connection, date_value: str) -> dict[str, Any]:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT id, instagram_user_id, instagram_username, full_name, phone, service,
+                   appointment_date, appointment_time, status, attendance_status,
+                   approval_status, notes, capacity_units
+            FROM appointments
+            WHERE appointment_date = %s::date
+              AND status IN ('confirmed', 'preconsultation', 'scheduled')
+              AND COALESCE(attendance_status, 'scheduled') NOT IN ('completed', 'no_show', 'canceled', 'cancelled')
+            ORDER BY appointment_time ASC, id ASC
+            """,
+            (date_value,),
+        )
+        appointments = [serialize_row(row) for row in cur.fetchall()]
+    by_time: dict[str, dict[str, list[dict[str, Any]]]] = {}
+    for appointment in appointments:
+        slot_time = str(appointment.get("appointment_time") or "")[:5]
+        service_name = appointment.get("service") or LIVE_CRM_PRECONSULTATION_SERVICE
+        slug = resolve_service_capacity_slug(service_name)
+        by_time.setdefault(slot_time, {}).setdefault(slug, []).append(appointment)
+
+    slot_step = SLOT_DURATION_MINUTES + SLOT_BUFFER_MINUTES
+    slots: list[dict[str, Any]] = []
+    current = datetime.combine(date.fromisoformat(date_value), WORK_START)
+    end = datetime.combine(date.fromisoformat(date_value), WORK_END)
+    default_service = LIVE_CRM_PRECONSULTATION_SERVICE
+    default_capacity = get_service_capacity(conn, default_service)
+    while current < end:
+        slot = current.time().strftime("%H:%M")
+        services: list[dict[str, Any]] = []
+        total_used = 0
+        total_capacity = default_capacity
+        for service_appointments in by_time.get(slot, {}).values():
+            service_name = service_appointments[0].get("service") or default_service
+            used = sum(max(1, int(item.get("capacity_units") or 1)) for item in service_appointments)
+            capacity = get_service_capacity(conn, service_name)
+            total_used += used
+            total_capacity = max(total_capacity, capacity)
+            services.append({
+                "service": service_name,
+                "used": used,
+                "capacity": capacity,
+                "status": "full" if used >= capacity else "available",
+                "appointments": service_appointments,
+            })
+        slots.append({
+            "time": slot,
+            "used": total_used,
+            "capacity": total_capacity,
+            "label": f"{total_used}/{total_capacity}",
+            "status": "full" if total_used >= total_capacity else "available",
+            "services": services,
+        })
+        current += timedelta(minutes=slot_step)
+    return {"date": date_value, "slots": slots}
+
+
 def _expand_taken_with_buffer(taken: set[str]) -> set[str]:
     """Expand taken slots to include buffer zones before and after each appointment."""
     if not taken or SLOT_BUFFER_MINUTES <= 0:
@@ -6888,17 +7582,14 @@ def _expand_taken_with_buffer(taken: set[str]) -> set[str]:
     return expanded
 
 
-def get_available_slots_for_date(conn: psycopg.Connection, date_value: str) -> list[str]:
-    taken = get_taken_slots_for_date(conn, date_value)
-    blocked = _expand_taken_with_buffer(taken)
-
+def get_available_slots_for_date(conn: psycopg.Connection, date_value: str, service_name: str | None = None) -> list[str]:
     slot_step = SLOT_DURATION_MINUTES + SLOT_BUFFER_MINUTES
     slots: list[str] = []
     current = datetime.combine(date.fromisoformat(date_value), WORK_START)
     end = datetime.combine(date.fromisoformat(date_value), WORK_END)
     while current < end:
         slot = current.time().strftime("%H:%M")
-        if slot not in blocked:
+        if is_slot_capacity_available(conn, date_value, slot, service_name or LIVE_CRM_PRECONSULTATION_SERVICE):
             slots.append(slot)
         current += timedelta(minutes=slot_step)
     return slots
@@ -6914,13 +7605,13 @@ def build_availability_reply(date_value: str, open_slots: list[str], ask_service
     return f"{human_date}{period_text} şu saatlerimiz uygun görünüyor: {slot_text}. Size uyan net saati yazarsanız devam edebilirim."
 
 
-def find_next_available_days(conn: psycopg.Connection, start_date_value: str, limit: int = 3) -> list[dict[str, Any]]:
+def find_next_available_days(conn: psycopg.Connection, start_date_value: str, limit: int = 3, service_name: str | None = None) -> list[dict[str, Any]]:
     start_date = date.fromisoformat(start_date_value)
     results: list[dict[str, Any]] = []
     max_days = min(APPOINTMENT_LOOKAHEAD_DAYS, 14)
     for offset in range(1, max_days + 1):
         current_date = (start_date + timedelta(days=offset)).isoformat()
-        slots = get_available_slots_for_date(conn, current_date)
+        slots = get_available_slots_for_date(conn, current_date, service_name)
         if slots:
             results.append({"date": current_date, "slots": slots[:3]})
         if len(results) >= limit:
@@ -6962,45 +7653,39 @@ def validate_slot(date_value: Any, time_value: Any) -> str | None:
     return None
 
 
-def find_existing_appointment(conn: psycopg.Connection, date_value: str, time_value: str) -> dict[str, Any] | None:
-    """Check if a slot is taken, including buffer zone overlap."""
+def find_existing_appointment(conn: psycopg.Connection, date_value: str, time_value: str, service_name: str | None = None) -> dict[str, Any] | None:
+    """Return a conflict only when the requested service capacity is full."""
+    service = service_name or LIVE_CRM_PRECONSULTATION_SERVICE
+    if is_slot_capacity_available(conn, date_value, time_value, service):
+        return None
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT id, full_name, appointment_date, appointment_time FROM appointments WHERE appointment_date = %s::date AND appointment_time = %s::time AND status IN ('confirmed', 'preconsultation')",
+            """
+            SELECT id, full_name, appointment_date, appointment_time, service
+            FROM appointments
+            WHERE appointment_date = %s::date
+              AND appointment_time = %s::time
+              AND status IN ('confirmed', 'preconsultation', 'scheduled')
+              AND COALESCE(attendance_status, 'scheduled') NOT IN ('completed', 'no_show', 'canceled', 'cancelled')
+            ORDER BY id ASC
+            LIMIT 1
+            """,
             (date_value, time_value),
         )
         row = cur.fetchone()
         if row:
             return serialize_row(row)
-    if is_live_crm_configured():
-        row = live_crm_find_slot_appointment(date_value, time_value)
-        if row:
-            return {
-                "id": row.get("id"),
-                "full_name": row.get("customer_name"),
-                "appointment_date": row.get("date"),
-                "appointment_time": row.get("time"),
-            }
-    if SLOT_BUFFER_MINUTES > 0:
-        taken = get_taken_slots_for_date(conn, date_value)
-        blocked = _expand_taken_with_buffer(taken)
-        normalized_time = str(time_value)[:5]
-        if normalized_time in blocked:
-            return {"id": None, "full_name": "buffer_conflict", "appointment_date": date_value, "appointment_time": time_value}
-    return None
+    return {"id": None, "full_name": "capacity_full", "appointment_date": date_value, "appointment_time": time_value, "service": service}
 
 
-def suggest_alternatives(conn: psycopg.Connection, date_value: str, requested_time_value: str) -> list[str]:
-    taken = get_taken_slots_for_date(conn, date_value)
-    blocked = _expand_taken_with_buffer(taken)
-
+def suggest_alternatives(conn: psycopg.Connection, date_value: str, requested_time_value: str, service_name: str | None = None) -> list[str]:
     slot_step = SLOT_DURATION_MINUTES + SLOT_BUFFER_MINUTES
     slots: list[str] = []
     current = datetime.combine(date.fromisoformat(date_value), WORK_START)
     end = datetime.combine(date.fromisoformat(date_value), WORK_END)
     while current < end:
         slot = current.time().strftime("%H:%M")
-        if slot not in blocked:
+        if is_slot_capacity_available(conn, date_value, slot, service_name or LIVE_CRM_PRECONSULTATION_SERVICE):
             slots.append(slot)
         current += timedelta(minutes=slot_step)
 
@@ -7029,19 +7714,26 @@ def create_appointment(conn: psycopg.Connection, conversation: dict[str, Any], u
 
     try:
         with conn.cursor() as cur:
+            requested_date = normalize_date_string(conversation.get("requested_date"))
+            requested_time = normalize_time_string(conversation.get("requested_time"))
+            requested_service = conversation.get("service")
+            lock_capacity_slot(cur, requested_date, requested_time, requested_service)
             cur.execute(
                 """
                 SELECT id, instagram_user_id, status
                 FROM appointments
-                WHERE appointment_date = %s::date AND appointment_time = %s::time
+                WHERE instagram_user_id = %s
+                  AND appointment_date = %s::date
+                  AND appointment_time = %s::time
+                  AND status IN ('confirmed', 'preconsultation', 'scheduled')
                 LIMIT 1
                 """,
-                (conversation.get("requested_date"), conversation.get("requested_time")),
+                (conversation.get("instagram_user_id"), requested_date, requested_time),
             )
             existing_slot = cur.fetchone()
 
             if existing_slot:
-                if str(existing_slot.get("instagram_user_id") or "") != str(conversation.get("instagram_user_id") or ""):
+                if False and str(existing_slot.get("instagram_user_id") or "") != str(conversation.get("instagram_user_id") or ""):
                     raise HTTPException(status_code=409, detail="Bu slot artık dolu.")
                 resolved_status = "confirmed" if existing_slot.get("status") == "confirmed" else local_status
                 cur.execute(
@@ -7092,8 +7784,8 @@ def create_appointment(conn: psycopg.Connection, conversation: dict[str, Any], u
                         conversation.get("full_name"),
                         conversation.get("phone"),
                         conversation.get("service"),
-                        conversation.get("requested_date"),
-                        conversation.get("requested_time"),
+                        requested_date,
+                        requested_time,
                         local_status,
                         conversation.get("llm_notes"),
                     ),
