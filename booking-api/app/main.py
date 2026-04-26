@@ -4611,8 +4611,14 @@ def _price_reply_suffix(service: dict[str, Any], conversation: dict[str, Any] | 
     return build_contextual_service_followup(service, conversation)
 
 
+def _price_question_suffix(conversation: dict[str, Any] | None = None) -> str:
+    if conversation and conversation.get("booking_kind"):
+        return "Detayları ön görüşmede netleştirebiliriz."
+    return "Kapsam ve hedefe göre netleşir. İsterseniz ihtiyacınıza uygun yapıyı kısa bir ön görüşmede netleştirebiliriz."
+
+
 def build_price_question_reply(service: dict[str, Any], conversation: dict[str, Any] | None = None) -> str:
-    suffix = _price_reply_suffix(service, conversation)
+    suffix = _price_question_suffix(conversation)
     if str(service.get("price") or "").lower().startswith("özel"):
         return f"{service['display']} için fiyat ihtiyaca göre değişiyor. {suffix}"
     if is_recurring_service(service):

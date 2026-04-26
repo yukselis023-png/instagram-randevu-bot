@@ -97,6 +97,9 @@ class ReplyQualityTests(unittest.TestCase):
 
         self.assertEqual(result["kind"], "price_question")
         self.assertIn("5.000", result["reply"])
+        self.assertNotIn("Hangi gün", result["reply"])
+        self.assertNotIn("hangi gün", result["reply"].lower())
+        self.assertNotIn("hangi saat", result["reply"].lower())
 
     def test_consultation_acceptance_enters_booking_collection(self):
         conversation = {
