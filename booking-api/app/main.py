@@ -173,10 +173,22 @@ MORNING_REMINDER_START = time.fromisoformat(MORNING_REMINDER_WINDOW_START)
 MORNING_REMINDER_END = time.fromisoformat(MORNING_REMINDER_WINDOW_END)
 
 app = FastAPI(title="Instagram Booking API", version="1.0.0")
-ALLOWED_ORIGINS = [origin.strip() for origin in os.getenv("CORS_ALLOW_ORIGINS", "http://127.0.0.1:4173,http://localhost:4173,https://doel-crm.vercel.app").split(",") if origin.strip()]
+ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv(
+        "CORS_ALLOW_ORIGINS",
+        "http://127.0.0.1:4173,http://localhost:4173,http://127.0.0.1:4299,http://localhost:4299,https://doel-crm.vercel.app",
+    ).split(",")
+    if origin.strip()
+]
+ALLOWED_ORIGIN_REGEX = os.getenv(
+    "CORS_ALLOW_ORIGIN_REGEX",
+    r"https://[a-z0-9-]+(?:-[a-z0-9-]+)*\.vercel\.app|http://127\.0\.0\.1:\d+|http://localhost:\d+",
+)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
+    allow_origin_regex=ALLOWED_ORIGIN_REGEX,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
