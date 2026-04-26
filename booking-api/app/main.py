@@ -2779,12 +2779,24 @@ def is_business_context_intro_message(text: str, history: list[dict[str, Any]] |
     if is_all_choice_message(text) or is_confirmation_acceptance_message(text) or is_offer_hesitation_message(text):
         return False
     sector_keywords = BEAUTY_BUSINESS_KEYWORDS + REAL_ESTATE_BUSINESS_KEYWORDS
-    has_sector_in_current_message = any(keyword in lowered for keyword in sector_keywords)
+    has_sector_in_current_message = contains_business_keyword(lowered, sector_keywords)
     if not has_sector_in_current_message:
         return False
     if any(keyword in lowered for keyword in BUSINESS_CONTEXT_INTRO_KEYWORDS):
         return True
     return len(lowered.split()) <= 4
+
+
+def contains_business_keyword(text: str, keywords: list[str]) -> bool:
+    lowered = sanitize_text(text).lower()
+    for keyword in keywords:
+        normalized_keyword = sanitize_text(keyword).lower().strip()
+        if not normalized_keyword:
+            continue
+        keyword_pattern = r"\s+".join(re.escape(part) for part in normalized_keyword.split())
+        if re.search(rf"(?<![0-9a-z_]){keyword_pattern}(?![0-9a-z_])", lowered):
+            return True
+    return False
 
 
 def detect_business_sector(text: str, history: list[dict[str, Any]] | None = None) -> str | None:
@@ -2793,9 +2805,9 @@ def detect_business_sector(text: str, history: list[dict[str, Any]] | None = Non
         if item.get("direction") == "in":
             combined = f"{combined} {sanitize_text(item.get('message_text') or '')}".strip()
     lowered = combined.lower()
-    if any(keyword in lowered for keyword in BEAUTY_BUSINESS_KEYWORDS):
+    if contains_business_keyword(lowered, BEAUTY_BUSINESS_KEYWORDS):
         return "beauty"
-    if any(keyword in lowered for keyword in REAL_ESTATE_BUSINESS_KEYWORDS):
+    if contains_business_keyword(lowered, REAL_ESTATE_BUSINESS_KEYWORDS):
         return "real_estate"
     return None
 

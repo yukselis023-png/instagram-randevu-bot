@@ -138,6 +138,19 @@ class ReplyQualityTests(unittest.TestCase):
             )
         )
 
+    def test_business_sector_detection_does_not_match_words_inside_unrelated_words(self):
+        history = [
+            {"direction": "in", "message_text": "Otomasyon ve yapay zeka hizmeti istiyorum"},
+            {"direction": "in", "message_text": "Tamam goruselim"},
+        ]
+
+        self.assertIsNone(main.detect_business_sector("Carsamba saat 12:00 uygun", history))
+        self.assertIsNone(main.detect_business_sector("Planlayalim", []))
+
+    def test_business_sector_detection_still_matches_explicit_real_estate_terms(self):
+        self.assertEqual(main.detect_business_sector("Emlak ofisim icin otomasyon istiyorum", []), "real_estate")
+        self.assertEqual(main.detect_business_sector("Arsa ilanlari icin takip lazim", []), "real_estate")
+
     def test_model_routing_uses_8b_for_simple_replies(self):
         profile = main.get_ai_compose_profile("info:greeting", {})
 
