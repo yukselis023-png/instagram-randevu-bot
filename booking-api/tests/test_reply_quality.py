@@ -148,6 +148,23 @@ class ReplyQualityTests(unittest.TestCase):
             )
         )
 
+    def test_advisory_question_with_volume_uses_volume_instead_of_reasking(self):
+        message = "Günde 80 DM geliyor, randevu ve müşteri takibi karışıyor. Hangisi mantıklı?"
+        conversation = {
+            "service": None,
+            "state": "collect_service",
+            "booking_kind": None,
+            "memory_state": {},
+        }
+        matched_services = main.match_service_candidates(message, None)
+
+        result = main.maybe_build_information_reply(message, {}, matched_services, conversation, [])
+
+        self.assertEqual(result["kind"], "message_volume")
+        self.assertIn("80", result["reply"])
+        self.assertNotIn("kaç", result["reply"].lower())
+        self.assertNotIn("kac", result["reply"].lower())
+
     def test_randevu_painpoint_does_not_count_as_booking_intent(self):
         message = "Günde yaklaşık 80 DM geliyor, tekrar eden sorular ve randevu kaçıyor."
         conversation = {

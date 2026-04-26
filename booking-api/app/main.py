@@ -5481,6 +5481,14 @@ def maybe_build_information_reply(message_text: str, llm_data: dict[str, Any], m
             "next_state": "collect_service",
             "set_service": conversation.get("service"),
         }
+    if (is_service_advice_request(message_text, llm_data) or is_comparison_request(message_text, matched_services, llm_data)) and is_message_volume_answer(message_text):
+        sector = detect_business_sector(message_text, history)
+        return {
+            "reply": build_message_volume_reply(message_text, conversation, history),
+            "kind": "message_volume",
+            "next_state": "collect_service",
+            "set_service": conversation.get("service") or ("Otomasyon & Yapay Zeka Çözümleri" if sector in {"beauty", "real_estate"} or matched_services else None),
+        }
     if is_service_advice_request(message_text, llm_data) or is_comparison_request(message_text, matched_services, llm_data):
         return build_service_advice_reply(message_text, matched_services, llm_data, conversation)
     if direct_service_match and matched_service and current_state == "collect_service" and not message_shows_booking_intent(message_text, llm_data) and not asks_detail and not is_price_question(message_text) and not is_price_followup_message(message_text, llm_data) and not is_price_negotiation_message(message_text, llm_data) and len(sanitize_text(message_text).split()) <= 3:
@@ -5638,7 +5646,7 @@ def should_ai_compose_reply(
         return False
 
     label = sanitize_text(decision_label or "").lower()
-    if label in {"info:overview", "info:price_question", "info:price_followup", "info:price_route"}:
+    if label in {"info:overview", "info:price_question", "info:price_followup", "info:price_route", "info:message_volume"}:
         return False
 
     _ = (message_type, handoff, appointment_created, conversation)
