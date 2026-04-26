@@ -5224,6 +5224,20 @@ def maybe_build_information_reply(message_text: str, llm_data: dict[str, Any], m
             "next_state": conversation.get("state", "new") if has_booking_context else "new",
             "set_service": conversation.get("service") if has_booking_context else None,
         }
+    if is_price_question(message_text):
+        if matched_service:
+            return {
+                "reply": build_price_question_reply(matched_service, conversation),
+                "kind": "price_question",
+                "next_state": "collect_service",
+                "set_service": matched_service["display"],
+            }
+        return {
+            "reply": "Net fiyat, secilecek hizmete gore degisiyor. Web tasarim, otomasyon & yapay zeka, performans pazarlama veya sosyal medya yonetiminden hangisiyle ilgilendiginizi yazarsaniz size dogru bilgiyi paylasayim.",
+            "kind": "price_route",
+            "next_state": "collect_service",
+            "set_service": None,
+        }
     if asks_detailed_service_overview:
         return {
             "reply": build_detailed_services_overview_reply(),
@@ -5618,7 +5632,7 @@ def should_ai_compose_reply(
         return False
 
     label = sanitize_text(decision_label or "").lower()
-    if label in {"info:overview"}:
+    if label in {"info:overview", "info:price_question", "info:price_followup", "info:price_route"}:
         return False
 
     _ = (message_type, handoff, appointment_created, conversation)
@@ -6214,8 +6228,8 @@ def reply_mentions_price(text: str) -> bool:
 def reply_requests_booking_details(text: str) -> bool:
     lowered = sanitize_text(text).lower()
     patterns = [
-        "ad soyad", "telefon numaran", "telefonunuzu", "uygun gün", "hangi gün", "hangi tarih",
-        "hangi saat", "size uygun gün", "randevu kaydı", "ön görüşme kaydı", "on gorusme kaydi",
+        "ad soyad", "telefon numaran", "telefonunuzu", "uygun gün", "uygun gun", "hangi gün", "hangi gun", "hangi g?n", "hangi tarih",
+        "hangi saat", "gün ve saat", "gun ve saat", "g?n ve saat", "size uygun gün", "size uygun gun", "randevu kaydı", "ön görüşme kaydı", "on gorusme kaydi",
         "telefon numarası", "telefon numarasi"
     ]
     return any(pattern in lowered for pattern in patterns)

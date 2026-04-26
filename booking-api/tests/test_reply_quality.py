@@ -61,12 +61,42 @@ class ReplyQualityTests(unittest.TestCase):
 
         self.assertEqual(result, draft)
 
+    def test_guardrails_reject_price_reply_that_jumps_to_calendar(self):
+        draft = "Otomasyon ve Yapay Zeka Cozumleri 5.000 TL'den basliyor (ilk 3 ay indirimli aylik hizmet bedeli). DM, randevu yoksa musteri takibi mi daha oncelikli?"
+        candidate = "Otomasyon ve Yapay Zeka hizmetimizin fiyati 5.000 TL/ay. Kisa bir gorusme yapabiliriz, hangi gun ve saat sizin icin uygundur?"
+        result = main.apply_reply_guardrails(
+            draft,
+            candidate,
+            "Fiyat nedir?",
+            {"service": "Otomasyon & Yapay Zeka Cozumleri", "state": "collect_service"},
+            "info:price_question",
+            [],
+        )
+
+        self.assertEqual(result, draft)
+
     def test_service_info_followup_does_not_jump_to_calendar(self):
         service = main.match_service_catalog("Instagram mesajlarına otomatik cevap veren sistem", None)
         reply = main.build_service_info_reply(service, {"state": "collect_service"})
 
         self.assertNotIn("Hangi gün", reply)
         self.assertIn("mesaj yoğunluğunuz", reply)
+
+    def test_price_question_after_automation_context_stays_price_reply(self):
+        service = main.match_service_catalog("Otomasyon ve yapay zeka hizmeti", None)
+        conversation = {"service": service["display"], "state": "collect_service", "memory_state": {}}
+        history = [
+            {
+                "direction": "out",
+                "message_text": "Tamam, otomasyon tarafinda ilerleyebiliriz. Once hangi sureci toparlamak istediginizi netlestirelim: DM, randevu yoksa musteri takibi mi?",
+            }
+        ]
+        matched_services = main.match_service_candidates("Fiyat nedir?", conversation["service"])
+
+        result = main.maybe_build_information_reply("Fiyat nedir?", {}, matched_services, conversation, history)
+
+        self.assertEqual(result["kind"], "price_question")
+        self.assertIn("5.000", result["reply"])
 
     def test_consultation_acceptance_enters_booking_collection(self):
         conversation = {
@@ -162,6 +192,15 @@ class ReplyQualityTests(unittest.TestCase):
         self.assertEqual(
             profile["models"],
             ["meta-llama/llama-4-scout-17b-16e-instruct", "llama-3.1-8b-instant"],
+        )
+
+    def test_price_replies_skip_llm_polish_for_deterministic_numbers(self):
+        self.assertFalse(
+            main.should_ai_compose_reply(
+                "info",
+                "info:price_question",
+                conversation={"service": "Otomasyon & Yapay Zeka Cozumleri"},
+            )
         )
 
     def test_model_routing_uses_70b_then_scout_then_8b_for_quality_replies(self):
