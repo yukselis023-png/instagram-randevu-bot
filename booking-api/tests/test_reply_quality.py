@@ -299,6 +299,32 @@ class ReplyQualityTests(unittest.TestCase):
         self.assertFalse(main.is_slot_capacity_available_from_counts(2, 2))
         self.assertFalse(main.is_slot_capacity_available_from_counts(3, 2))
 
+    def test_business_record_filter_removes_codex_test_records(self):
+        records = [
+            {"instagram_user_id": "codex-prod-booking-123", "full_name": "Codex Final Test"},
+            {"instagram_username": "real_customer", "full_name": "Ayse Demir"},
+            {"instagram_user_id": "perfect-booking-20260426", "full_name": "Probe User"},
+        ]
+
+        filtered = main.filter_business_records(records)
+
+        self.assertEqual(filtered, [{"instagram_username": "real_customer", "full_name": "Ayse Demir"}])
+        self.assertTrue(main.is_test_record({"instagram_username": "codex_prod_probe"}))
+        self.assertFalse(main.is_test_record({"instagram_username": "doeldigital", "full_name": "Gercek Musteri"}))
+
+    def test_customer_voice_note_validation_accepts_short_audio_data_url(self):
+        note = "data:audio/webm;base64," + ("A" * 128)
+
+        self.assertEqual(main.validate_voice_note_url(note), note)
+
+    def test_customer_voice_note_validation_rejects_oversized_audio_data_url(self):
+        note = "data:audio/webm;base64," + ("A" * (main.MAX_VOICE_NOTE_URL_LENGTH + 1))
+
+        with self.assertRaises(main.HTTPException) as raised:
+            main.validate_voice_note_url(note)
+
+        self.assertEqual(raised.exception.status_code, 400)
+
     def test_call_suggestion_scores_due_support_and_renewal(self):
         today = main.date(2026, 5, 1)
         customer = {

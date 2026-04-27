@@ -78,6 +78,7 @@ CRM_WORKSPACE_ID = os.getenv("CRM_WORKSPACE_ID", "").strip()
 CRM_SYNC_SOURCE = os.getenv("CRM_SYNC_SOURCE", "instagram_dm").strip() or "instagram_dm"
 CRM_SYNC_TIMEOUT_SECONDS = int(os.getenv("CRM_SYNC_TIMEOUT_SECONDS", "10"))
 CRM_SYNC_EVENT_LIMIT = int(os.getenv("CRM_SYNC_EVENT_LIMIT", "50"))
+MAX_VOICE_NOTE_URL_LENGTH = int(os.getenv("MAX_VOICE_NOTE_URL_LENGTH", "1200000"))
 LIVE_CRM_ENABLED = os.getenv("LIVE_CRM_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
 LIVE_CRM_SUPABASE_URL = os.getenv("LIVE_CRM_SUPABASE_URL", "").rstrip("/")
 LIVE_CRM_SUPABASE_ANON_KEY = os.getenv("LIVE_CRM_SUPABASE_ANON_KEY", "")
@@ -1172,7 +1173,7 @@ def list_appointments(
                 (*params, max(1, min(limit, 300))),
             )
             rows = cur.fetchall()
-    return {"appointments": [serialize_row(row) for row in rows]}
+    return {"appointments": filter_business_records([serialize_row(row) for row in rows])}
 
 
 @app.get("/api/appointments/calendar")
@@ -1233,7 +1234,7 @@ def list_customers(
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(query, (*params, max(1, min(limit, 200))))
-            rows = [CustomerCard(**serialize_row(row)) for row in cur.fetchall()]
+            rows = [CustomerCard(**row) for row in filter_business_records([serialize_row(row) for row in cur.fetchall()])]
     return CustomerListResponse(customers=rows)
 
 
@@ -1265,7 +1266,7 @@ def list_customer_operations(list_slug: str, limit: int = 50) -> CustomerListRes
                     """,
                     (max(1, min(limit, 200)),),
                 )
-                rows = [CustomerCard(**serialize_row(row)) for row in cur.fetchall()]
+                rows = [CustomerCard(**row) for row in filter_business_records([serialize_row(row) for row in cur.fetchall()])]
         return CustomerListResponse(customers=rows)
     if normalized not in mapping:
         raise HTTPException(status_code=400, detail="Unknown operations list")
@@ -1374,6 +1375,9 @@ def get_customer_timeline(instagram_user_id: str, limit: int = 100) -> CustomerT
 @app.patch("/api/customers/{instagram_user_id}")
 def update_customer_notes(instagram_user_id: str, payload: CustomerNoteUpdateRequest) -> dict[str, Any]:
     preferences_json = json.dumps(payload.preferences) if payload.preferences is not None else None
+    payload_fields = getattr(payload, "model_fields_set", getattr(payload, "__fields_set__", set()))
+    voice_note_should_update = "voice_note_url" in payload_fields
+    voice_note_value = validate_voice_note_url(payload.voice_note_url) if voice_note_should_update else None
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -1386,7 +1390,7 @@ def update_customer_notes(instagram_user_id: str, payload: CustomerNoteUpdateReq
                     subscription_renewal_date = COALESCE(%s::date, subscription_renewal_date),
                     consent_status = COALESCE(%s, consent_status),
                     consent_updated_at = CASE WHEN %s IS NULL THEN consent_updated_at ELSE NOW() END,
-                    voice_note_url = COALESCE(%s, voice_note_url),
+                    voice_note_url = CASE WHEN %s THEN %s ELSE voice_note_url END,
                     customer_type = COALESCE(%s, customer_type),
                     approval_status = COALESCE(%s, approval_status),
                     approval_reason = COALESCE(%s, approval_reason),
@@ -1404,7 +1408,8 @@ def update_customer_notes(instagram_user_id: str, payload: CustomerNoteUpdateReq
                     normalize_date_string(payload.subscription_renewal_date),
                     sanitize_text(payload.consent_status or "") or None,
                     sanitize_text(payload.consent_status or "") or None,
-                    sanitize_text(payload.voice_note_url or "") or None,
+                    voice_note_should_update,
+                    voice_note_value,
                     sanitize_text(payload.customer_type or "") or None,
                     sanitize_text(payload.approval_status or "") or None,
                     sanitize_text(payload.approval_reason or "") or None,
@@ -1680,7 +1685,7 @@ def get_call_suggestions(date: str | None = None, limit: int = 20) -> dict[str, 
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT * FROM customers ORDER BY updated_at DESC LIMIT 300")
-            customers = [serialize_row(row) for row in cur.fetchall()]
+            customers = filter_business_records([serialize_row(row) for row in cur.fetchall()])
             cur.execute(
                 """
                 SELECT *
@@ -1688,7 +1693,7 @@ def get_call_suggestions(date: str | None = None, limit: int = 20) -> dict[str, 
                 WHERE status NOT IN ('done', 'resolved', 'closed', 'cancelled', 'canceled')
                 """
             )
-            work_items = [serialize_row(row) for row in cur.fetchall()]
+            work_items = filter_business_records([serialize_row(row) for row in cur.fetchall()])
             cur.execute(
                 """
                 SELECT id, instagram_user_id, full_name, phone, service, appointment_date, appointment_time, status
@@ -1697,7 +1702,7 @@ def get_call_suggestions(date: str | None = None, limit: int = 20) -> dict[str, 
                 """,
                 (target_date.isoformat(), target_date.isoformat()),
             )
-            appointments = [serialize_row(row) for row in cur.fetchall()]
+            appointments = filter_business_records([serialize_row(row) for row in cur.fetchall()])
 
     items_by_customer: dict[Any, list[dict[str, Any]]] = {}
     appts_by_customer: dict[str, list[dict[str, Any]]] = {}
@@ -2872,6 +2877,28 @@ def serialize_row(row: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+TEST_RECORD_MARKERS = ("codex", "test", "probe", "prod-sync", "perfect-")
+TEST_RECORD_IDENTITY_FIELDS = (
+    "instagram_user_id",
+    "instagram_username",
+    "full_name",
+    "customer_name",
+    "name",
+)
+
+
+def is_test_record(record: dict[str, Any]) -> bool:
+    identity = " ".join(
+        str(record.get(field) or "")
+        for field in TEST_RECORD_IDENTITY_FIELDS
+    ).lower()
+    return any(marker in identity for marker in TEST_RECORD_MARKERS)
+
+
+def filter_business_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [record for record in records if not is_test_record(record)]
+
+
 def build_customer_filter_clause(
     *,
     segment: str | None = None,
@@ -3136,6 +3163,19 @@ def sanitize_text(value: str) -> str:
         "Ç": "C", "ç": "c",
     })
     return text.translate(replacements)
+
+
+def validate_voice_note_url(value: str | None) -> str | None:
+    if value is None:
+        return None
+    cleaned = str(value).strip()
+    if not cleaned:
+        return None
+    if len(cleaned) > MAX_VOICE_NOTE_URL_LENGTH:
+        raise HTTPException(status_code=400, detail="Sesli not kaydı çok büyük")
+    if cleaned.startswith("data:") and not cleaned.startswith("data:audio/"):
+        raise HTTPException(status_code=400, detail="Sesli not formatı desteklenmiyor")
+    return cleaned
 
 
 def sanitize_service_slug(value: str | None) -> str:
@@ -7530,7 +7570,7 @@ def build_calendar_slots(conn: psycopg.Connection, date_value: str) -> dict[str,
             """,
             (date_value,),
         )
-        appointments = [serialize_row(row) for row in cur.fetchall()]
+        appointments = filter_business_records([serialize_row(row) for row in cur.fetchall()])
     by_time: dict[str, dict[str, list[dict[str, Any]]]] = {}
     for appointment in appointments:
         slot_time = str(appointment.get("appointment_time") or "")[:5]
