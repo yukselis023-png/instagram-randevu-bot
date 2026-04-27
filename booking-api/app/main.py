@@ -553,6 +553,7 @@ REQUEST_REASON_KEYWORDS = [
 PHONE_REFUSAL_KEYWORDS = [
     "hayır", "hayir", "istemiyorum", "paylaşmak istemiyorum", "paylasmak istemiyorum", "vermek istemiyorum",
     "telefon vermek istemiyorum", "numara vermek istemiyorum", "telefon paylaşmak istemiyorum", "telefonu paylaşmak istemiyorum",
+    "telefon vermeden", "numara vermeden",
     "gerek yok", "şimdilik vermeyeyim", "simdilik vermeyeyim", "buradan konuşalım", "burdan konusalim",
 ]
 OFFER_HESITATION_KEYWORDS = [
@@ -3501,6 +3502,7 @@ def recent_outbound_requested_message_volume(history: list[dict[str, Any]] | Non
         "günlük mesaj trafiğiniz", "gunluk mesaj trafiginiz", "gün içinde yaklaşık kaç", "gun icinde yaklasik kac",
         "günde yaklaşık kaç", "gunde yaklasik kac", "günde ortalama kaç", "gunde ortalama kac",
         "kaç kişi yazıyor", "kac kisi yaziyor", "kaç mesaj geliyor", "kac mesaj geliyor", "kaç mesaj alıyorsunuz", "kac mesaj aliyorsunuz",
+        "gunluk mesaj yogunlugunuz", "mesaj yogunlugunuz yaklasik kac",
     ]
     return any(cue in last_outbound for cue in cues)
 
@@ -3868,6 +3870,8 @@ def infer_reply_question_type(reply_text: str | None, decision_label: str | None
     if any(token in lowered for token in ["gecikme mi", "geç dönüş mü", "gec donus mu", "tekrar eden mesajlar", "tekrar eden sorular", "aynı sorular", "ayni sorular", "gec donusler mi", "geç dönüşler mi"]):
         return "dm_issue"
     if any(token in lowered for token in ["kaç kişi yazıyor", "kac kisi yaziyor", "kaç mesaj geliyor", "kac mesaj geliyor"]):
+        return "message_volume"
+    if any(token in lowered for token in ["gunluk mesaj yogunlugunuz", "mesaj yogunlugunuz yaklasik kac"]):
         return "message_volume"
     if reply_offers_consultation(lowered) and "?" in lowered:
         return "offer_response"
@@ -5362,6 +5366,10 @@ def is_angry_complaint_message(text: str) -> bool:
         "bot gibi",
         "oto mesaj",
         "otomatik mesaj",
+        "sinirlendim",
+        "tekrar edip duruyorsun",
+        "ayni seyi tekrar",
+        "ayni şeyi tekrar",
         "sacma",
         "saçma",
     ]
@@ -5917,6 +5925,21 @@ def maybe_build_information_reply(message_text: str, llm_data: dict[str, Any], m
             "kind": "technical_issue",
             "next_state": conversation.get("state", "new") if has_booking_context else "new",
             "set_service": conversation.get("service") if has_booking_context else None,
+        }
+    if is_request_reason_question(message_text) or is_clarification_request(message_text):
+        return {
+            "reply": build_contextual_clarification_reply(conversation, message_text),
+            "kind": "clarification",
+            "next_state": conversation.get("state", "collect_service") or "collect_service",
+            "set_service": conversation.get("service"),
+        }
+    if is_phone_share_refusal(message_text):
+        return {
+            "reply": build_phone_refusal_reply(conversation),
+            "kind": "phone_refusal",
+            "next_state": "collect_service",
+            "set_service": conversation.get("service"),
+            "clear_booking": True,
         }
     if is_price_question(message_text):
         if matched_service:
