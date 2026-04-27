@@ -2567,9 +2567,13 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
                     next_days = find_next_available_days(conn, conversation["requested_date"], service_name=conversation.get("service"))
                     reply = build_no_availability_reply(conversation["requested_date"], next_days, ask_service=True)
                     final_decision = "collect_service_no_availability"
-            elif is_simple_greeting(message_text):
+            elif is_simple_greeting(message_text) or is_good_wishes_message(message_text):
                 reply = "Merhaba, hoş geldiniz. Size hangi konuda yardımcı olabilirim?"
-                final_decision = "greeting_collect_service"
+                if is_good_wishes_message(message_text):
+                    reply = build_good_wishes_reply()
+                    final_decision = "info:smalltalk"
+                else:
+                    final_decision = "greeting_collect_service"
             else:
                 reply = "Tabii. Size en doğru şekilde yardımcı olabilmem için biraz açar mısınız? Şu an en çok hangi konuda destek arıyorsunuz?"
                 final_decision = "collect_service"
@@ -3309,6 +3313,20 @@ def is_simple_greeting(text: str) -> bool:
     return is_greeting_like_message(text)
 
 
+def is_good_wishes_message(text: str) -> bool:
+    lowered = sanitize_text(text).lower().strip(".!?, ")
+    phrases = {
+        "kolay gelsin",
+        "iyi calismalar",
+        "iyi çalışmalar",
+        "hayirli isler",
+        "hayırlı işler",
+        "basarilar",
+        "başarılar",
+    }
+    return lowered in phrases or any(phrase in lowered for phrase in phrases)
+
+
 def is_low_signal_message(text: str) -> bool:
     lowered = sanitize_text(text).lower()
     if not lowered:
@@ -3389,6 +3407,10 @@ def build_smalltalk_reply(conversation: dict[str, Any]) -> str:
     if has_resumeable_booking_context(conversation):
         return f"İyidir, teşekkür ederim. {build_booking_resume_hint(conversation)}"
     return "İyidir, teşekkür ederim. Size nasıl yardımcı olabilirim?"
+
+
+def build_good_wishes_reply() -> str:
+    return "Teşekkür ederiz, size de kolay gelsin."
 
 
 def build_technical_issue_reply(conversation: dict[str, Any], history: list[dict[str, Any]] | None = None) -> str:
@@ -5920,6 +5942,13 @@ def maybe_build_information_reply(message_text: str, llm_data: dict[str, Any], m
             "next_state": conversation.get("state", "collect_service") if has_booking_context else "collect_service",
             "set_service": conversation.get("service") if has_booking_context else None,
         }
+    if is_good_wishes_message(message_text):
+        return {
+            "reply": build_good_wishes_reply(),
+            "kind": "smalltalk",
+            "next_state": conversation.get("state", "collect_service") if has_booking_context else "collect_service",
+            "set_service": conversation.get("service") if has_booking_context else None,
+        }
     if is_voice_duration_placeholder_message(message_text) and current_state in {"new", "collect_service"}:
         return {
             "reply": build_voice_duration_placeholder_reply(),
@@ -6298,6 +6327,7 @@ def should_call_llm_extractor(message_text: str, conversation: dict[str, Any]) -
     memory = ensure_conversation_memory(conversation)
     is_social_or_technical_heuristic = bool(
         is_simple_greeting(message_text)
+        or is_good_wishes_message(message_text)
         or is_presence_check_message(message_text)
         or is_smalltalk_message(message_text)
         or is_reaction_message(message_text)

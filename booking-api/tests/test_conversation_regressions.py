@@ -122,3 +122,18 @@ def test_phone_refusal_gets_information_path_without_phone_pressure():
 
     assert result["kind"] == "phone_refusal"
     assert "telefon numaran" not in result["reply"].lower()
+
+
+def test_good_wishes_get_social_reply_not_sales_fallback():
+    conversation = {
+        "service": None,
+        "state": "collect_service",
+        "booking_kind": None,
+        "memory_state": {},
+    }
+
+    result = main.maybe_build_information_reply("Kolay gelsin", {}, [], conversation, [])
+
+    assert result["kind"] == "smalltalk"
+    assert "kolay gelsin" in result["reply"].lower()
+    assert "hangi konuda destek" not in result["reply"].lower()
