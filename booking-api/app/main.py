@@ -2847,6 +2847,7 @@ def run_migrations() -> None:
             cur.execute("ALTER TABLE appointments ADD COLUMN IF NOT EXISTS refund_reason TEXT")
             cur.execute("ALTER TABLE appointments ADD COLUMN IF NOT EXISTS capacity_units INTEGER NOT NULL DEFAULT 1")
             cur.execute("ALTER TABLE appointments DROP CONSTRAINT IF EXISTS appointments_appointment_date_appointment_time_key")
+            cur.execute("ALTER TABLE customers ADD COLUMN IF NOT EXISTS preferences JSONB NOT NULL DEFAULT '{}'::jsonb")
             cur.execute("ALTER TABLE customers ADD COLUMN IF NOT EXISTS discount_code TEXT")
             cur.execute("ALTER TABLE customers ADD COLUMN IF NOT EXISTS custom_offer TEXT")
             cur.execute("ALTER TABLE customers ADD COLUMN IF NOT EXISTS subscription_renewal_date DATE")
