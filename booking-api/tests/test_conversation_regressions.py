@@ -19,6 +19,22 @@ def test_numeric_range_after_volume_question_is_not_treated_as_date():
     assert "2040" not in result["reply"]
 
 
+def test_numeric_range_without_context_still_gets_useful_answer():
+    conversation = {
+        "service": None,
+        "state": "collect_service",
+        "booking_kind": None,
+        "memory_state": {},
+    }
+
+    result = main.maybe_build_information_reply("30-40", {}, [], conversation, [])
+
+    assert result["kind"] == "message_volume"
+    assert "30-40" in result["reply"]
+    assert "hangi konuda destek" not in result["reply"].lower()
+    assert "2040" not in result["reply"]
+
+
 def test_volume_question_reply_is_remembered_from_service_info_text():
     conversation = {"state": "collect_service", "memory_state": {}}
 

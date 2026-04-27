@@ -5972,6 +5972,14 @@ def maybe_build_information_reply(message_text: str, llm_data: dict[str, Any], m
             "set_service": conversation.get("service") if has_booking_context else None,
             "clear_booking": True,
         }
+    if current_state in {"new", "collect_service", "human_handoff"} and is_message_volume_answer(message_text):
+        sector = detect_business_sector(message_text, history)
+        return {
+            "reply": build_message_volume_reply(message_text, conversation, history),
+            "kind": "message_volume",
+            "next_state": "collect_service",
+            "set_service": conversation.get("service") or ("Otomasyon & Yapay Zeka Ã‡Ã¶zÃ¼mleri" if sector in {"beauty", "real_estate"} else None),
+        }
     if is_technical_issue_message(message_text):
         return {
             "reply": build_technical_issue_reply(conversation, history),
