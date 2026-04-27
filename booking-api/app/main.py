@@ -68,7 +68,7 @@ LLM_REPLY_ADVISORY_TIMEOUT_SECONDS = float(os.getenv("LLM_REPLY_ADVISORY_TIMEOUT
 LLM_REPLY_MICRO_MAX_TOKENS = int(os.getenv("LLM_REPLY_MICRO_MAX_TOKENS", "48"))
 LLM_REPLY_ADVISORY_MAX_TOKENS = int(os.getenv("LLM_REPLY_ADVISORY_MAX_TOKENS", "90"))
 LLM_REPLY_POLISH_ENABLED = os.getenv("LLM_REPLY_POLISH_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
-FULL_AI_CONVERSATIONAL_MODE = os.getenv("FULL_AI_CONVERSATIONAL_MODE", "false").lower() in {"1", "true", "yes", "on"}
+FULL_AI_CONVERSATIONAL_MODE = os.getenv("FULL_AI_CONVERSATIONAL_MODE", "true").lower() in {"1", "true", "yes", "on"}
 CRM_SYNC_ENABLED = os.getenv("CRM_SYNC_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
 CRM_SUPABASE_URL = os.getenv("CRM_SUPABASE_URL", "").rstrip("/")
 CRM_SUPABASE_ANON_KEY = os.getenv("CRM_SUPABASE_ANON_KEY", "")
@@ -437,6 +437,7 @@ HOUR_WORD_PATTERN = re.compile(r"\bsaat\s*([01]?\d|2[0-3])\b", re.IGNORECASE)
 STANDALONE_TIME_PATTERN = re.compile(r"^\s*([01]?\d|2[0-3])[:.]([0-5]\d)\s*\??\s*$")
 VOICE_DURATION_PLACEHOLDER_PATTERN = re.compile(r"^\s*([0-5])[:.]([0-5]\d)\s*$")
 MESSAGE_VOLUME_PATTERN = re.compile(r"\b(\d{2,5})\s*(kişi|kisi|mesaj|dm|lead)\b", re.IGNORECASE)
+NUMERIC_RANGE_ANSWER_PATTERN = re.compile(r"^\s*(\d{1,5})\s*[-–]\s*(\d{1,5})\s*\??\s*$")
 PURE_NUMERIC_DATE_PATTERN = re.compile(r"^\s*\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\s*\??\s*$")
 DATE_CUE_PATTERN = re.compile(
     r"(bugün\w*|bugun\w*|yarın\w*|yarin\w*|ertesi\s+gün\w*|ertesi\s+gun\w*|sonraki\s+gün\w*|sonraki\s+gun\w*|bir\s+sonraki\s+gün\w*|bir\s+sonraki\s+gun\w*|öbür\s+gün\w*|obur\s+gun\w*|evvelsi\s+gün\w*|evvelsi\s+gun\w*|evelsi\s+gün\w*|evelsi\s+gun\w*|haftaya\w*|pazartesi\w*|salı\w*|sali\w*|çarşamba\w*|carsamba\w*|perşembe\w*|persembe\w*|cuma\w*|cumartesi\w*|pazar\w*|ocak\w*|şubat\w*|subat\w*|mart\w*|nisan\w*|mayıs\w*|mayis\w*|haziran\w*|temmuz\w*|ağustos\w*|agustos\w*|eylül\w*|eylul\w*|ekim\w*|kasım\w*|kasim\w*|aralık\w*|aralik\w*|\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?)",
@@ -3597,6 +3598,9 @@ def detect_dm_issue_choice(text: str) -> str | None:
 
 def extract_message_volume_estimate(text: str) -> str | None:
     cleaned = sanitize_text(text)
+    range_match = NUMERIC_RANGE_ANSWER_PATTERN.match(cleaned)
+    if range_match:
+        return f"{range_match.group(1)}-{range_match.group(2)}"
     direct = MESSAGE_VOLUME_PATTERN.search(cleaned)
     if direct:
         return direct.group(1)
@@ -3609,6 +3613,8 @@ def extract_message_volume_estimate(text: str) -> str | None:
 def is_message_volume_answer(text: str) -> bool:
     cleaned = sanitize_text(text)
     lowered = cleaned.lower()
+    if NUMERIC_RANGE_ANSWER_PATTERN.match(cleaned):
+        return True
     if MESSAGE_VOLUME_PATTERN.search(cleaned):
         return True
     if re.search(r"\b(günde|gunde|günlük|gunluk)\s*(\d{2,5})\b", lowered):
@@ -4857,6 +4863,8 @@ def extract_time_for_state(text: str, state: str | None = None) -> str | None:
 
 
 def has_date_cue(text: str) -> bool:
+    if NUMERIC_RANGE_ANSWER_PATTERN.match(sanitize_text(text)):
+        return False
     return DATE_CUE_PATTERN.search(text) is not None
 
 
@@ -5317,12 +5325,56 @@ def is_assistant_identity_question(text: str) -> bool:
 
 def is_clarification_request(text: str) -> bool:
     lowered = sanitize_text(text).lower()
-    return any(keyword in lowered for keyword in CLARIFICATION_KEYWORDS)
+    return any(keyword in lowered for keyword in CLARIFICATION_KEYWORDS) or is_meeting_clarification_question(text)
+
+
+def is_meeting_clarification_question(text: str) -> bool:
+    lowered = sanitize_text(text).lower()
+    phrases = [
+        "ne on gorusmesi",
+        "ne ön görüşmesi",
+        "hangi gorusme",
+        "hangi görüşme",
+        "nasil gorusecegiz",
+        "nasıl görüşeceğiz",
+        "nasıl görüşecegiz",
+        "nereden gorusecegiz",
+        "nereden görüşeceğiz",
+    ]
+    return any(phrase in lowered for phrase in phrases)
 
 
 def is_request_reason_question(text: str) -> bool:
     lowered = sanitize_text(text).lower()
     return any(keyword in lowered for keyword in REQUEST_REASON_KEYWORDS)
+
+
+def is_angry_complaint_message(text: str) -> bool:
+    lowered = sanitize_text(text).lower()
+    complaint_phrases = [
+        "salak",
+        "aptal",
+        "anlamiyorsun",
+        "anlamıyorsun",
+        "cevap vermiyorsun",
+        "ayni mesaji",
+        "aynı mesajı",
+        "ayni mesaj",
+        "aynı mesaj",
+        "bot gibi",
+        "oto mesaj",
+        "otomatik mesaj",
+        "sacma",
+        "saçma",
+    ]
+    return any(phrase in lowered for phrase in complaint_phrases)
+
+
+def build_angry_complaint_reply() -> str:
+    return (
+        "Kusura bakmayın, sizi yanlış yönlendirdim ve aynı akışı tekrar ettim. "
+        "Şu an telefon istemeden devam edebiliriz. Merak ettiğiniz konuyu yazın; önce onu net cevaplayayım."
+    )
 
 
 def is_phone_share_refusal(text: str) -> bool:
@@ -5441,11 +5493,19 @@ def build_booking_assumption_reset_reply() -> str:
     return "Haklısınız, yanlış anladıysam kusura bakmayın. Şu an bir randevu oluşturmuyorum. Önce hangi konuda bilgi almak istediğinizi yazın, size net şekilde yardımcı olayım."
 
 
-def build_contextual_clarification_reply(conversation: dict[str, Any]) -> str:
+def build_contextual_clarification_reply(conversation: dict[str, Any], message_text: str | None = None) -> str:
     state = conversation.get("state", "new")
     service = sanitize_text(conversation.get("service") or "")
     booking_label = get_booking_label(conversation)
     memory = ensure_conversation_memory(conversation)
+    lowered_message = sanitize_text(message_text or "").lower()
+    if is_meeting_clarification_question(lowered_message):
+        focus = service or "ihtiyacınız"
+        return (
+            f"Ön görüşme, {focus} için size uygun çözümü hızlıca netleştirdiğimiz kısa bir görüşmedir. "
+            "Genelde Instagram üzerinden başlatıp ardından telefon ya da online görüşme ile ilerliyoruz. "
+            "İsterseniz önce merak ettiğiniz kısmı buradan cevaplayayım."
+        )
     if state == "collect_service":
         if memory.get("pending_offer") == "preconsultation_offer":
             focus = service or "bu süreç"
@@ -5845,6 +5905,14 @@ def maybe_build_information_reply(message_text: str, llm_data: dict[str, Any], m
             "next_state": "collect_service",
             "set_service": conversation.get("service"),
         }
+    if is_angry_complaint_message(message_text):
+        return {
+            "reply": build_angry_complaint_reply(),
+            "kind": "complaint",
+            "next_state": "collect_service",
+            "set_service": conversation.get("service") if has_booking_context else None,
+            "clear_booking": True,
+        }
     if is_technical_issue_message(message_text):
         return {
             "reply": build_technical_issue_reply(conversation, history),
@@ -6039,14 +6107,14 @@ def maybe_build_information_reply(message_text: str, llm_data: dict[str, Any], m
         }
     if is_request_reason_question(message_text) and current_state in {"collect_name", "collect_phone", "collect_date", "collect_period", "collect_time"}:
         return {
-            "reply": build_contextual_clarification_reply(conversation),
+            "reply": build_contextual_clarification_reply(conversation, message_text),
             "kind": "clarification",
             "next_state": conversation.get("state", "collect_service") or "collect_service",
             "set_service": conversation.get("service"),
         }
     if is_clarification_request(message_text):
         return {
-            "reply": build_contextual_clarification_reply(conversation),
+            "reply": build_contextual_clarification_reply(conversation, message_text),
             "kind": "clarification",
             "next_state": conversation.get("state", "collect_service") or "collect_service",
             "set_service": conversation.get("service"),
