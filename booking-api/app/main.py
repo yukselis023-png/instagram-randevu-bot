@@ -1376,49 +1376,64 @@ def get_customer_timeline(instagram_user_id: str, limit: int = 100) -> CustomerT
 
 @app.patch("/api/customers/{instagram_user_id}")
 def update_customer_notes(instagram_user_id: str, payload: CustomerNoteUpdateRequest) -> dict[str, Any]:
-    preferences_json = json.dumps(payload.preferences) if payload.preferences is not None else None
     payload_fields = getattr(payload, "model_fields_set", getattr(payload, "__fields_set__", set()))
-    voice_note_should_update = "voice_note_url" in payload_fields
-    voice_note_value = validate_voice_note_url(payload.voice_note_url) if voice_note_should_update else None
+    updates: list[str] = []
+    params: list[Any] = []
+
+    def add_text_update(field_name: str, column_name: str) -> None:
+        if field_name not in payload_fields:
+            return
+        value = sanitize_text(getattr(payload, field_name) or "") or None
+        if value is None:
+            return
+        updates.append(f"{column_name} = %s")
+        params.append(value)
+
+    add_text_update("notes", "notes")
+    add_text_update("discount_code", "discount_code")
+    add_text_update("custom_offer", "custom_offer")
+    add_text_update("customer_type", "customer_type")
+    add_text_update("approval_status", "approval_status")
+    add_text_update("approval_reason", "approval_reason")
+    add_text_update("rejection_reason", "rejection_reason")
+
+    if "preferences" in payload_fields and payload.preferences is not None:
+        updates.append("preferences = preferences || %s::jsonb")
+        params.append(json.dumps(payload.preferences))
+
+    if "subscription_renewal_date" in payload_fields:
+        renewal_date = normalize_date_string(payload.subscription_renewal_date)
+        if renewal_date:
+            updates.append("subscription_renewal_date = %s::date")
+            params.append(renewal_date)
+
+    if "consent_status" in payload_fields:
+        consent_value = sanitize_text(payload.consent_status or "") or None
+        if consent_value is not None:
+            updates.append("consent_status = %s")
+            params.append(consent_value)
+            updates.append("consent_updated_at = NOW()")
+
+    if "voice_note_url" in payload_fields:
+        updates.append("voice_note_url = %s")
+        params.append(validate_voice_note_url(payload.voice_note_url))
+
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                """
-                UPDATE customers
-                SET notes = COALESCE(%s, notes),
-                    preferences = CASE WHEN %s::jsonb IS NULL THEN preferences ELSE preferences || %s::jsonb END,
-                    discount_code = COALESCE(%s, discount_code),
-                    custom_offer = COALESCE(%s, custom_offer),
-                    subscription_renewal_date = COALESCE(%s::date, subscription_renewal_date),
-                    consent_status = COALESCE(%s, consent_status),
-                    consent_updated_at = CASE WHEN %s IS NULL THEN consent_updated_at ELSE NOW() END,
-                    voice_note_url = CASE WHEN %s THEN %s ELSE voice_note_url END,
-                    customer_type = COALESCE(%s, customer_type),
-                    approval_status = COALESCE(%s, approval_status),
-                    approval_reason = COALESCE(%s, approval_reason),
-                    rejection_reason = COALESCE(%s, rejection_reason),
-                    updated_at = NOW()
-                WHERE instagram_user_id = %s
-                RETURNING *
-                """,
-                (
-                    sanitize_text(payload.notes or "") or None,
-                    preferences_json,
-                    preferences_json,
-                    sanitize_text(payload.discount_code or "") or None,
-                    sanitize_text(payload.custom_offer or "") or None,
-                    normalize_date_string(payload.subscription_renewal_date),
-                    sanitize_text(payload.consent_status or "") or None,
-                    sanitize_text(payload.consent_status or "") or None,
-                    voice_note_should_update,
-                    voice_note_value,
-                    sanitize_text(payload.customer_type or "") or None,
-                    sanitize_text(payload.approval_status or "") or None,
-                    sanitize_text(payload.approval_reason or "") or None,
-                    sanitize_text(payload.rejection_reason or "") or None,
-                    instagram_user_id,
-                ),
-            )
+            if updates:
+                updates.append("updated_at = NOW()")
+                params.append(instagram_user_id)
+                cur.execute(
+                    f"""
+                    UPDATE customers
+                    SET {", ".join(updates)}
+                    WHERE instagram_user_id = %s
+                    RETURNING *
+                    """,
+                    tuple(params),
+                )
+            else:
+                cur.execute("SELECT * FROM customers WHERE instagram_user_id = %s", (instagram_user_id,))
             row = cur.fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail="Customer not found")
