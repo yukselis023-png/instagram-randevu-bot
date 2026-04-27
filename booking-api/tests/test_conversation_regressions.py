@@ -137,3 +137,18 @@ def test_good_wishes_get_social_reply_not_sales_fallback():
     assert result["kind"] == "smalltalk"
     assert "kolay gelsin" in result["reply"].lower()
     assert "hangi konuda destek" not in result["reply"].lower()
+
+
+def test_human_request_wins_over_existing_sales_context():
+    conversation = {
+        "service": "Performans Pazarlama",
+        "state": "collect_service",
+        "booking_kind": None,
+        "memory_state": {},
+    }
+
+    result = main.maybe_build_information_reply("İnsanla görüşebilir miyim?", {}, [], conversation, [])
+
+    assert result["kind"] == "human_handoff"
+    assert result["handoff"] is True
+    assert result["next_state"] == "human_handoff"

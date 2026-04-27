@@ -5903,6 +5903,14 @@ def maybe_build_information_reply(message_text: str, llm_data: dict[str, Any], m
     recent_overview_context = any(cue in recent_outbound_text for cue in ["web tasarim", "otomasyon", "reklam", "sosyal medya"])
     asks_detailed_service_overview = (asks_services and asks_detail) or (asks_detail and recent_overview_context)
     asks_schedule = is_working_schedule_question(message_text)
+    if llm_bool(llm_data.get("wants_human")) or any(keyword in sanitize_text(message_text).lower() for keyword in HUMAN_KEYWORDS):
+        return {
+            "reply": "Tabii, sizi yetkili ekibimize yönlendiriyorum. Uygunsanız adınızı ve telefon numaranızı bırakın, ekibimiz size kısa sürede dönüş sağlasın.",
+            "kind": "human_handoff",
+            "next_state": "human_handoff",
+            "set_service": conversation.get("service"),
+            "handoff": True,
+        }
     if (asks_identity and asks_services) or (asks_identity and asks_schedule) or (asks_services and asks_schedule):
         return {
             "reply": build_combined_intro_reply(
