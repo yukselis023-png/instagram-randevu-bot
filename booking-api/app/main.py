@@ -3107,8 +3107,6 @@ def schedule_customer_automation_events(conn: psycopg.Connection, customer_id: i
                     (customer_id, anchor, allowed_triggers, sector, customer_id),
                 )
             else:
-                if not is_slot_capacity_available(conn, requested_date, requested_time, requested_service):
-                    raise HTTPException(status_code=409, detail={"type": "slot_conflict", "message": "Bu slot artik dolu."})
                 cur.execute(
                     """
                     INSERT INTO automation_events (customer_id, rule_id, template_slug, event_type, scheduled_at, payload)
