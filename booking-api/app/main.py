@@ -2431,8 +2431,9 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
             conversation["full_name"] = detected_name
         if detected_phone and canonical_phone(conversation.get("phone")) != canonical_phone(detected_phone):
             conversation["phone"] = detected_phone
-        if picked_service and (not conversation.get("service") or conversation.get("state") == "collect_service"):
-            conversation["service"] = picked_service
+        applied_service = apply_detected_service_to_conversation(conversation, message_text, llm_service_hint)
+        if applied_service:
+            picked_service = applied_service
         elif not conversation.get("service") and detected_service:
             conversation["service"] = detected_service
         if detected_date and normalize_date_string(conversation.get("requested_date")) != detected_date:
@@ -2450,6 +2451,12 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
 
         sanitize_conversation_state(conversation)
         conversation["last_customer_message"] = message_text
+        if is_invalid_name_attempt(message_text, conversation.get("state", "new")):
+            return finalize_result(
+                "Adınızı ve soyadınızı tam olarak yazar mısınız?",
+                message_type="clarify",
+                decision_label="collect_name_invalid",
+            )
         conversation["llm_notes"] = llm_data.get("notes")
         if should_trace_decline_memory(message_text, conversation, llm_data):
             log_decline_memory_trace("before_user_memory_update", payload.sender_id, trace_id, conversation, extra={"llm_objection_type": llm_data.get("objection_type")})
@@ -4777,6 +4784,8 @@ def titlecase_name(value: str | None) -> str | None:
     words = [w for w in clean.split() if w]
     if not 1 <= len(words) <= 4:
         return None
+    if any(len(w) < 2 for w in words):
+        return None
     if any(w.lower() in NON_NAME_WORDS for w in words):
         return None
     return " ".join(word[:1].upper() + word[1:].lower() for word in words)
@@ -4823,9 +4832,25 @@ def extract_name(text: str, state: str) -> str | None:
     words = clean.split()
     if state != 'collect_name':
         return None
-    if 1 <= len(words) <= 3 and not any(w.lower() in NON_NAME_WORDS for w in words):
+    if 1 <= len(words) <= 3 and not any(len(w) < 2 for w in words) and not any(w.lower() in NON_NAME_WORDS for w in words):
         return titlecase_name(clean)
     return None
+
+
+def is_invalid_name_attempt(text: str, state: str) -> bool:
+    if state != "collect_name":
+        return False
+    if extract_name(text, state):
+        return False
+    if match_service_candidates(text, None):
+        return False
+    if "?" in sanitize_text(text):
+        return False
+    clean = sanitize_text(re.sub(r"[^a-zA-ZçğıöşüÇĞİÖŞÜ\s]", "", text))
+    words = clean.split()
+    return not words or any(len(word) < 2 for word in words)
+
+
 def canonical_phone(value: Any) -> str | None:
     if not value:
         return None
@@ -6465,6 +6490,25 @@ def pick_service(text: str, llm_service: str | None) -> str | None:
     return None
 
 
+def apply_detected_service_to_conversation(conversation: dict[str, Any], message_text: str, llm_service_hint: str | None = None) -> str | None:
+    direct_service = pick_service(message_text, None)
+    picked_service = direct_service or pick_service(message_text, llm_service_hint)
+    if not picked_service:
+        return None
+
+    current_service = sanitize_text(conversation.get("service") or "")
+    state = sanitize_text(conversation.get("state") or "new")
+    current_match = match_service_catalog(current_service, current_service) if current_service else None
+    current_display = (current_match or {}).get("display") or current_service
+    active_booking_states = {"collect_name", "collect_phone", "collect_date", "collect_period", "collect_time"}
+    explicit_override = bool(direct_service and current_display and direct_service != current_display and state in active_booking_states)
+
+    if not current_display or state == "collect_service" or explicit_override:
+        conversation["service"] = picked_service
+        return picked_service
+    return None
+
+
 def elapsed_ms(started_at: float) -> int:
     return int((time_module.perf_counter() - started_at) * 1000)
 
@@ -6553,6 +6597,8 @@ def should_ai_compose_reply(
         return False
 
     label = sanitize_text(decision_label or "").lower()
+    if label == "collect_name_invalid":
+        return False
     if label in {"info:overview", "info:price_question", "info:price_followup", "info:price_route", "info:message_volume"}:
         return False
 

@@ -264,6 +264,52 @@ def test_website_how_many_days_question_is_not_message_volume():
     assert "yogunluk" not in reply
 
 
+def test_service_correction_overrides_active_booking_service():
+    conversation = {
+        "service": "Web Tasarım - KOBİ Paketi",
+        "state": "collect_name",
+        "booking_kind": "preconsultation",
+        "memory_state": {},
+    }
+
+    applied = main.apply_detected_service_to_conversation(conversation, "Yok otomasyon için yapalım", None)
+
+    assert applied == "Otomasyon & Yapay Zeka Çözümleri"
+    assert conversation["service"] == "Otomasyon & Yapay Zeka Çözümleri"
+    assert conversation["state"] == "collect_name"
+    assert conversation["booking_kind"] == "preconsultation"
+
+
+def test_service_correction_variants_use_current_message_over_old_service():
+    cases = [
+        ("Web değil otomasyon için", "Otomasyon & Yapay Zeka Çözümleri"),
+        ("Hayır reklam için yapalım", "Performans Pazarlama"),
+        ("Sosyal medya için görüşelim", "Sosyal Medya Yönetimi"),
+    ]
+
+    for message, expected_service in cases:
+        conversation = {
+            "service": "Web Tasarım - KOBİ Paketi",
+            "state": "collect_name",
+            "booking_kind": "preconsultation",
+            "memory_state": {},
+        }
+
+        applied = main.apply_detected_service_to_conversation(conversation, message, None)
+
+        assert applied == expected_service
+        assert conversation["service"] == expected_service
+
+
+def test_single_letter_is_not_accepted_as_full_name():
+    assert main.extract_name("G", "collect_name") is None
+    assert main.extract_name("a", "collect_name") is None
+    assert main.extract_name(".", "collect_name") is None
+    assert main.is_invalid_name_attempt("G", "collect_name")
+    assert main.is_invalid_name_attempt("a", "collect_name")
+    assert main.is_invalid_name_attempt(".", "collect_name")
+
+
 def test_business_fit_question_after_price_context_is_not_price_followup():
     conversation = {
         "service": None,
