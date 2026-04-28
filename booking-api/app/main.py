@@ -104,6 +104,7 @@ DOEL_SERVICE_CATALOG = [
         ],
         "price": "12.900 ₺",
         "price_note": "tek seferlik paket fiyatı",
+        "delivery_time": "7-14 iş günü",
         "summary": "Google uyumlu, tüm cihazlara tam uyumlu, WhatsApp butonlu, 1 yıl altyapı garantili ve otomasyon altyapısına uygun kurumsal web tasarım çözümü.",
     },
     {
@@ -5065,7 +5066,23 @@ def is_service_overview_question(text: str) -> bool:
 
 def is_price_question(text: str) -> bool:
     lowered = text.lower()
+    if is_delivery_time_question(text):
+        return False
     return any(keyword in lowered for keyword in PRICE_KEYWORDS)
+
+
+def is_delivery_time_question(text: str) -> bool:
+    lowered = sanitize_text(text).lower()
+    delivery_cues = [
+        "teslim", "teslimat", "termin", "hazir olur", "hazır olur", "ne zaman hazir",
+        "ne zaman hazır", "kac gunde", "kaç günde", "kac gun", "kaç gün",
+        "ne kadar surer", "ne kadar sürer", "sure ne", "süre ne", "suresi", "süresi",
+    ]
+    service_cues = [
+        "web", "website", "websitesi", "site", "tasarim", "tasarım", "landing",
+        "otomasyon", "reklam", "sosyal medya", "hizmet",
+    ]
+    return any(cue in lowered for cue in delivery_cues) and any(cue in lowered for cue in service_cues)
 
 
 def extract_budget_amount(text: str) -> int | None:
@@ -5298,6 +5315,15 @@ def build_price_question_reply(service: dict[str, Any], conversation: dict[str, 
     if is_recurring_service(service):
         return f"{service['display']} {service['price']}'den başlıyor ({service['price_note']}). {suffix}"
     return f"{service['display']} {service['price']} ({service['price_note']}). {suffix}"
+
+
+def build_delivery_time_reply(service: dict[str, Any] | None = None) -> str:
+    if service:
+        display = str(service.get("display") or "Bu hizmet").strip()
+        delivery_time = str(service.get("delivery_time") or "").strip()
+        if delivery_time:
+            return f"{display} için tahmini teslim süresi genelde {delivery_time}. İçeriklerin hazır olması, sayfa sayısı ve revizyon sayısı bu süreyi değiştirebilir."
+    return "Tahmini teslim süresi hizmetin kapsamına göre değişir. Web sitesi gibi standart işlerde içerikler hazırsa süre genelde birkaç iş günü ile iki hafta aralığında netleşir."
 
 
 def build_booking_ready_service_reply(service: dict[str, Any], *, price_context: bool = False) -> str:
@@ -6028,6 +6054,14 @@ def maybe_build_information_reply(message_text: str, llm_data: dict[str, Any], m
             "next_state": "collect_service",
             "set_service": conversation.get("service"),
             "clear_booking": True,
+        }
+    if is_delivery_time_question(message_text):
+        delivery_service = matched_service or match_service_catalog(message_text, conversation.get("service"))
+        return {
+            "reply": build_delivery_time_reply(delivery_service),
+            "kind": "delivery_time",
+            "next_state": "collect_service",
+            "set_service": (delivery_service or {}).get("display") or conversation.get("service"),
         }
     if is_price_question(message_text):
         if matched_service:

@@ -227,6 +227,25 @@ def test_price_question_without_service_uses_clean_turkish():
     assert "tasarim" not in reply
 
 
+def test_website_delivery_time_question_is_not_answered_with_price():
+    conversation = {
+        "service": None,
+        "state": "collect_service",
+        "booking_kind": None,
+        "memory_state": {},
+    }
+
+    result = main.maybe_build_information_reply("tahmini teslim suresi ne kadar websitesinde", {}, [], conversation, [])
+
+    assert result["kind"] == "delivery_time"
+    reply = result["reply"].lower()
+    assert "teslim" in reply
+    assert "iş günü" in reply or "is gunu" in reply
+    assert "12.900" not in reply
+    assert "fiyat" not in reply
+    assert "telefon" not in reply
+
+
 def test_business_fit_question_after_price_context_is_not_price_followup():
     conversation = {
         "service": None,
