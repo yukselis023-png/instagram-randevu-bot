@@ -6325,6 +6325,8 @@ def should_use_generic_ai_reply(message_text: str, llm_data: dict[str, Any] | No
     cleaned = sanitize_text(message_text)
     if not cleaned:
         return False
+    if is_business_fit_question(cleaned):
+        return True
     current_state = sanitize_text(conversation.get("state") or "new")
     if current_state not in {"new", "collect_service", "human_handoff"}:
         return False
@@ -6333,8 +6335,6 @@ def should_use_generic_ai_reply(message_text: str, llm_data: dict[str, Any] | No
         return False
     if is_low_signal_message(cleaned) and "?" not in cleaned:
         return False
-    if is_business_fit_question(cleaned):
-        return True
     return not bool(
         message_shows_booking_intent(cleaned, llm_data)
         or wants_availability_information(cleaned, llm_data)

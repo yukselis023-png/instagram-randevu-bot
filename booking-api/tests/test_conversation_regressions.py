@@ -265,3 +265,18 @@ def test_short_agency_fit_question_is_not_availability_request():
     assert "hangi konuda destek" not in result["reply"].lower()
     assert "biraz açar" not in result["reply"].lower()
     assert "müşteri takibi" in result["reply"].lower()
+
+
+def test_agency_fit_question_answers_even_in_old_collection_state():
+    conversation = {
+        "service": None,
+        "state": "collect_phone",
+        "booking_kind": "preconsultation",
+        "memory_state": {},
+    }
+
+    result = main.maybe_build_information_reply("Ajans icin uygun mu?", {}, [], conversation, [])
+
+    assert result["kind"] == "generic_ai"
+    assert "hangi konuda destek" not in result["reply"].lower()
+    assert "telefon numaran" not in result["reply"].lower()
