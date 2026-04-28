@@ -4925,6 +4925,7 @@ def extract_time_for_state(text: str, state: str | None = None) -> str | None:
     state = sanitize_text(state or "")
     standalone = STANDALONE_TIME_PATTERN.match(cleaned)
     numeric_date_like = PURE_NUMERIC_DATE_PATTERN.match(cleaned) is not None
+    contains_numeric_date = re.search(r"\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b", cleaned) is not None
     explicit_time_context = has_date_cue(cleaned) or any(cue in cleaned.lower() for cue in ["saat", "uygun", "müsait", "musait", "randevu", "görüşme", "gorusme", "kaçta", "kacta", "?"])
 
     if is_voice_duration_placeholder_message(cleaned) and state not in {"collect_period", "collect_time"}:
@@ -4946,6 +4947,8 @@ def extract_time_for_state(text: str, state: str | None = None) -> str | None:
         return None
 
     dotted = TIME_PATTERN.search(cleaned)
+    if dotted and contains_numeric_date and state not in {"collect_period", "collect_time"}:
+        return None
     if dotted and (has_date_cue(cleaned) or state in {"collect_period", "collect_time"}):
         return f"{int(dotted.group(1)):02d}:{int(dotted.group(2)):02d}"
     return None

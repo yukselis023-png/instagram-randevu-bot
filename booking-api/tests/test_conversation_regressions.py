@@ -353,6 +353,13 @@ def test_scam_or_trust_question_gets_answer_instead_of_collect_name_prompt():
     assert "05.05" not in reply
 
 
+def test_numeric_date_in_booking_request_is_not_treated_as_time():
+    message = "Otomasyon icin 05.05.2026 on gorusme yapalim"
+
+    assert main.extract_date(message) == "2026-05-05"
+    assert main.extract_time_for_state(message, "collect_service") is None
+
+
 def test_ai_compose_is_enabled_for_business_reply_labels():
     labels = [
         "info:price_question",
