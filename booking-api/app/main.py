@@ -3606,7 +3606,7 @@ def infer_contextual_followup_role(
     explicit_price_followup = is_price_followup_message(cleaned, llm_data) or detect_price_scope_clarification(cleaned)
     weak_price_followup = (
         "?" in cleaned
-        and any(token in lowered for token in ["mi", "mı", "mu", "mü", "aylık", "aylik", "tek sefer", "bu fiyat", "bu ucret", "bu ücret", "dahil", "tamamı", "tamami"])
+        and any(token in lowered for token in ["aylık", "aylik", "tek sefer", "bu fiyat", "bu ucret", "bu ücret", "dahil", "tamamı", "tamami"])
     )
     if recent_act == "answered_price" or price_context_open:
         if explicit_price_followup or weak_price_followup:

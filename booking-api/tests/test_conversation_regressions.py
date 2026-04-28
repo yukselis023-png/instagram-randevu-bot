@@ -225,3 +225,27 @@ def test_price_question_without_service_uses_clean_turkish():
     assert "secilecek" not in reply
     assert "gore" not in reply
     assert "tasarim" not in reply
+
+
+def test_business_fit_question_after_price_context_is_not_price_followup():
+    conversation = {
+        "service": None,
+        "state": "collect_service",
+        "booking_kind": None,
+        "memory_state": {
+            "last_outbound_act": "answered_price",
+            "price_context_open": True,
+        },
+    }
+    history = [
+        {
+            "direction": "out",
+            "message_text": "Net fiyat, seçilecek hizmete göre değişiyor.",
+        }
+    ]
+
+    result = main.maybe_build_information_reply("Bu sistem bizim ajansa uyar mi?", {}, [], conversation, history)
+
+    assert result["kind"] == "generic_ai"
+    assert "fiyat" not in result["reply"].lower()
+    assert "müşteri takibi" in result["reply"].lower()
