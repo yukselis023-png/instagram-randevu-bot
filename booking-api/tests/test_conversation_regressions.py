@@ -302,7 +302,53 @@ def test_delivery_duration_followup_is_not_treated_as_booking_date():
     assert "otomasyon" in reply
     assert "4 hafta" in reply
     assert "olabilir" in reply or "cikabilir" in reply or "çıkabilir" in reply
-    assert "ad" not in reply
+    assert "ad soyad" not in reply
+    assert "adınızı" not in reply
+    assert "adinizi" not in reply
+    assert "soyad" not in reply
+    assert "05.05" not in reply
+
+
+def test_active_booking_state_does_not_override_customer_questions():
+    conversation = {
+        "service": "Otomasyon & Yapay Zeka Cozumleri",
+        "state": "collect_name",
+        "booking_kind": "preconsultation",
+        "requested_date": "2026-05-05",
+        "memory_state": {},
+    }
+
+    for message in ["Dolandirici misiniz?", "Bu guvenilir mi?", "Once bilgi verir misiniz?", "Fiyat neydi?"]:
+        assert not main.should_enter_booking_collection(
+            message,
+            {},
+            asks_availability=False,
+            detected_phone=None,
+            detected_date=None,
+            detected_time=None,
+            conversation=conversation,
+            history=[],
+        )
+
+
+def test_scam_or_trust_question_gets_answer_instead_of_collect_name_prompt():
+    conversation = {
+        "service": "Otomasyon & Yapay Zeka Cozumleri",
+        "state": "collect_name",
+        "booking_kind": "preconsultation",
+        "requested_date": "2026-05-05",
+        "memory_state": {},
+    }
+
+    matched = main.match_service_candidates("Dolandirici misiniz?", conversation.get("service"))
+    result = main.maybe_build_information_reply("Dolandirici misiniz?", {}, matched, conversation, [])
+
+    assert result["kind"] in {"trust_question", "generic_ai"}
+    reply = result["reply"].lower()
+    assert "dolandirici" in reply or "dolandırıcı" in reply or "güven" in reply or "guven" in reply
+    assert "ad soyad" not in reply
+    assert "adınızı" not in reply
+    assert "adinizi" not in reply
     assert "soyad" not in reply
     assert "05.05" not in reply
 

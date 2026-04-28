@@ -5561,6 +5561,34 @@ def is_angry_complaint_message(text: str) -> bool:
     return any(phrase in lowered for phrase in complaint_phrases)
 
 
+def is_trust_or_scam_question(text: str) -> bool:
+    lowered = sanitize_text(text).lower()
+    if "?" not in lowered:
+        return False
+    trust_terms = [
+        "dolandirici",
+        "dolandırıcı",
+        "sahte",
+        "guvenilir",
+        "güvenilir",
+        "guvenebilir",
+        "güvenebilir",
+        "guveneyim",
+        "güveneyim",
+        "gercek misiniz",
+        "gerçek misiniz",
+        "emin olabilir",
+    ]
+    return any(term in lowered for term in trust_terms)
+
+
+def build_trust_or_scam_reply() -> str:
+    return (
+        "Hayır, dolandırıcı değiliz. DOEL Digital olarak web, reklam ve yapay zeka otomasyon hizmetleri veriyoruz. "
+        "Karar vermeden önce referans, kapsam, fiyat ve süreç bilgisini buradan net sorabilirsiniz; içinize sinmezse hiçbir bilgi paylaşmak zorunda değilsiniz."
+    )
+
+
 def build_angry_complaint_reply() -> str:
     return (
         "Kusura bakmayın, sizi yanlış yönlendirdim ve aynı akışı tekrar ettim. "
@@ -5854,6 +5882,17 @@ def should_enter_booking_collection(
         return False
     active_booking_state = sanitize_text(conversation.get("state") or "") in {"collect_name", "collect_phone", "collect_date", "collect_period", "collect_time"}
     if active_booking_state and has_resumeable_booking_context(conversation):
+        if customer_question_should_pause_booking_collection(
+            message_text,
+            llm_data,
+            asks_availability=asks_availability,
+            detected_phone=detected_phone,
+            detected_date=detected_date,
+            detected_time=detected_time,
+            conversation=conversation,
+            history=history,
+        ):
+            return False
         return True
     if asks_availability or detected_phone or detected_date or detected_time:
         return True
@@ -5864,6 +5903,38 @@ def should_enter_booking_collection(
     if message_shows_booking_intent(message_text, llm_data):
         return True
     return llm_bool(llm_data.get("wants_booking")) and llm_booking_confidence(llm_data) >= 0.9
+
+
+def customer_question_should_pause_booking_collection(
+    message_text: str,
+    llm_data: dict[str, Any] | None = None,
+    *,
+    asks_availability: bool = False,
+    detected_phone: str | None = None,
+    detected_date: str | None = None,
+    detected_time: str | None = None,
+    conversation: dict[str, Any] | None = None,
+    history: list[dict[str, Any]] | None = None,
+) -> bool:
+    cleaned = sanitize_text(message_text)
+    if "?" not in cleaned:
+        return False
+    llm_data = llm_data or {}
+    conversation = conversation or {}
+    if asks_availability or detected_phone or detected_date or detected_time:
+        return False
+    if extract_phone(cleaned) or extract_date(cleaned) or extract_time_for_state(cleaned, conversation.get("state")):
+        return False
+    if accepts_pending_consultation_offer(cleaned, conversation, history, llm_data):
+        return False
+    lowered = cleaned.lower()
+    if any(keyword in lowered for keyword in DIRECT_APPOINTMENT_KEYWORDS):
+        return False
+    if message_shows_booking_intent(cleaned, llm_data) or wants_availability_information(cleaned, llm_data):
+        return False
+    if llm_data.get("intent") == "appointment" or (llm_bool(llm_data.get("wants_booking")) and llm_booking_confidence(llm_data) >= 0.9):
+        return False
+    return True
 
 
 def normalize_booking_kind(value: str | None) -> str | None:
@@ -6121,6 +6192,13 @@ def maybe_build_information_reply(message_text: str, llm_data: dict[str, Any], m
             "next_state": "collect_service",
             "set_service": conversation.get("service") if has_booking_context else None,
             "clear_booking": True,
+        }
+    if is_trust_or_scam_question(message_text):
+        return {
+            "reply": build_trust_or_scam_reply(),
+            "kind": "trust_question",
+            "next_state": conversation.get("state", "collect_service") or "collect_service",
+            "set_service": conversation.get("service") if has_booking_context else None,
         }
     if is_delivery_time_question(message_text):
         delivery_service = matched_service or match_service_catalog(message_text, conversation.get("service"))
