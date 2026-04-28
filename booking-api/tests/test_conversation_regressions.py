@@ -318,7 +318,7 @@ def test_active_booking_state_does_not_override_customer_questions():
         "memory_state": {},
     }
 
-    for message in ["Dolandirici misiniz?", "Bu guvenilir mi?", "Once bilgi verir misiniz?", "Fiyat neydi?"]:
+    for message in ["Merhaba", "nasilsiniz", "Dolandirici misiniz?", "Bu guvenilir mi?", "Once bilgi verir misiniz?", "Fiyat neydi?"]:
         assert not main.should_enter_booking_collection(
             message,
             {},
@@ -329,6 +329,24 @@ def test_active_booking_state_does_not_override_customer_questions():
             conversation=conversation,
             history=[],
         )
+
+
+def test_active_booking_state_greeting_gets_greeting_instead_of_collect_prompt():
+    conversation = {
+        "service": "Otomasyon & Yapay Zeka Cozumleri",
+        "state": "collect_name",
+        "booking_kind": "preconsultation",
+        "requested_date": "2026-05-05",
+        "memory_state": {},
+    }
+
+    result = main.maybe_build_information_reply("Merhaba", {}, [], conversation, [])
+
+    assert result["kind"] in {"greeting", "greeting_interrupt"}
+    reply = result["reply"].lower()
+    assert "merhaba" in reply
+    assert "ad soyad" not in reply
+    assert "soyad" not in reply
 
 
 def test_scam_or_trust_question_gets_answer_instead_of_collect_name_prompt():

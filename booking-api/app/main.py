@@ -5658,9 +5658,9 @@ def build_booking_resume_hint(conversation: dict[str, Any]) -> str:
     if state == "collect_date":
         return "İsterseniz size uygun günü yazabilirsiniz."
     if state == "collect_phone":
-        return "İsterseniz telefon numaranızı paylaşarak devam edebiliriz."
+        return "Ön görüşme kaydına daha sonra devam edebiliriz; isterseniz önce sorunuzu yanıtlayayım."
     if state == "collect_name":
-        return "İsterseniz ad soyad bilginizi paylaşarak devam edebiliriz."
+        return "Ön görüşme kaydına daha sonra devam edebiliriz; isterseniz önce sorunuzu yanıtlayayım."
     return "Size nasıl yardımcı olabilirim?"
 
 
@@ -5920,8 +5920,6 @@ def customer_question_should_pause_booking_collection(
     history: list[dict[str, Any]] | None = None,
 ) -> bool:
     cleaned = sanitize_text(message_text)
-    if "?" not in cleaned:
-        return False
     llm_data = llm_data or {}
     conversation = conversation or {}
     if asks_availability or detected_phone or detected_date or detected_time:
@@ -5936,6 +5934,30 @@ def customer_question_should_pause_booking_collection(
     if message_shows_booking_intent(cleaned, llm_data) or wants_availability_information(cleaned, llm_data):
         return False
     if llm_data.get("intent") == "appointment" or (llm_bool(llm_data.get("wants_booking")) and llm_booking_confidence(llm_data) >= 0.9):
+        return False
+    if any(
+        [
+            is_simple_greeting(cleaned),
+            is_good_wishes_message(cleaned),
+            is_smalltalk_message(cleaned),
+            is_presence_check_message(cleaned),
+            is_angry_complaint_message(cleaned),
+            is_trust_or_scam_question(cleaned),
+            is_request_reason_question(cleaned),
+            is_clarification_request(cleaned),
+            is_phone_share_refusal(cleaned),
+            is_price_question(cleaned),
+            is_price_followup_message(cleaned, llm_data),
+            is_delivery_time_question(cleaned),
+            is_service_overview_question(cleaned),
+            is_working_schedule_question(cleaned),
+            is_company_background_question(cleaned),
+            is_assistant_identity_question(cleaned),
+            is_owner_check_message(cleaned),
+        ]
+    ):
+        return True
+    if "?" not in cleaned:
         return False
     return True
 
