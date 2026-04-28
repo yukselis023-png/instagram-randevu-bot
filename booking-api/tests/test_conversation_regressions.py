@@ -301,6 +301,27 @@ def test_service_correction_variants_use_current_message_over_old_service():
         assert conversation["service"] == expected_service
 
 
+def test_same_service_restatement_gets_non_repeated_collect_name_reply():
+    conversation = {
+        "service": "Otomasyon & Yapay Zeka Çözümleri",
+        "state": "collect_name",
+        "booking_kind": "preconsultation",
+        "memory_state": {},
+    }
+
+    assert main.is_same_service_restatement(conversation, "Otomasyon & Yapay Zeka Çözümleri", "Yok otomasyon için yapalım")
+    reply = main.build_collect_name_request_reply(
+        conversation,
+        "ön görüşme",
+        "Not aldım; Otomasyon & Yapay Zeka Çözümleri için. ",
+        same_service_restatement=True,
+    )
+
+    assert reply.startswith("Tamam, Otomasyon")
+    assert "adınızı ve soyadınızı" in reply
+    assert "Not aldım;" not in reply
+
+
 def test_single_letter_is_not_accepted_as_full_name():
     assert main.extract_name("G", "collect_name") is None
     assert main.extract_name("a", "collect_name") is None

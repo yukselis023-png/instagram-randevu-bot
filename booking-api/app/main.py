@@ -2556,6 +2556,7 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
             conversation["booking_kind"] = infer_booking_kind(message_text, llm_data, conversation, matched_services) or ("appointment" if asks_availability else "preconsultation")
         booking_label = get_booking_label(conversation)
         ack_prefix = build_captured_ack_prefix(conversation)
+        same_service_restatement = is_same_service_restatement(conversation, picked_service, message_text)
         reply = None
         appointment_created = False
         appointment_id = None
@@ -2597,7 +2598,7 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
                 final_decision = "service_info_continue"
             else:
                 conversation["state"] = "collect_name"
-                reply = f"{ack_prefix}{booking_label.capitalize()} kaydını açabilmem için önce adınız ve soyadınızı paylaşır mısınız?".strip()
+                reply = build_collect_name_request_reply(conversation, booking_label, ack_prefix, same_service_restatement)
                 final_decision = "collect_name"
         elif not conversation.get("phone"):
             if not booking_transition_allowed:
@@ -4361,6 +4362,23 @@ def build_captured_ack_prefix(conversation: dict[str, Any]) -> str:
     if not bits:
         return ""
     return f"Not aldım; {' '.join(bits)}. "
+
+
+def is_same_service_restatement(conversation: dict[str, Any], picked_service: str | None, message_text: str) -> bool:
+    if not picked_service or sanitize_text(conversation.get("state") or "") != "collect_name":
+        return False
+    if extract_name(message_text, "collect_name"):
+        return False
+    current_service = sanitize_text(conversation.get("service") or "")
+    current_match = match_service_catalog(current_service, current_service) if current_service else None
+    current_display = (current_match or {}).get("display") or current_service
+    return bool(current_display and current_display == picked_service)
+
+
+def build_collect_name_request_reply(conversation: dict[str, Any], booking_label: str, ack_prefix: str, same_service_restatement: bool = False) -> str:
+    if same_service_restatement and conversation.get("service"):
+        return f"Tamam, {conversation['service']} için devam ediyoruz. {booking_label.capitalize()} kaydını açabilmem için adınızı ve soyadınızı yazar mısınız?"
+    return f"{ack_prefix}{booking_label.capitalize()} kaydını açabilmem için önce adınız ve soyadınızı paylaşır mısınız?".strip()
 
 
 def build_post_confirmation_followup_reply(conversation: dict[str, Any], message_text: str) -> str:
