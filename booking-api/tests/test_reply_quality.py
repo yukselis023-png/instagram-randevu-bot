@@ -214,8 +214,8 @@ class ReplyQualityTests(unittest.TestCase):
             ["meta-llama/llama-4-scout-17b-16e-instruct", "llama-3.1-8b-instant"],
         )
 
-    def test_price_replies_skip_llm_polish_for_deterministic_numbers(self):
-        self.assertFalse(
+    def test_price_replies_use_ai_compose_with_deterministic_numbers_guarded(self):
+        self.assertTrue(
             main.should_ai_compose_reply(
                 "info",
                 "info:price_question",

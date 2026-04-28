@@ -264,6 +264,62 @@ def test_website_how_many_days_question_is_not_message_volume():
     assert "yogunluk" not in reply
 
 
+def test_automation_delivery_time_gets_automation_specific_answer():
+    conversation = {
+        "service": None,
+        "state": "collect_service",
+        "booking_kind": None,
+        "memory_state": {},
+    }
+
+    matched = main.match_service_candidates("Otomasyon teslim süresi ne kadar?", None)
+    result = main.maybe_build_information_reply("Otomasyon teslim süresi ne kadar?", {}, matched, conversation, [])
+
+    assert result["kind"] == "delivery_time"
+    assert result["set_service"] == "Otomasyon & Yapay Zeka Çözümleri"
+    reply = result["reply"].lower()
+    assert "otomasyon" in reply
+    assert "web sitesi gibi" not in reply
+    assert "3-7" in reply or "1-3" in reply
+
+
+def test_ai_compose_is_enabled_for_business_reply_labels():
+    labels = [
+        "info:price_question",
+        "info:price_route",
+        "info:price_followup",
+        "info:message_volume",
+        "info:delivery_time",
+        "collect_name",
+        "collect_name_invalid",
+        "human_handoff",
+    ]
+
+    for label in labels:
+        assert main.should_ai_compose_reply("reply", label, conversation={"state": "collect_service"})
+
+
+def test_llm_extractor_runs_for_real_customer_messages(monkeypatch):
+    monkeypatch.setattr(main, "LLM_BASE_URL", "https://api.groq.com/openai/v1")
+    monkeypatch.setattr(main, "LLM_API_KEY", "test-key")
+    conversation = {
+        "service": None,
+        "state": "collect_service",
+        "booking_kind": None,
+        "memory_state": {},
+    }
+    messages = [
+        "Merhaba",
+        "Hizmetlerinizin fiyatları nedir?",
+        "Otomasyon teslim süresi ne kadar?",
+        "Toplantı yapalım",
+        "G",
+    ]
+
+    for message in messages:
+        assert main.should_call_llm_extractor(message, conversation)
+
+
 def test_service_correction_overrides_active_booking_service():
     conversation = {
         "service": "Web Tasarım - KOBİ Paketi",

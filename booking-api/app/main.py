@@ -118,6 +118,7 @@ DOEL_SERVICE_CATALOG = [
         ],
         "price": "5.000 ₺",
         "price_note": "ilk 3 ay indirimli aylık hizmet bedeli",
+        "delivery_time": "standart kurulumlarda 3-7 iş günü, özel entegrasyonlarda 1-3 hafta",
         "summary": "Müşteri mesajlarına 7/24 yanıt, randevuları otomatik ayarlama, teklif ve fatura otomasyonu, Instagram yorumlarına otomatik cevap ve Excel kayıt akışları içerir.",
     },
     {
@@ -5365,8 +5366,9 @@ def build_delivery_time_reply(service: dict[str, Any] | None = None) -> str:
         display = str(service.get("display") or "Bu hizmet").strip()
         delivery_time = str(service.get("delivery_time") or "").strip()
         if delivery_time:
-            return f"{display} için tahmini teslim süresi genelde {delivery_time}. İçeriklerin hazır olması, sayfa sayısı ve revizyon sayısı bu süreyi değiştirebilir."
-    return "Tahmini teslim süresi hizmetin kapsamına göre değişir. Web sitesi gibi standart işlerde içerikler hazırsa süre genelde birkaç iş günü ile iki hafta aralığında netleşir."
+            return f"{display} için tahmini teslim süresi genelde {delivery_time}. Kapsam, entegrasyon sayısı ve hazır içerikler süreyi değiştirebilir."
+        return f"{display} için tahmini teslim süresi kapsam netleşince doğru aralıkla paylaşılır. En doğru süre için ihtiyacı kısaca görmemiz gerekir."
+    return "Tahmini teslim süresi hizmetin kapsamına göre değişir. Kapsam netleşince doğru tarih aralığını paylaşabiliriz."
 
 
 def build_booking_ready_service_reply(service: dict[str, Any], *, price_context: bool = False) -> str:
@@ -6531,58 +6533,12 @@ def elapsed_ms(started_at: float) -> int:
 
 
 def should_call_llm_extractor(message_text: str, conversation: dict[str, Any]) -> bool:
-    state = conversation.get("state", "new")
     cleaned = sanitize_text(message_text)
-    lowered = cleaned.lower()
-    word_count = len(cleaned.split())
-    memory = ensure_conversation_memory(conversation)
-    is_social_or_technical_heuristic = bool(
-        is_simple_greeting(message_text)
-        or is_good_wishes_message(message_text)
-        or is_presence_check_message(message_text)
-        or is_smalltalk_message(message_text)
-        or is_reaction_message(message_text)
-        or is_fatigue_painpoint_message(message_text)
-        or is_technical_issue_message(message_text)
-    )
-    social_signal = bool(is_social_or_technical_heuristic or is_low_signal_message(message_text))
-    contextual_followup = bool(memory.get("pending_offer") or memory.get("open_loop") or memory.get("last_bot_question_type"))
-    recent_outbound_act = sanitize_text(str(memory.get("last_outbound_act") or "")).lower()
-    followup_role = infer_contextual_followup_role(message_text, conversation, None, None)
-
     if not LLM_BASE_URL or not LLM_API_KEY:
         return False
+    if not cleaned:
+        return False
     if is_voice_duration_placeholder_message(message_text):
-        return False
-    if is_service_overview_question(message_text) or is_working_schedule_question(message_text) or is_company_background_question(message_text) or is_assistant_identity_question(message_text) or is_owner_check_message(message_text):
-        return False
-    if is_price_question(message_text):
-        return False
-    if extract_phone(message_text) or extract_time(message_text) or extract_date(message_text):
-        return False
-    if state == "collect_name" and extract_name(message_text, "collect_name"):
-        return False
-    if is_confirmation_acceptance_message(message_text) or is_all_choice_message(message_text):
-        return False
-    if followup_role == "price_clarification":
-        return False
-    objection_type = sanitize_text(str(match_objection_type(message_text) or "")).lower()
-    if detect_priority_choice(message_text):
-        return False
-    if objection_type == "hesitation":
-        return False
-    if is_low_signal_message(message_text):
-        return False
-    if memory.get("offer_status") == "declined" and word_count <= 3 and "?" not in cleaned:
-        return False
-    if sanitize_text(str(memory.get("customer_goal") or "")).lower() in {"ilgilenmiyor", "kapanış onayı", "kapanis onayi", "süreci devam ettirmek istemiyor", "sureci devam ettirmek istemiyor"} and word_count <= 3 and "?" not in cleaned:
-        return False
-    if state in {"collect_service", "collect_name", "collect_phone", "collect_date", "collect_period", "collect_time"} and word_count <= 5:
-        if conversation.get("service") and any(token in lowered for token in ["otomasyon", "yapay zeka", "web", "reklam", "sosyal medya", "crm", "randevu", "dm"]):
-            return False
-    if is_social_or_technical_heuristic and not contextual_followup:
-        return False
-    if word_count <= 1 and not social_signal and not contextual_followup and not match_service_candidates(message_text, conversation.get("service")):
         return False
     return True
 
@@ -6611,12 +6567,6 @@ def should_ai_compose_reply(
     conversation: dict[str, Any] | None = None,
 ) -> bool:
     if not FULL_AI_CONVERSATIONAL_MODE or not LLM_REPLY_POLISH_ENABLED:
-        return False
-
-    label = sanitize_text(decision_label or "").lower()
-    if label == "collect_name_invalid":
-        return False
-    if label in {"info:overview", "info:price_question", "info:price_followup", "info:price_route", "info:message_volume"}:
         return False
 
     _ = (message_type, handoff, appointment_created, conversation)
@@ -7536,8 +7486,8 @@ def polish_reply_text(
 
     catalog = (
         "HİZMETLER VE FİYATLAR: "
-        "1) Web Tasarım KOBİ: 12.900 TL (tek seferlik). "
-        "2) Otomasyon ve Yapay Zeka: 5.000 TL/ay. "
+        "1) Web Tasarım KOBİ: 12.900 TL (tek seferlik), teslim 7-14 iş günü. "
+        "2) Otomasyon ve Yapay Zeka: 5.000 TL/ay, teslim standart kurulumlarda 3-7 iş günü, özel entegrasyonlarda 1-3 hafta. "
         "3) Performans Pazarlama: 7.500 TL/ay (reklam bütçesi hariç). "
         "4) Sosyal Medya Yönetimi: Özel teklif. "
         "5) Marka Stratejisi: Özel teklif. "

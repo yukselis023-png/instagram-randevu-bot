@@ -734,6 +734,19 @@ def process_message(cl: Client, state: PollerState, thread: dict[str, Any], mess
     result = post_to_processing_backend(sender_id, username, processed_text, raw_event)
     should_reply = bool(result.get("should_reply"))
     reply_text = (result.get("reply_text") or "").strip()
+    decision_path = result.get("decision_path")
+    conversation_state = result.get("conversation_state")
+    has_reply = bool(reply_text)
+    logger.info(
+        "poller_backend_decision trace_id=%s message_id=%s sender_id=%s should_reply=%s has_reply=%s state=%s decision_path=%s",
+        trace_id,
+        message_id,
+        sender_id,
+        should_reply,
+        has_reply,
+        conversation_state,
+        decision_path,
+    )
 
     if should_reply and reply_text:
         try:
@@ -742,7 +755,16 @@ def process_message(cl: Client, state: PollerState, thread: dict[str, Any], mess
         except Exception as exc:
             logger.warning("poller_reply_failed trace_id=%s sender_id=%s thread_id=%s error=%s", trace_id, sender_id, thread_id, exc)
     else:
-        logger.info("poller_no_reply trace_id=%s message_id=%s sender_id=%s decision_path=%s", trace_id, message_id, sender_id, result.get("decision_path"))
+        logger.info(
+            "poller_no_reply trace_id=%s message_id=%s sender_id=%s should_reply=%s has_reply=%s state=%s decision_path=%s",
+            trace_id,
+            message_id,
+            sender_id,
+            should_reply,
+            has_reply,
+            conversation_state,
+            decision_path,
+        )
 
     state.add(message_id)
     save_state(state)
