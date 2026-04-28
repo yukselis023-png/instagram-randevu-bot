@@ -6311,7 +6311,49 @@ def maybe_build_information_reply(message_text: str, llm_data: dict[str, Any], m
             "next_state": "collect_service" if not conversation.get("service") else conversation.get("state", "collect_service"),
             "set_service": conversation.get("service"),
         }
+    if should_use_generic_ai_reply(message_text, llm_data, conversation):
+        return {
+            "reply": build_generic_ai_draft_reply(message_text, conversation, history),
+            "kind": "generic_ai",
+            "next_state": "collect_service",
+            "set_service": conversation.get("service"),
+        }
     return None
+
+
+def should_use_generic_ai_reply(message_text: str, llm_data: dict[str, Any] | None, conversation: dict[str, Any]) -> bool:
+    cleaned = sanitize_text(message_text)
+    if not cleaned:
+        return False
+    current_state = sanitize_text(conversation.get("state") or "new")
+    if current_state not in {"new", "collect_service", "human_handoff"}:
+        return False
+    llm_data = llm_data or {}
+    if llm_data.get("intent") == "appointment":
+        return False
+    if is_low_signal_message(cleaned) and "?" not in cleaned:
+        return False
+    return not bool(
+        message_shows_booking_intent(cleaned, llm_data)
+        or wants_availability_information(cleaned, llm_data)
+        or extract_phone(cleaned)
+        or extract_date(cleaned)
+        or extract_time_for_state(cleaned, current_state)
+    )
+
+
+def build_generic_ai_draft_reply(message_text: str, conversation: dict[str, Any], history: list[dict[str, Any]] | None = None) -> str:
+    lowered = sanitize_text(message_text).lower()
+    service = sanitize_text(conversation.get("service") or "")
+    if any(token in lowered for token in ["uyar", "uygun", "mantÄ±klÄ± mÄ±", "mantikli mi", "bize olur mu"]):
+        return "Evet, tekrar eden mesaj, randevu veya mÃ¼ÅŸteri takibi varsa bu sistem size uygun olabilir. En Ã§ok hangi sÃ¼reci hÄ±zlandÄ±rmak istiyorsunuz?"
+    if any(token in lowered for token in ["nasÄ±l Ã§alÄ±ÅŸ", "nasil calis", "nasÄ±l oluyor", "nasil oluyor", "sistem nasÄ±l", "sistem nasil"]):
+        return "Sistem gelen mesajÄ± anlayÄ±p uygun cevabÄ± verir, gerekirse randevu veya mÃ¼ÅŸteri kaydÄ±na baÄŸlar. Hangi akÄ±ÅŸÄ± otomatikleÅŸtirmek istiyorsunuz?"
+    if any(token in lowered for token in ["ne yapÄ±yorsunuz", "ne yapiyorsunuz", "ne iÅŸ", "ne is", "kimsiniz"]):
+        return "DOEL; web tasarÄ±m, yapay zeka otomasyon, reklam ve sosyal medya sÃ¼reÃ§lerinde markalara destek verir. Åu an hangi tarafÄ± geliÅŸtirmek istiyorsunuz?"
+    if service:
+        return f"{service} tarafÄ±nda yardÄ±mcÄ± olabilirim. Sorunuzu netleÅŸtirirseniz size en pratik yolu sÃ¶yleyeyim."
+    return "AnladÄ±m, size net cevap vereyim. Web tasarÄ±m, yapay zeka otomasyon, reklam veya mÃ¼ÅŸteri takibi tarafÄ±ndan hangisini geliÅŸtirmek istiyorsunuz?"
 
 
 def pick_service(text: str, llm_service: str | None) -> str | None:
@@ -6556,6 +6598,7 @@ def build_ai_reply_goal(decision_label: str | None, conversation: dict[str, Any]
         "info:company_background": "Answer the company/about/experience question directly in short natural Turkish. If the exact year or duration is not known in the facts, do not invent it; instead give a brief honest introduction about who the business is, what it does, and its working focus. Do not redirect into service selection, pricing, or discovery unless the customer asks for that next.",
         "info:overview": "Summarize the core services naturally without sounding like a catalog and ask which one is most relevant to them.",
         "info:faq": "Answer the question clearly in natural Turkish and gently guide the next step.",
+        "info:generic_ai": "Answer the customer's message directly in natural Turkish. Do not fall back to vague discovery phrases. If the exact answer needs context, give the most useful short answer first and ask only one focused follow-up question. Do not ask for phone, date, time, meeting, or appointment unless the customer explicitly asked to start booking.",
         "info:objection": "Respond reassuringly without pressure and keep the conversation open.",
         "info:decline_cooldown": "The customer has already declined or is closing the conversation. Reply in one very short, polite Turkish sentence, acknowledge the close naturally, and do not ask any new question or reopen sales.",
         "collect_time": "Present the available time slots briefly and ask which one works best.",

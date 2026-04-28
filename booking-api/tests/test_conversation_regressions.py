@@ -168,3 +168,20 @@ def test_human_request_wins_over_existing_sales_context():
     assert result["kind"] == "human_handoff"
     assert result["handoff"] is True
     assert result["next_state"] == "human_handoff"
+
+
+def test_unclear_non_booking_message_uses_ai_generic_path_not_sales_fallback():
+    conversation = {
+        "service": None,
+        "state": "collect_service",
+        "booking_kind": None,
+        "memory_state": {},
+    }
+
+    result = main.maybe_build_information_reply("Bu sistem bizim ajansa uyar mi?", {}, [], conversation, [])
+
+    assert result["kind"] == "generic_ai"
+    assert result["next_state"] == "collect_service"
+    assert "hangi konuda destek" not in result["reply"].lower()
+    assert "biraz a" not in result["reply"].lower()
+    assert "telefon numaran" not in result["reply"].lower()
