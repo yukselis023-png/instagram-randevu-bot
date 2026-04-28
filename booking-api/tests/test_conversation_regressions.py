@@ -207,3 +207,21 @@ def test_generic_ai_answers_how_it_works_in_clean_turkish():
     assert "mÃ" not in result["reply"]
     assert "Ä" not in result["reply"]
     assert "Å" not in result["reply"]
+
+
+def test_price_question_without_service_uses_clean_turkish():
+    conversation = {
+        "service": None,
+        "state": "collect_service",
+        "booking_kind": None,
+        "memory_state": {},
+    }
+
+    result = main.maybe_build_information_reply("Fiyat nedir?", {}, [], conversation, [])
+
+    assert result["kind"] == "price_route"
+    reply = result["reply"].lower()
+    assert "seçilecek hizmete göre değişiyor" in reply
+    assert "secilecek" not in reply
+    assert "gore" not in reply
+    assert "tasarim" not in reply

@@ -6011,7 +6011,7 @@ def maybe_build_information_reply(message_text: str, llm_data: dict[str, Any], m
                 "set_service": matched_service["display"],
             }
         return {
-            "reply": "Net fiyat, secilecek hizmete gore degisiyor. Web tasarim, otomasyon & yapay zeka, performans pazarlama veya sosyal medya yonetiminden hangisiyle ilgilendiginizi yazarsaniz size dogru bilgiyi paylasayim.",
+            "reply": "Net fiyat, seçilecek hizmete göre değişiyor. Web tasarım, otomasyon & yapay zeka, performans pazarlama veya sosyal medya yönetiminden hangisiyle ilgilendiğinizi yazarsanız size doğru bilgiyi paylaşayım.",
             "kind": "price_route",
             "next_state": "collect_service",
             "set_service": None,
