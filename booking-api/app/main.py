@@ -6025,6 +6025,14 @@ def maybe_build_information_reply(message_text: str, llm_data: dict[str, Any], m
             "set_service": conversation.get("service") if has_booking_context else None,
             "clear_booking": True,
         }
+    if is_delivery_time_question(message_text):
+        delivery_service = matched_service or match_service_catalog(message_text, conversation.get("service"))
+        return {
+            "reply": build_delivery_time_reply(delivery_service),
+            "kind": "delivery_time",
+            "next_state": "collect_service",
+            "set_service": (delivery_service or {}).get("display") or conversation.get("service"),
+        }
     if current_state in {"new", "collect_service", "human_handoff"} and is_message_volume_answer(message_text):
         sector = detect_business_sector(message_text, history)
         return {
@@ -6054,14 +6062,6 @@ def maybe_build_information_reply(message_text: str, llm_data: dict[str, Any], m
             "next_state": "collect_service",
             "set_service": conversation.get("service"),
             "clear_booking": True,
-        }
-    if is_delivery_time_question(message_text):
-        delivery_service = matched_service or match_service_catalog(message_text, conversation.get("service"))
-        return {
-            "reply": build_delivery_time_reply(delivery_service),
-            "kind": "delivery_time",
-            "next_state": "collect_service",
-            "set_service": (delivery_service or {}).get("display") or conversation.get("service"),
         }
     if is_price_question(message_text):
         if matched_service:

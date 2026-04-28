@@ -246,6 +246,24 @@ def test_website_delivery_time_question_is_not_answered_with_price():
     assert "telefon" not in reply
 
 
+def test_website_how_many_days_question_is_not_message_volume():
+    conversation = {
+        "service": None,
+        "state": "collect_service",
+        "booking_kind": None,
+        "memory_state": {},
+    }
+
+    result = main.maybe_build_information_reply("Web sitesi kac gunde teslim olur?", {}, [], conversation, [])
+
+    assert result["kind"] == "delivery_time"
+    reply = result["reply"].lower()
+    assert "teslim" in reply
+    assert "12.900" not in reply
+    assert "yoğunluk" not in reply
+    assert "yogunluk" not in reply
+
+
 def test_business_fit_question_after_price_context_is_not_price_followup():
     conversation = {
         "service": None,
