@@ -283,6 +283,28 @@ def test_automation_delivery_time_gets_automation_specific_answer():
     assert "3-7" in reply or "1-3" in reply
 
 
+def test_delivery_duration_followup_is_not_treated_as_booking_date():
+    message = "4 haftaya ciktigi oluyor mu?"
+    conversation = {
+        "service": "Otomasyon & Yapay Zeka Cozumleri",
+        "state": "collect_service",
+        "booking_kind": None,
+        "memory_state": {},
+    }
+
+    assert main.extract_date(message) is None
+    matched = main.match_service_candidates(message, conversation.get("service"))
+    result = main.maybe_build_information_reply(message, {}, matched, conversation, [])
+
+    assert result["kind"] == "delivery_time"
+    assert result["next_state"] == "collect_service"
+    reply = result["reply"].lower()
+    assert "otomasyon" in reply
+    assert "ad" not in reply
+    assert "soyad" not in reply
+    assert "05.05" not in reply
+
+
 def test_ai_compose_is_enabled_for_business_reply_labels():
     labels = [
         "info:price_question",

@@ -4951,8 +4951,31 @@ def extract_time_for_state(text: str, state: str | None = None) -> str | None:
     return None
 
 
+def is_delivery_duration_followup(text: str) -> bool:
+    lowered = sanitize_text(text).lower()
+    has_duration_amount = re.search(r"\b\d+\s*(?:is\s*)?(?:gun\w*|gün\w*|hafta\w*|ay\w*)\b", lowered)
+    if not has_duration_amount:
+        return False
+    duration_cues = [
+        "cik",
+        "çık",
+        "uz",
+        "sur",
+        "sür",
+        "sure",
+        "süre",
+        "teslim",
+        "termin",
+        "tamamlan",
+        "ne kadar",
+    ]
+    return any(cue in lowered for cue in duration_cues)
+
+
 def has_date_cue(text: str) -> bool:
     if NUMERIC_RANGE_ANSWER_PATTERN.match(sanitize_text(text)):
+        return False
+    if is_delivery_duration_followup(text):
         return False
     return DATE_CUE_PATTERN.search(text) is not None
 
@@ -5117,6 +5140,8 @@ def is_price_question(text: str) -> bool:
 
 def is_delivery_time_question(text: str) -> bool:
     lowered = sanitize_text(text).lower()
+    if is_delivery_duration_followup(text):
+        return True
     delivery_cues = [
         "teslim", "teslimat", "termin", "hazir olur", "hazır olur", "ne zaman hazir",
         "ne zaman hazır", "kac gunde", "kaç günde", "kac gun", "kaç gün",
