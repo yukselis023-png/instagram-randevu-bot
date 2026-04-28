@@ -6333,6 +6333,8 @@ def should_use_generic_ai_reply(message_text: str, llm_data: dict[str, Any] | No
         return False
     if is_low_signal_message(cleaned) and "?" not in cleaned:
         return False
+    if is_business_fit_question(cleaned):
+        return True
     return not bool(
         message_shows_booking_intent(cleaned, llm_data)
         or wants_availability_information(cleaned, llm_data)
@@ -6340,6 +6342,19 @@ def should_use_generic_ai_reply(message_text: str, llm_data: dict[str, Any] | No
         or extract_date(cleaned)
         or extract_time_for_state(cleaned, current_state)
     )
+
+
+def is_business_fit_question(message_text: str) -> bool:
+    lowered = sanitize_text(message_text).lower()
+    if "?" not in lowered:
+        return False
+    fit_words = ["uygun", "uyar", "olur mu", "mantıklı", "mantikli"]
+    business_words = ["ajans", "firma", "şirket", "sirket", "işletme", "isletme", "marka", "sektör", "sektor", "bizim", "bize"]
+    if not any(word in lowered for word in fit_words):
+        return False
+    if not any(word in lowered for word in business_words):
+        return False
+    return not bool(extract_date(lowered) or extract_time_for_state(lowered, "collect_service"))
 
 
 def build_generic_ai_draft_reply(message_text: str, conversation: dict[str, Any], history: list[dict[str, Any]] | None = None) -> str:

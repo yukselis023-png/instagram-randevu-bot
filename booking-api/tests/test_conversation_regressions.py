@@ -249,3 +249,19 @@ def test_business_fit_question_after_price_context_is_not_price_followup():
     assert result["kind"] == "generic_ai"
     assert "fiyat" not in result["reply"].lower()
     assert "müşteri takibi" in result["reply"].lower()
+
+
+def test_short_agency_fit_question_is_not_availability_request():
+    conversation = {
+        "service": None,
+        "state": "collect_service",
+        "booking_kind": None,
+        "memory_state": {},
+    }
+
+    result = main.maybe_build_information_reply("Ajans icin uygun mu?", {}, [], conversation, [])
+
+    assert result["kind"] == "generic_ai"
+    assert "hangi konuda destek" not in result["reply"].lower()
+    assert "biraz açar" not in result["reply"].lower()
+    assert "müşteri takibi" in result["reply"].lower()
