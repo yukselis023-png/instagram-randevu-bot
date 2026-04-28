@@ -4972,6 +4972,24 @@ def is_delivery_duration_followup(text: str) -> bool:
     return any(cue in lowered for cue in duration_cues)
 
 
+def extract_duration_phrase(text: str) -> str | None:
+    lowered = sanitize_text(text).lower()
+    match = re.search(r"\b(\d+)\s*((?:is\s*)?(?:gun\w*|gün\w*|hafta\w*|ay\w*))\b", lowered)
+    if not match:
+        return None
+    amount = match.group(1)
+    unit = match.group(2).strip()
+    if unit.startswith("gun") or unit.startswith("gün"):
+        unit = "gün"
+    elif unit.startswith("hafta"):
+        unit = "hafta"
+    elif unit.startswith("ay"):
+        unit = "ay"
+    elif "gun" in unit or "gün" in unit:
+        unit = "iş günü"
+    return f"{amount} {unit}"
+
+
 def has_date_cue(text: str) -> bool:
     if NUMERIC_RANGE_ANSWER_PATTERN.match(sanitize_text(text)):
         return False
@@ -5394,6 +5412,15 @@ def build_delivery_time_reply(service: dict[str, Any] | None = None) -> str:
             return f"{display} için tahmini teslim süresi genelde {delivery_time}. Kapsam, entegrasyon sayısı ve hazır içerikler süreyi değiştirebilir."
         return f"{display} için tahmini teslim süresi kapsam netleşince doğru aralıkla paylaşılır. En doğru süre için ihtiyacı kısaca görmemiz gerekir."
     return "Tahmini teslim süresi hizmetin kapsamına göre değişir. Kapsam netleşince doğru tarih aralığını paylaşabiliriz."
+
+
+def build_delivery_duration_followup_reply(service: dict[str, Any] | None, message_text: str) -> str:
+    display = str((service or {}).get("display") or "Bu hizmet").strip()
+    duration = extract_duration_phrase(message_text) or "bu seviyeye"
+    return (
+        f"Evet, {display} tarafında {duration} seviyesine çıkabilir; özellikle çoklu entegrasyon, özel CRM/n8n akışı, "
+        "onay süreçleri, revizyonlar veya hazır içerik eksikliği varsa süre uzar. Standart kurulumlarda hedefimiz daha kısa tutmaktır."
+    )
 
 
 def build_booking_ready_service_reply(service: dict[str, Any], *, price_context: bool = False) -> str:
@@ -6097,8 +6124,12 @@ def maybe_build_information_reply(message_text: str, llm_data: dict[str, Any], m
         }
     if is_delivery_time_question(message_text):
         delivery_service = matched_service or match_service_catalog(message_text, conversation.get("service"))
+        if is_delivery_duration_followup(message_text):
+            reply_text = build_delivery_duration_followup_reply(delivery_service, message_text)
+        else:
+            reply_text = build_delivery_time_reply(delivery_service)
         return {
-            "reply": build_delivery_time_reply(delivery_service),
+            "reply": reply_text,
             "kind": "delivery_time",
             "next_state": "collect_service",
             "set_service": (delivery_service or {}).get("display") or conversation.get("service"),

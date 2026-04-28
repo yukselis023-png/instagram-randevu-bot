@@ -300,6 +300,8 @@ def test_delivery_duration_followup_is_not_treated_as_booking_date():
     assert result["next_state"] == "collect_service"
     reply = result["reply"].lower()
     assert "otomasyon" in reply
+    assert "4 hafta" in reply
+    assert "olabilir" in reply or "cikabilir" in reply or "çıkabilir" in reply
     assert "ad" not in reply
     assert "soyad" not in reply
     assert "05.05" not in reply
