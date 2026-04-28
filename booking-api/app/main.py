@@ -6345,15 +6345,15 @@ def should_use_generic_ai_reply(message_text: str, llm_data: dict[str, Any] | No
 def build_generic_ai_draft_reply(message_text: str, conversation: dict[str, Any], history: list[dict[str, Any]] | None = None) -> str:
     lowered = sanitize_text(message_text).lower()
     service = sanitize_text(conversation.get("service") or "")
-    if any(token in lowered for token in ["uyar", "uygun", "mantÄ±klÄ± mÄ±", "mantikli mi", "bize olur mu"]):
-        return "Evet, tekrar eden mesaj, randevu veya mÃ¼ÅŸteri takibi varsa bu sistem size uygun olabilir. En Ã§ok hangi sÃ¼reci hÄ±zlandÄ±rmak istiyorsunuz?"
-    if any(token in lowered for token in ["nasÄ±l Ã§alÄ±ÅŸ", "nasil calis", "nasÄ±l oluyor", "nasil oluyor", "sistem nasÄ±l", "sistem nasil"]):
-        return "Sistem gelen mesajÄ± anlayÄ±p uygun cevabÄ± verir, gerekirse randevu veya mÃ¼ÅŸteri kaydÄ±na baÄŸlar. Hangi akÄ±ÅŸÄ± otomatikleÅŸtirmek istiyorsunuz?"
-    if any(token in lowered for token in ["ne yapÄ±yorsunuz", "ne yapiyorsunuz", "ne iÅŸ", "ne is", "kimsiniz"]):
-        return "DOEL; web tasarÄ±m, yapay zeka otomasyon, reklam ve sosyal medya sÃ¼reÃ§lerinde markalara destek verir. Åu an hangi tarafÄ± geliÅŸtirmek istiyorsunuz?"
+    if any(token in lowered for token in ["uyar", "uygun", "mantıklı mı", "mantikli mi", "bize olur mu"]):
+        return "Evet, tekrar eden mesaj, randevu veya müşteri takibi varsa bu sistem size uygun olabilir. En çok hangi süreci hızlandırmak istiyorsunuz?"
+    if any(token in lowered for token in ["nasıl çalış", "nasil calis", "nasıl oluyor", "nasil oluyor", "sistem nasıl", "sistem nasil"]):
+        return "Sistem gelen mesajı anlayıp uygun cevabı verir, gerekirse randevu veya müşteri kaydına bağlar. Hangi akışı otomatikleştirmek istiyorsunuz?"
+    if any(token in lowered for token in ["ne yapıyorsunuz", "ne yapiyorsunuz", "ne iş", "ne is", "kimsiniz"]):
+        return "DOEL; web tasarım, yapay zeka otomasyon, reklam ve sosyal medya süreçlerinde markalara destek verir. Şu an hangi tarafı geliştirmek istiyorsunuz?"
     if service:
-        return f"{service} tarafÄ±nda yardÄ±mcÄ± olabilirim. Sorunuzu netleÅŸtirirseniz size en pratik yolu sÃ¶yleyeyim."
-    return "AnladÄ±m, size net cevap vereyim. Web tasarÄ±m, yapay zeka otomasyon, reklam veya mÃ¼ÅŸteri takibi tarafÄ±ndan hangisini geliÅŸtirmek istiyorsunuz?"
+        return f"{service} tarafında yardımcı olabilirim. Sorunuzu netleştirirseniz size en pratik yolu söyleyeyim."
+    return "Anladım, size net cevap vereyim. Web tasarım, yapay zeka otomasyon, reklam veya müşteri takibi tarafından hangisini geliştirmek istiyorsunuz?"
 
 
 def pick_service(text: str, llm_service: str | None) -> str | None:

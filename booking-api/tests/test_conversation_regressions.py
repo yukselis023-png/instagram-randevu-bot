@@ -185,3 +185,25 @@ def test_unclear_non_booking_message_uses_ai_generic_path_not_sales_fallback():
     assert "hangi konuda destek" not in result["reply"].lower()
     assert "biraz a" not in result["reply"].lower()
     assert "telefon numaran" not in result["reply"].lower()
+    assert "müşteri" in result["reply"].lower()
+    assert "mÃ" not in result["reply"]
+    assert "Ä" not in result["reply"]
+    assert "Å" not in result["reply"]
+
+
+def test_generic_ai_answers_how_it_works_in_clean_turkish():
+    conversation = {
+        "service": None,
+        "state": "collect_service",
+        "booking_kind": None,
+        "memory_state": {},
+    }
+
+    result = main.maybe_build_information_reply("Nasıl çalışıyor?", {}, [], conversation, [])
+
+    assert result["kind"] == "faq"
+    assert "ihtiyaç analizi" in result["reply"].lower()
+    assert "telefon numaran" not in result["reply"].lower()
+    assert "mÃ" not in result["reply"]
+    assert "Ä" not in result["reply"]
+    assert "Å" not in result["reply"]
