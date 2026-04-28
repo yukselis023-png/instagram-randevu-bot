@@ -280,3 +280,25 @@ def test_agency_fit_question_answers_even_in_old_collection_state():
     assert result["kind"] == "generic_ai"
     assert "hangi konuda destek" not in result["reply"].lower()
     assert "telefon numaran" not in result["reply"].lower()
+
+
+def test_agency_fit_question_is_not_booking_transition():
+    message = "Ajans icin uygun mu?"
+    conversation = {
+        "service": None,
+        "state": "collect_phone",
+        "booking_kind": "preconsultation",
+        "memory_state": {},
+    }
+
+    assert main.is_business_fit_question(message)
+    assert not main.should_enter_booking_collection(
+        message,
+        {},
+        asks_availability=False,
+        detected_phone=None,
+        detected_date=None,
+        detected_time=None,
+        conversation=conversation,
+        history=[],
+    )

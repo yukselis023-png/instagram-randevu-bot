@@ -2467,7 +2467,8 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
         direct_service_match = bool(picked_service or direct_matched_services)
         matched_services = match_service_candidates(message_text, conversation.get("service") or llm_service_hint)
         matched_service = matched_services[0] if matched_services else None
-        asks_availability = wants_availability_information(message_text, llm_data)
+        business_fit_question = is_business_fit_question(message_text)
+        asks_availability = False if business_fit_question else wants_availability_information(message_text, llm_data)
         booking_transition_allowed = should_enter_booking_collection(
             message_text,
             llm_data,
@@ -2478,6 +2479,8 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
             conversation=conversation,
             history=recent_history,
         )
+        if business_fit_question:
+            booking_transition_allowed = False
         info_result = maybe_build_information_reply(message_text, llm_data, matched_services, conversation, recent_history, direct_service_match=direct_service_match)
 
         if info_result and not booking_transition_allowed and not detected_date and not detected_time and not detected_phone and llm_data.get("intent") != "appointment":
@@ -5703,6 +5706,8 @@ def should_enter_booking_collection(
 ) -> bool:
     llm_data = llm_data or {}
     conversation = conversation or {}
+    if is_business_fit_question(message_text):
+        return False
     active_booking_state = sanitize_text(conversation.get("state") or "") in {"collect_name", "collect_phone", "collect_date", "collect_period", "collect_time"}
     if active_booking_state and has_resumeable_booking_context(conversation):
         return True
