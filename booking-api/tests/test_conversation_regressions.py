@@ -449,6 +449,22 @@ def test_all_choice_after_general_price_question_lists_all_prices():
     assert "hangi hizmet" not in reply
 
 
+def test_dm_volume_message_overrides_prior_web_context():
+    conversation = {
+        "service": "Web Tasarım - KOBİ Paketi",
+        "state": "collect_service",
+        "booking_kind": None,
+        "memory_state": {},
+    }
+
+    result = main.maybe_build_information_reply("Çok DM geliyor", {}, [], conversation, [])
+
+    assert result["kind"] == "message_volume"
+    assert result["set_service"] == "Otomasyon & Yapay Zeka Çözümleri"
+    assert "web tasarım" not in result["reply"].lower()
+    assert "dm" in result["reply"].lower() or "mesaj" in result["reply"].lower()
+
+
 def test_question_in_phone_collection_is_answered_before_phone_pressure():
     conversation = {
         "service": "Otomasyon & Yapay Zeka Çözümleri",

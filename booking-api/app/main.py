@@ -510,7 +510,7 @@ BEAUTY_BUSINESS_KEYWORDS = ["güzellik salonu", "guzellik salonu", "güzellik me
 REAL_ESTATE_BUSINESS_KEYWORDS = ["emlak", "gayrimenkul", "ilan", "portföy", "portfoy", "arsa", "daire", "konut", "kiralık", "kiralik", "satılık", "satilik", "yer gösterme", "yer gosterme"]
 DM_DELAY_KEYWORDS = ["gecikme", "geç dönüş", "gec donus", "geç cevap", "gec cevap", "geç yanıt", "gec yanit", "yanıt zor", "yanit zor", "yavaş dönüş", "yavas donus"]
 REPEATED_MESSAGE_ISSUE_KEYWORDS = ["tekrar eden mesaj", "tekrar eden mesajlar", "aynı sorular", "ayni sorular", "aynı şeyler", "ayni seyler", "aynı mesajlar", "ayni mesajlar", "sürekli aynı", "surekli ayni"]
-MESSAGE_VOLUME_KEYWORDS = ["çok kişi yazıyor", "cok kisi yaziyor", "çok mesaj geliyor", "cok mesaj geliyor", "günde", "gunde", "günlük", "gunluk", "mesaj trafiği", "mesaj trafigi", "dm trafiği", "dm trafigi", "çok talep geliyor", "cok talep geliyor", "çok yoğun", "cok yogun"]
+MESSAGE_VOLUME_KEYWORDS = ["çok kişi yazıyor", "cok kisi yaziyor", "çok mesaj geliyor", "cok mesaj geliyor", "çok mesaj", "cok mesaj", "çok dm geliyor", "cok dm geliyor", "çok dm", "cok dm", "günde", "gunde", "günlük", "gunluk", "mesaj trafiği", "mesaj trafigi", "dm trafiği", "dm trafigi", "çok talep geliyor", "cok talep geliyor", "çok yoğun", "cok yogun"]
 ALL_CHOICE_MESSAGES = {"hepsi", "hepsi lazım", "hepsi lazim", "hepsi olur", "hepsi olsun", "hepsi gerekli", "hepsi ya", "hepsi ya genel olarak", "genel olarak hepsi", "hepsi gerekiyor", "hepsi var", "hepsi yoruyor", "hep birlikte", "tamamı", "tamami", "her şey", "her sey", "hepsi hepsi", "ikisi", "ikisi de", "ikiside", "iki side", "ikidi de", "ikiside ya", "her ikisi", "ikisi de lazım", "ikisi de lazim"}
 CONFIRMATION_ACCEPTANCE_MESSAGES = {
     "olur", "tamam", "evet", "uygun", "olabilir", "olur tabii", "olur tabi", "olur olur",
@@ -2496,7 +2496,7 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
             if info_result.get("clear_booking"):
                 clear_booking_assumption(conversation)
             set_service = sanitize_text(info_result.get("set_service") or "")
-            if set_service and not conversation.get("service"):
+            if set_service and (not conversation.get("service") or info_result.get("kind") == "message_volume"):
                 conversation["service"] = set_service
             forced_booking_kind = normalize_booking_kind(info_result.get("set_booking_kind"))
             if forced_booking_kind:
@@ -6059,12 +6059,11 @@ def maybe_build_information_reply(message_text: str, llm_data: dict[str, Any], m
             "set_service": (delivery_service or {}).get("display") or conversation.get("service"),
         }
     if current_state in {"new", "collect_service", "human_handoff"} and is_message_volume_answer(message_text):
-        sector = detect_business_sector(message_text, history)
         return {
             "reply": build_message_volume_reply(message_text, conversation, history),
             "kind": "message_volume",
             "next_state": "collect_service",
-            "set_service": conversation.get("service") or ("Otomasyon & Yapay Zeka Ã‡Ã¶zÃ¼mleri" if sector in {"beauty", "real_estate"} else None),
+            "set_service": "Otomasyon & Yapay Zeka Çözümleri",
         }
     if is_technical_issue_message(message_text):
         return {
