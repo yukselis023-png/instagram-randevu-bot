@@ -5922,12 +5922,13 @@ def maybe_build_information_reply(message_text: str, llm_data: dict[str, Any], m
     matched_service = matched_services[0] if matched_services else None
     has_booking_context = has_resumeable_booking_context(conversation)
     memory = ensure_conversation_memory(conversation)
-    asks_detail = any(keyword in lowered for keyword in DETAIL_KEYWORDS) or ("?" in message_text and current_state in {"new", "collect_service"})
+    detail_keyword_match = any(keyword in lowered for keyword in DETAIL_KEYWORDS)
+    asks_detail = detail_keyword_match or ("?" in message_text and current_state in {"new", "collect_service"})
     asks_identity = is_assistant_identity_question(message_text)
     asks_services = is_service_overview_question(message_text)
     recent_outbound_text = get_last_outbound_text(history).lower()
     recent_overview_context = any(cue in recent_outbound_text for cue in ["web tasarim", "otomasyon", "reklam", "sosyal medya"])
-    asks_detailed_service_overview = (asks_services and asks_detail) or (asks_detail and recent_overview_context)
+    asks_detailed_service_overview = (asks_services and asks_detail) or (detail_keyword_match and recent_overview_context)
     asks_schedule = is_working_schedule_question(message_text)
     if (asks_identity and asks_services) or (asks_identity and asks_schedule) or (asks_services and asks_schedule):
         return {

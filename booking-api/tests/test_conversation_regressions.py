@@ -397,6 +397,32 @@ def test_generic_security_question_gets_direct_answer_not_service_picker():
     assert "hangisini geliştirmek" not in reply
 
 
+def test_security_question_after_price_overview_is_answered_directly():
+    conversation = {
+        "service": None,
+        "state": "collect_service",
+        "booking_kind": None,
+        "memory_state": {
+            "last_outbound_act": "answered_price",
+            "price_context_open": True,
+        },
+    }
+    history = [
+        {
+            "direction": "out",
+            "message_text": "Tabii, ana hizmet fiyatları şöyle: Web Tasarım - KOBİ Paketi: 12.900 TL; Otomasyon & Yapay Zeka Çözümleri: 5.000 TL; Performans Pazarlama: 7.500 TL.",
+        }
+    ]
+
+    result = main.maybe_build_information_reply("Bu sistem guvenli mi?", {}, [], conversation, history)
+
+    assert result["kind"] == "generic_ai"
+    reply = result["reply"].lower()
+    assert "riskleri" in reply
+    assert "telefon" not in reply
+    assert "web tasar" not in reply
+
+
 def test_answerable_offtopic_question_gets_answer_not_service_picker():
     conversation = {
         "service": None,
