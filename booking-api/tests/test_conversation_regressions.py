@@ -302,3 +302,112 @@ def test_agency_fit_question_is_not_booking_transition():
         conversation=conversation,
         history=[],
     )
+
+
+def test_human_identity_question_does_not_trigger_handoff():
+    conversation = {
+        "service": None,
+        "state": "collect_service",
+        "booking_kind": None,
+        "memory_state": {},
+    }
+
+    result = main.maybe_build_information_reply("Insanla mi gorusuyorum?", {}, [], conversation, [])
+
+    assert result["kind"] == "assistant_identity"
+    assert result.get("handoff") is not True
+    assert result["next_state"] != "human_handoff"
+    assert "telefon numaran" not in result["reply"].lower()
+    assert "destek" in result["reply"].lower() or "asistan" in result["reply"].lower()
+
+
+def test_explicit_human_handoff_request_still_handoffs():
+    conversation = {
+        "service": None,
+        "state": "collect_service",
+        "booking_kind": None,
+        "memory_state": {},
+    }
+
+    result = main.maybe_build_information_reply("Insanla gorusmek istiyorum", {}, [], conversation, [])
+
+    assert result["kind"] == "human_handoff"
+    assert result["handoff"] is True
+    assert result["next_state"] == "human_handoff"
+
+
+def test_all_choice_after_general_price_question_lists_all_prices():
+    conversation = {
+        "service": None,
+        "state": "collect_service",
+        "booking_kind": None,
+        "memory_state": {
+            "last_outbound_act": "answered_price",
+            "price_context_open": True,
+        },
+    }
+    history = [
+        {
+            "direction": "out",
+            "message_text": "Net fiyat, seçilecek hizmete göre değişiyor. Web tasarım, otomasyon & yapay zeka, performans pazarlama veya sosyal medya yönetiminden hangisiyle ilgilendiğinizi yazarsanız size doğru bilgiyi paylaşayım.",
+        }
+    ]
+
+    result = main.maybe_build_information_reply("Hepsini merak ediyorum", {}, [], conversation, history)
+
+    assert result["kind"] == "price_all_services"
+    reply = result["reply"].lower()
+    assert "web tasarım" in reply
+    assert "12.900" in reply
+    assert "otomasyon" in reply
+    assert "5.000" in reply
+    assert "performans pazarlama" in reply
+    assert "7.500" in reply
+    assert "hangi hizmet" not in reply
+
+
+def test_question_in_phone_collection_is_answered_before_phone_pressure():
+    conversation = {
+        "service": "Otomasyon & Yapay Zeka Çözümleri",
+        "state": "collect_phone",
+        "booking_kind": "preconsultation",
+        "memory_state": {},
+    }
+
+    result = main.maybe_build_information_reply("Bu sistem güvenli mi?", {}, [], conversation, [])
+
+    assert result["kind"] == "generic_ai"
+    assert "telefon numaran" not in result["reply"].lower()
+    assert result["reply"].strip()
+
+
+def test_generic_security_question_gets_direct_answer_not_service_picker():
+    conversation = {
+        "service": None,
+        "state": "collect_service",
+        "booking_kind": None,
+        "memory_state": {},
+    }
+
+    result = main.maybe_build_information_reply("Bu sistem guvenli mi?", {}, [], conversation, [])
+
+    assert result["kind"] == "generic_ai"
+    reply = result["reply"].lower()
+    assert "güven" in reply or "guven" in reply
+    assert "hangisini geliştirmek" not in reply
+
+
+def test_answerable_offtopic_question_gets_answer_not_service_picker():
+    conversation = {
+        "service": None,
+        "state": "collect_service",
+        "booking_kind": None,
+        "memory_state": {},
+    }
+
+    result = main.maybe_build_information_reply("Dunyanin baskenti neresi?", {}, [], conversation, [])
+
+    assert result["kind"] == "generic_ai"
+    reply = result["reply"].lower()
+    assert "başkenti" in reply or "baskenti" in reply
+    assert "hangisini geliştirmek" not in reply

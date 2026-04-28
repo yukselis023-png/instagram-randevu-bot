@@ -541,6 +541,7 @@ OWNER_CHECK_KEYWORDS = [
 ]
 ASSISTANT_IDENTITY_KEYWORDS = [
     "adın ne", "adin ne", "adınız ne", "adiniz ne", "kimsin", "kimsiniz", "kimle görüşüyorum", "kiminle görüşüyorum", "sen misin", "siz misiniz",
+    "insanla mı görüşüyorum", "insanla mi gorusuyorum", "insanla mı gorusuyorum", "insanla mi görüşüyorum",
 ]
 CLARIFICATION_KEYWORDS = [
     "nasıl yani", "nasil yani", "ne demek", "anlamadım", "anlamadim", "tam olarak ne", "yani ne", "nasıl oluyor", "nasil oluyor",
@@ -5338,6 +5339,26 @@ def build_price_scope_clarification_reply(service: dict[str, Any] | None = None)
     return "Hayır, tüm hizmetler dahil değil. Paylaşılan rakam başlangıç fiyatıdır ve hizmete göre değişir. İsterseniz hangi hizmet için düşündüğünüzü yazın, net söyleyeyim."
 
 
+def build_all_services_price_reply() -> str:
+    priced_items: list[str] = []
+    special_offer_items: list[str] = []
+    for service in DOEL_SERVICE_CATALOG:
+        display = str(service.get("display") or "").strip()
+        price = str(service.get("price") or "").strip().replace("₺", "TL")
+        note = str(service.get("price_note") or "").strip()
+        if not display or not price:
+            continue
+        line = f"{display}: {price}"
+        if note:
+            line += f" ({note})"
+        if price.lower().startswith("özel"):
+            special_offer_items.append(line)
+        else:
+            priced_items.append(line)
+    joined = "; ".join([*priced_items, *special_offer_items])
+    return f"Tabii, ana hizmet fiyatları şöyle: {joined}. İsterseniz en merak ettiğiniz kalemden başlayıp detaylandırayım."
+
+
 def build_price_negotiation_reply(service: dict[str, Any], message_text: str) -> str:
     budget_amount = extract_budget_amount(message_text)
     budget_text = format_try_amount(budget_amount)
@@ -5908,14 +5929,6 @@ def maybe_build_information_reply(message_text: str, llm_data: dict[str, Any], m
     recent_overview_context = any(cue in recent_outbound_text for cue in ["web tasarim", "otomasyon", "reklam", "sosyal medya"])
     asks_detailed_service_overview = (asks_services and asks_detail) or (asks_detail and recent_overview_context)
     asks_schedule = is_working_schedule_question(message_text)
-    if llm_bool(llm_data.get("wants_human")) or any(keyword in sanitize_text(message_text).lower() for keyword in HUMAN_KEYWORDS):
-        return {
-            "reply": "Tabii, sizi yetkili ekibimize yönlendiriyorum. Uygunsanız adınızı ve telefon numaranızı bırakın, ekibimiz size kısa sürede dönüş sağlasın.",
-            "kind": "human_handoff",
-            "next_state": "human_handoff",
-            "set_service": conversation.get("service"),
-            "handoff": True,
-        }
     if (asks_identity and asks_services) or (asks_identity and asks_schedule) or (asks_services and asks_schedule):
         return {
             "reply": build_combined_intro_reply(
@@ -5926,6 +5939,14 @@ def maybe_build_information_reply(message_text: str, llm_data: dict[str, Any], m
             "kind": "combined_intro",
             "next_state": "collect_service",
             "set_service": conversation.get("service") if has_booking_context else None,
+        }
+    if not asks_identity and not is_owner_check_message(message_text) and (llm_bool(llm_data.get("wants_human")) or any(keyword in sanitize_text(message_text).lower() for keyword in HUMAN_KEYWORDS)):
+        return {
+            "reply": "Tabii, sizi yetkili ekibimize yönlendiriyorum. Uygunsanız adınızı ve telefon numaranızı bırakın, ekibimiz size kısa sürede dönüş sağlasın.",
+            "kind": "human_handoff",
+            "next_state": "human_handoff",
+            "set_service": conversation.get("service"),
+            "handoff": True,
         }
     if ensure_conversation_memory(conversation).get("offer_status") == "declined" and (is_closeout_message(message_text) or is_low_signal_message(message_text)):
         return {
@@ -6084,6 +6105,13 @@ def maybe_build_information_reply(message_text: str, llm_data: dict[str, Any], m
         }
     followup_role = infer_contextual_followup_role(message_text, conversation, history, llm_data)
     recent_outbound_act = infer_recent_outbound_act(history)
+    if is_all_choice_message(message_text) and (recent_outbound_act == "answered_price" or recent_outbound_answered_price(history) or memory.get("price_context_open")):
+        return {
+            "reply": build_all_services_price_reply(),
+            "kind": "price_all_services",
+            "next_state": "collect_service",
+            "set_service": None,
+        }
     if followup_role == "price_clarification" and recent_outbound_act == "answered_price":
         scoped_service = matched_service or (service_catalog.get(conversation.get("service")) if conversation.get("service") else None)
         return {
@@ -6334,7 +6362,10 @@ def should_use_generic_ai_reply(message_text: str, llm_data: dict[str, Any] | No
         return True
     current_state = sanitize_text(conversation.get("state") or "new")
     if current_state not in {"new", "collect_service", "human_handoff"}:
-        return False
+        if "?" not in cleaned:
+            return False
+        if extract_phone(cleaned) or extract_date(cleaned) or extract_time_for_state(cleaned, current_state):
+            return False
     llm_data = llm_data or {}
     if llm_data.get("intent") == "appointment":
         return False
@@ -6365,6 +6396,10 @@ def is_business_fit_question(message_text: str) -> bool:
 def build_generic_ai_draft_reply(message_text: str, conversation: dict[str, Any], history: list[dict[str, Any]] | None = None) -> str:
     lowered = sanitize_text(message_text).lower()
     service = sanitize_text(conversation.get("service") or "")
+    if any(token in lowered for token in ["güvenli", "guvenli", "güvenlik", "guvenlik", "güvenli mi", "guvenli mi"]):
+        return "Evet, doğru kurulumda güvenli çalışır; erişimler, müşteri verisi ve otomasyon adımları kontrollü şekilde yapılandırılır. İsterseniz hangi verilerin işleneceğini yazın, riskleri net söyleyeyim."
+    if any(token in lowered for token in ["dünyanın başkenti", "dunyanin baskenti", "dünya başkenti", "dunya baskenti"]):
+        return "Dünyanın tek bir başkenti yok; her ülkenin kendi başkenti var. İsterseniz belirli bir ülkeyi yazın, başkentini söyleyeyim."
     if any(token in lowered for token in ["uyar", "uygun", "mantıklı mı", "mantikli mi", "bize olur mu"]):
         return "Evet, tekrar eden mesaj, randevu veya müşteri takibi varsa bu sistem size uygun olabilir. En çok hangi süreci hızlandırmak istiyorsunuz?"
     if any(token in lowered for token in ["nasıl çalış", "nasil calis", "nasıl oluyor", "nasil oluyor", "sistem nasıl", "sistem nasil"]):
@@ -6373,7 +6408,9 @@ def build_generic_ai_draft_reply(message_text: str, conversation: dict[str, Any]
         return "DOEL; web tasarım, yapay zeka otomasyon, reklam ve sosyal medya süreçlerinde markalara destek verir. Şu an hangi tarafı geliştirmek istiyorsunuz?"
     if service:
         return f"{service} tarafında yardımcı olabilirim. Sorunuzu netleştirirseniz size en pratik yolu söyleyeyim."
-    return "Anladım, size net cevap vereyim. Web tasarım, yapay zeka otomasyon, reklam veya müşteri takibi tarafından hangisini geliştirmek istiyorsunuz?"
+    if "?" in lowered:
+        return "Net cevap vereyim: Bu konuda elimde kesin bilgi yoksa uydurmam; bildiğim kısmı açıkça söyler, belirsiz kalan noktayı ekibe netleştiririm. Sorunuzu biraz daha somut yazarsanız doğrudan cevaplayayım."
+    return "Anladım. Buradan mesajınızı değerlendirip size en uygun cevabı vermeye çalışacağım."
 
 
 def pick_service(text: str, llm_service: str | None) -> str | None:
