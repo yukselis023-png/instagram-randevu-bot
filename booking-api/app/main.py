@@ -51,7 +51,7 @@ SLOT_DURATION_MINUTES = int(os.getenv("SLOT_DURATION_MINUTES", "60"))
 SLOT_BUFFER_MINUTES = int(os.getenv("SLOT_BUFFER_MINUTES", "10"))
 APPOINTMENT_LOOKAHEAD_DAYS = int(os.getenv("APPOINTMENT_LOOKAHEAD_DAYS", "30"))
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://api.groq.com/openai/v1").rstrip("/")
-LLM_API_KEY = os.getenv("LLM_API_KEY", "")
+LLM_API_KEY = os.getenv("LLM_API_KEY", "").strip()
 LLM_MODEL = os.getenv("LLM_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct")
 LLM_FALLBACK_MODEL = os.getenv("LLM_FALLBACK_MODEL", "llama-3.1-8b-instant")
 LLM_EXTRACT_TIMEOUT_SECONDS = float(os.getenv("LLM_EXTRACT_TIMEOUT_SECONDS", "6"))
@@ -939,6 +939,55 @@ def version() -> dict[str, Any]:
         "ai_first_enabled": AI_FIRST_ENABLED,
         "reply_guarantee_enabled": REPLY_GUARANTEE_ENABLED,
     }
+
+
+@app.get("/api/llm-health")
+def llm_health() -> dict[str, Any]:
+    if not LLM_BASE_URL or not LLM_API_KEY:
+        return {
+            "ok": False,
+            "configured": False,
+            "base_url_configured": bool(LLM_BASE_URL),
+            "api_key_configured": bool(LLM_API_KEY),
+            "model": LLM_MODEL,
+        }
+    headers = {
+        "Authorization": f"Bearer {LLM_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    try:
+        response = requests.post(
+            f"{LLM_BASE_URL}/chat/completions",
+            headers=headers,
+            json={
+                "model": LLM_REPLY_MICRO_MODEL or LLM_MODEL,
+                "messages": [
+                    {"role": "system", "content": "Return exactly OK."},
+                    {"role": "user", "content": "health"},
+                ],
+                "temperature": 0,
+                "max_tokens": 8,
+            },
+            timeout=10,
+        )
+        preview = sanitize_text(response.text)[:240]
+        return {
+            "ok": response.status_code < 400,
+            "configured": True,
+            "status_code": response.status_code,
+            "model": LLM_REPLY_MICRO_MODEL or LLM_MODEL,
+            "base_url": LLM_BASE_URL,
+            "body_preview": preview,
+        }
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "ok": False,
+            "configured": True,
+            "status_code": None,
+            "model": LLM_REPLY_MICRO_MODEL or LLM_MODEL,
+            "base_url": LLM_BASE_URL,
+            "error": sanitize_text(str(exc))[:240],
+        }
 
 
 @app.get("/crm", response_class=HTMLResponse)
