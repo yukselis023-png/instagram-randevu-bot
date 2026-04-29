@@ -1633,3 +1633,244 @@ def test_ai_first_delivery_followup_suppresses_booking_collection():
         conversation,
         {},
     )
+
+
+def test_ai_first_booking_after_phone_suggests_crm_slots(monkeypatch):
+    conversation = {
+        "service": "Web Tasarim - KOBI Paketi",
+        "full_name": "Berkay Elbir",
+        "phone": "+905539088633",
+        "state": "collect_phone",
+        "booking_kind": "preconsultation",
+        "memory_state": {},
+    }
+
+    def fake_slots(_conn, date_value, _service_name=None):
+        return {
+            "2026-04-30": ["12:00", "14:00"],
+            "2026-05-01": ["11:00"],
+        }.get(date_value, [])
+
+    monkeypatch.setattr(main, "get_available_booking_slots_for_date", fake_slots)
+
+    result = main.prepare_ai_first_booking_availability(
+        object(),
+        conversation,
+        detected_date=None,
+        detected_time=None,
+        start_date_value="2026-04-29",
+    )
+
+    reply = result["reply_text"].lower()
+    assert "uygun ilk" in reply
+    assert "12:00" in reply
+    assert "hangi gun" not in reply
+    assert "hangi saat" not in reply
+    assert conversation["state"] == "collect_time"
+    assert conversation["memory_state"]["suggested_booking_slots"][0] == {
+        "date": "2026-04-30",
+        "time": "12:00",
+    }
+
+
+def test_booking_slot_suggestions_use_clean_hourly_times(monkeypatch):
+    monkeypatch.setattr(main, "is_slot_capacity_available", lambda *_args, **_kwargs: True)
+
+    slots = main.get_available_booking_slots_for_date(object(), "2026-04-30", "Web Tasarim - KOBI Paketi")
+
+    assert slots[:4] == ["10:00", "11:00", "12:00", "13:00"]
+    assert "11:10" not in slots
+    assert "12:20" not in slots
+
+
+def test_ai_first_time_only_after_unique_suggestion_selects_slot():
+    conversation = {
+        "service": "Web Tasarim - KOBI Paketi",
+        "full_name": "Berkay Elbir",
+        "phone": "+905539088633",
+        "state": "collect_time",
+        "booking_kind": "preconsultation",
+        "memory_state": {
+            "suggested_booking_slots": [
+                {"date": "2026-04-30", "time": "12:00"},
+                {"date": "2026-04-30", "time": "14:00"},
+            ]
+        },
+    }
+
+    result = main.prepare_ai_first_booking_availability(
+        None,
+        conversation,
+        detected_date=None,
+        detected_time="12:00",
+        start_date_value="2026-04-29",
+    )
+
+    assert result["ready_to_book"] is True
+    assert conversation["requested_date"] == "2026-04-30"
+    assert conversation["requested_time"] == "12:00"
+
+
+def test_ai_first_time_only_after_ambiguous_suggestions_asks_date():
+    conversation = {
+        "service": "Web Tasarim - KOBI Paketi",
+        "full_name": "Berkay Elbir",
+        "phone": "+905539088633",
+        "state": "collect_time",
+        "booking_kind": "preconsultation",
+        "memory_state": {
+            "suggested_booking_slots": [
+                {"date": "2026-04-30", "time": "12:00"},
+                {"date": "2026-05-01", "time": "12:00"},
+            ]
+        },
+    }
+
+    result = main.prepare_ai_first_booking_availability(
+        None,
+        conversation,
+        detected_date=None,
+        detected_time="12:00",
+        start_date_value="2026-04-29",
+    )
+
+    reply = result["reply_text"].lower()
+    assert result["ready_to_book"] is False
+    assert "12:00" in reply
+    assert "hangi g" in reply
+    assert conversation["state"] == "collect_date"
+    assert conversation["memory_state"]["pending_requested_time"] == "12:00"
+
+
+def test_ai_first_date_after_pending_time_selects_slot():
+    conversation = {
+        "service": "Web Tasarim - KOBI Paketi",
+        "full_name": "Berkay Elbir",
+        "phone": "+905539088633",
+        "state": "collect_date",
+        "booking_kind": "preconsultation",
+        "requested_date": "2026-04-30",
+        "memory_state": {"pending_requested_time": "12:00"},
+    }
+
+    result = main.prepare_ai_first_booking_availability(
+        None,
+        conversation,
+        detected_date="2026-04-30",
+        detected_time=None,
+        start_date_value="2026-04-29",
+    )
+
+    assert result["ready_to_book"] is True
+    assert conversation["requested_date"] == "2026-04-30"
+    assert conversation["requested_time"] == "12:00"
+
+
+def test_collect_phone_ignores_llm_booking_datetime_from_phone_message():
+    llm_data = {"requested_date": "2026-05-05", "requested_time": "12:00"}
+
+    assert main.should_ignore_llm_booking_datetime_from_phone_message(
+        "telefon numaram 05539088633",
+        "collect_phone",
+        "+905539088633",
+        llm_data,
+    )
+
+
+def test_ai_first_name_collection_cannot_drop_booking_flow():
+    conversation = {
+        "service": "Web Tasarim - KOBI Paketi",
+        "full_name": "Berkay Elbir",
+        "state": "collect_name",
+        "booking_kind": "preconsultation",
+        "memory_state": {},
+    }
+    decision = {
+        "reply_text": "Hos geldiniz, nasil yardimci olabiliriz?",
+        "intent": "greeting",
+        "should_reply": True,
+        "booking_intent": False,
+        "missing_fields": [],
+    }
+
+    main.force_ai_first_booking_continuation(
+        decision,
+        conversation,
+        state_before_update="collect_name",
+        extracted_name="Berkay Elbir",
+        detected_phone=None,
+    )
+
+    assert decision["booking_intent"] is True
+    assert "phone" in decision["missing_fields"]
+    assert "telefon" in decision["reply_text"].lower()
+
+
+def test_ai_first_phone_collection_cannot_drop_booking_flow():
+    conversation = {
+        "service": "Web Tasarim - KOBI Paketi",
+        "full_name": "Berkay Elbir",
+        "phone": "+905539088633",
+        "state": "collect_phone",
+        "booking_kind": "preconsultation",
+        "memory_state": {},
+    }
+    decision = {
+        "reply_text": "Mesajinizi dikkate aliyorum.",
+        "intent": "fallback_reply",
+        "should_reply": True,
+        "booking_intent": False,
+        "missing_fields": [],
+    }
+
+    main.force_ai_first_booking_continuation(
+        decision,
+        conversation,
+        state_before_update="collect_phone",
+        extracted_name=None,
+        detected_phone="+905539088633",
+    )
+
+    assert decision["booking_intent"] is True
+    assert "requested_date" in decision["missing_fields"]
+    assert "requested_time" in decision["missing_fields"]
+
+
+def test_ai_first_time_collection_cannot_drop_booking_flow():
+    conversation = {
+        "service": "Web Tasarim - KOBI Paketi",
+        "full_name": "Berkay Elbir",
+        "phone": "+905539088633",
+        "state": "collect_time",
+        "booking_kind": "preconsultation",
+        "memory_state": {},
+    }
+    decision = {
+        "reply_text": "Mesajinizi dikkate aliyorum.",
+        "intent": "fallback_reply",
+        "should_reply": True,
+        "booking_intent": False,
+        "missing_fields": [],
+    }
+
+    main.force_ai_first_booking_continuation(
+        decision,
+        conversation,
+        state_before_update="collect_time",
+        extracted_name=None,
+        detected_phone=None,
+        detected_time="12:00",
+    )
+
+    assert decision["booking_intent"] is True
+    assert "requested_time" in decision["missing_fields"]
+
+
+def test_parse_json_like_handles_json_encoded_as_string():
+    content = '"{\\"reply_text\\": \\"Tabii, randevu planlayabiliriz.\\", \\"intent\\": \\"appointment\\", \\"should_reply\\": true}"'
+
+    parsed = main.parse_json_like(content)
+
+    assert parsed["reply_text"].startswith("Tabii")
+    assert parsed["intent"] == "appointment"
+    assert parsed["should_reply"] is True

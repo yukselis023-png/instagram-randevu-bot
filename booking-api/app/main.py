@@ -51,6 +51,7 @@ WORKING_HOURS_END = os.getenv("WORKING_HOURS_END", "19:00")
 SLOT_DURATION_MINUTES = int(os.getenv("SLOT_DURATION_MINUTES", "60"))
 SLOT_BUFFER_MINUTES = int(os.getenv("SLOT_BUFFER_MINUTES", "10"))
 APPOINTMENT_LOOKAHEAD_DAYS = int(os.getenv("APPOINTMENT_LOOKAHEAD_DAYS", "30"))
+AI_FIRST_BOOKING_SLOT_LIMIT = int(os.getenv("AI_FIRST_BOOKING_SLOT_LIMIT", "4"))
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://api.groq.com/openai/v1").rstrip("/")
 LLM_API_KEY = os.getenv("LLM_API_KEY", "").strip()
 LLM_MODEL = os.getenv("LLM_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct")
@@ -539,6 +540,8 @@ CONVERSATION_MEMORY_DEFAULTS = {
     "message_volume_estimate": None,
     "reschedule_requested_time": None,
     "reschedule_requested_date": None,
+    "suggested_booking_slots": [],
+    "pending_requested_time": None,
 }
 OWNER_CHECK_KEYWORDS = [
     "sahibiyle mi görüşüyorum", "sahibi misiniz", "işletme sahibi", "firma sahibi", "kurucu ile mi görüşüyorum",
@@ -2495,9 +2498,20 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
             llm_data = call_llm_extractor(message_text, conversation, recent_history)
             metrics["extract_ms"] = elapsed_ms(extract_started_at)
 
+        state_before_update = sanitize_text(conversation.get("state") or "new")
         detected_phone = extract_phone(message_text)
-        detected_time = extract_time_for_state(message_text, conversation.get("state", "new")) or normalize_time_string(llm_data.get("requested_time"))
-        detected_date = extract_date(message_text) or normalize_date_string(llm_data.get("requested_date"))
+        ignored_llm_booking_datetime = should_ignore_llm_booking_datetime_from_phone_message(
+            message_text,
+            state_before_update,
+            detected_phone,
+            llm_data,
+        )
+        llm_requested_time = None if ignored_llm_booking_datetime else normalize_time_string(llm_data.get("requested_time"))
+        llm_requested_date = None if ignored_llm_booking_datetime else normalize_date_string(llm_data.get("requested_date"))
+        if ignored_llm_booking_datetime:
+            decision_path.append("ignored_llm_datetime_from_phone")
+        detected_time = extract_time_for_state(message_text, state_before_update) or llm_requested_time
+        detected_date = extract_date(message_text) or llm_requested_date
         detected_period = extract_preferred_period(message_text) or infer_period_from_time(detected_time)
         llm_service_hint = llm_data.get("recommended_service") or llm_data.get("service")
         llm_name_candidate = titlecase_name(llm_data.get("name"))
@@ -2522,6 +2536,18 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
             conversation["full_name"] = detected_name
         if detected_phone and canonical_phone(conversation.get("phone")) != canonical_phone(detected_phone):
             conversation["phone"] = detected_phone
+        if (
+            detected_phone
+            and sanitize_text(conversation.get("state") or "") == "collect_phone"
+            and not detected_date
+            and not detected_time
+        ):
+            conversation["requested_date"] = None
+            conversation["requested_time"] = None
+            memory = ensure_conversation_memory(conversation)
+            memory["pending_requested_time"] = None
+            memory["suggested_booking_slots"] = []
+            conversation["memory_state"] = memory
         applied_service = apply_detected_service_to_conversation(conversation, message_text, llm_service_hint)
         if applied_service:
             picked_service = applied_service
@@ -2560,6 +2586,17 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
                 log_decline_memory_trace("after_user_memory_update", payload.sender_id, trace_id, conversation, extra={"llm_objection_type": llm_data.get("objection_type")})
             decision_path.append(REPLY_ENGINE)
             ai_decision = build_ai_first_decision(message_text, conversation, recent_history, llm_data)
+            if ignored_llm_booking_datetime:
+                ai_decision["requested_date"] = None
+                ai_decision["requested_time"] = None
+            force_ai_first_booking_continuation(
+                ai_decision,
+                conversation,
+                state_before_update=state_before_update,
+                extracted_name=extracted_name,
+                detected_phone=detected_phone,
+                detected_time=detected_time,
+            )
             metrics["ai_model_used"] = ai_decision.get("ai_model_used")
             metrics["ai_decision_intent"] = ai_decision.get("intent")
             metrics["fallback_used"] = bool(ai_decision.get("fallback_used"))
@@ -2567,8 +2604,30 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
             appointment_created = False
             appointment_id = None
             final_reply = ai_decision.get("reply_text")
+            availability_failed = False
+            if llm_bool(ai_decision.get("booking_intent")):
+                try:
+                    availability_result = prepare_ai_first_booking_availability(
+                        conn,
+                        conversation,
+                        detected_date=detected_date,
+                        detected_time=detected_time,
+                    )
+                    if availability_result.get("reply_text"):
+                        final_reply = availability_result["reply_text"]
+                        decision_path.append("ai_first_booking_availability")
+                    elif availability_result.get("ready_to_book"):
+                        decision_path.append("ai_first_booking_slot_resolved")
+                except Exception:  # noqa: BLE001
+                    logger.exception("ai_first_booking_availability_failed sender_id=%s", payload.sender_id)
+                    conversation["state"] = "human_handoff"
+                    conversation["assigned_human"] = True
+                    final_reply = "Müsaitlik kontrolünde sorun yaşadım, kaydınızı manuel kontrol için ekibe iletiyorum."
+                    decision_path.append("ai_first_booking_availability_error")
+                    availability_failed = True
             if (
                 llm_bool(ai_decision.get("booking_intent"))
+                and not availability_failed
                 and conversation.get("service")
                 and conversation.get("full_name")
                 and conversation.get("phone")
@@ -4182,6 +4241,19 @@ def ensure_conversation_memory(conversation: dict[str, Any]) -> dict[str, Any]:
     memory: dict[str, Any] = {}
     for key, default in CONVERSATION_MEMORY_DEFAULTS.items():
         value = raw.get(key, default)
+        if key == "suggested_booking_slots":
+            slots: list[dict[str, str]] = []
+            for item in value if isinstance(value, list) else []:
+                if not isinstance(item, dict):
+                    continue
+                slot_date = normalize_date_string(item.get("date"))
+                slot_time = normalize_time_string(item.get("time"))
+                if slot_date and slot_time:
+                    slots.append({"date": slot_date, "time": slot_time})
+                if len(slots) >= AI_FIRST_BOOKING_SLOT_LIMIT:
+                    break
+            memory[key] = slots
+            continue
         if isinstance(default, list):
             cleaned_items: list[str] = []
             for item in value if isinstance(value, list) else []:
@@ -5298,6 +5370,54 @@ def extract_time_for_state(text: str, state: str | None = None) -> str | None:
     if dotted and (has_date_cue(cleaned) or state in {"collect_period", "collect_time"}):
         return f"{int(dotted.group(1)):02d}:{int(dotted.group(2)):02d}"
     return None
+
+
+def should_ignore_llm_booking_datetime_from_phone_message(
+    message_text: str,
+    state: str | None,
+    detected_phone: str | None,
+    llm_data: dict[str, Any] | None,
+) -> bool:
+    if sanitize_text(state or "") != "collect_phone" or not detected_phone or not isinstance(llm_data, dict):
+        return False
+    if not (llm_data.get("requested_date") or llm_data.get("requested_time")):
+        return False
+    if extract_date(message_text) or extract_time_for_state(message_text, state):
+        return False
+    return True
+
+
+def force_ai_first_booking_continuation(
+    decision: dict[str, Any],
+    conversation: dict[str, Any],
+    *,
+    state_before_update: str | None,
+    extracted_name: str | None,
+    detected_phone: str | None,
+    detected_time: str | None = None,
+) -> None:
+    state = sanitize_text(state_before_update or "")
+    service = sanitize_text(conversation.get("service") or "")
+    has_name = bool(titlecase_name(extracted_name) or titlecase_name(conversation.get("full_name")))
+    has_phone = bool(canonical_phone(detected_phone) or canonical_phone(conversation.get("phone")))
+    if state == "collect_name" and service and titlecase_name(extracted_name):
+        decision["booking_intent"] = True
+        decision["intent"] = "booking_name_collected"
+        decision["should_reply"] = True
+        decision["missing_fields"] = ["phone", "requested_date", "requested_time"]
+        decision["reply_text"] = "Teşekkürler. Ön görüşme kaydını tamamlamak için telefon numaranızı paylaşır mısınız?"
+    elif state == "collect_phone" and service and has_name and has_phone:
+        decision["booking_intent"] = True
+        decision["intent"] = "booking_phone_collected"
+        decision["should_reply"] = True
+        decision["missing_fields"] = ["requested_date", "requested_time"]
+        decision["reply_text"] = "Telefon numaranızı aldım. Uygun saatleri kontrol ediyorum."
+    elif state in {"collect_time", "collect_period"} and service and has_name and has_phone and normalize_time_string(detected_time):
+        decision["booking_intent"] = True
+        decision["intent"] = "booking_time_collected"
+        decision["should_reply"] = True
+        decision["missing_fields"] = ["requested_time"]
+        decision["reply_text"] = "Saati aldım. Uygunluğu kontrol ediyorum."
 
 
 def is_delivery_duration_followup(text: str) -> bool:
@@ -8221,6 +8341,16 @@ def parse_json_like(content: str) -> dict[str, Any]:
     if content.startswith("```"):
         content = re.sub(r"^```(?:json)?", "", content).strip()
         content = re.sub(r"```$", "", content).strip()
+    try:
+        decoded = json.loads(content)
+        if isinstance(decoded, dict):
+            return decoded
+        if isinstance(decoded, str) and decoded != content:
+            nested = parse_json_like(decoded)
+            if nested:
+                return nested
+    except json.JSONDecodeError:
+        pass
     start = content.find("{")
     end = content.rfind("}")
     if start == -1 or end == -1 or end <= start:
@@ -8995,6 +9125,18 @@ def get_available_slots_for_date(conn: psycopg.Connection, date_value: str, serv
     return slots
 
 
+def get_available_booking_slots_for_date(conn: psycopg.Connection, date_value: str, service_name: str | None = None) -> list[str]:
+    slots: list[str] = []
+    current = datetime.combine(date.fromisoformat(date_value), WORK_START)
+    end = datetime.combine(date.fromisoformat(date_value), WORK_END)
+    while current < end:
+        slot = current.time().strftime("%H:%M")
+        if is_slot_capacity_available(conn, date_value, slot, service_name or LIVE_CRM_PRECONSULTATION_SERVICE):
+            slots.append(slot)
+        current += timedelta(minutes=max(30, SLOT_DURATION_MINUTES))
+    return slots
+
+
 def build_availability_reply(date_value: str, open_slots: list[str], ask_service: bool = False, period: str | None = None) -> str:
     human_date = format_human_date(date_value)
     visible_slots = open_slots[:4]
@@ -9030,6 +9172,197 @@ def build_no_availability_reply(date_value: str, next_days: list[dict[str, Any]]
 
     tail = " İlgilendiğiniz hizmeti de yazarsanız devam edebilirim." if ask_service else ""
     return f"{human_date} için maalesef boş saat kalmadı.{tail}"
+
+
+def normalize_booking_slot_option(item: Any) -> dict[str, str] | None:
+    if not isinstance(item, dict):
+        return None
+    slot_date = normalize_date_string(item.get("date"))
+    slot_time = normalize_time_string(item.get("time"))
+    if not slot_date or not slot_time:
+        return None
+    return {"date": slot_date, "time": slot_time}
+
+
+def format_booking_slot_option(slot: dict[str, str]) -> str:
+    return f"{format_human_date(slot['date'])} {slot['time']}"
+
+
+def remember_booking_slot_options(conversation: dict[str, Any], slots: list[dict[str, str]]) -> None:
+    memory = ensure_conversation_memory(conversation)
+    cleaned: list[dict[str, str]] = []
+    for slot in slots:
+        normalized = normalize_booking_slot_option(slot)
+        if normalized and normalized not in cleaned:
+            cleaned.append(normalized)
+        if len(cleaned) >= AI_FIRST_BOOKING_SLOT_LIMIT:
+            break
+    memory["suggested_booking_slots"] = cleaned
+    conversation["memory_state"] = memory
+
+
+def build_ai_first_booking_slot_reply(slots: list[dict[str, str]]) -> str:
+    option_text = ", ".join(format_booking_slot_option(slot) for slot in slots[:AI_FIRST_BOOKING_SLOT_LIMIT])
+    return f"Uygun ilk seçenekler: {option_text}. Size uyan gün ve saati yazarsanız kaydı oluşturayım."
+
+
+def collect_next_booking_slot_options(
+    conn: psycopg.Connection,
+    conversation: dict[str, Any],
+    *,
+    start_date_value: str | None = None,
+    preferred_time: str | None = None,
+    limit: int | None = None,
+) -> list[dict[str, str]]:
+    service_name = conversation.get("service") or LIVE_CRM_PRECONSULTATION_SERVICE
+    limit = max(1, int(limit or AI_FIRST_BOOKING_SLOT_LIMIT))
+    normalized_preferred_time = normalize_time_string(preferred_time)
+    start_date = date.fromisoformat(normalize_date_string(start_date_value) or datetime.now(TZ).date().isoformat())
+    max_days = min(APPOINTMENT_LOOKAHEAD_DAYS, 14)
+    exact_options: list[dict[str, str]] = []
+    fallback_options: list[dict[str, str]] = []
+
+    for offset in range(1, max_days + 1):
+        current_date = (start_date + timedelta(days=offset)).isoformat()
+        open_slots = get_available_booking_slots_for_date(conn, current_date, service_name)
+        if normalized_preferred_time:
+            for slot in open_slots:
+                option = {"date": current_date, "time": slot}
+                if slot == normalized_preferred_time:
+                    exact_options.append(option)
+                else:
+                    fallback_options.append(option)
+        else:
+            for slot in open_slots:
+                exact_options.append({"date": current_date, "time": slot})
+        if len(exact_options) >= limit:
+            break
+
+    if normalized_preferred_time and not exact_options:
+        try:
+            preferred_minutes = to_minutes(normalized_preferred_time)
+            fallback_options.sort(key=lambda slot: abs(to_minutes(slot["time"]) - preferred_minutes))
+        except ValueError:
+            pass
+        return fallback_options[:limit]
+    return exact_options[:limit]
+
+
+def build_ambiguous_time_choice_reply(time_value: str, slots: list[dict[str, str]]) -> str:
+    dates = ", ".join(format_human_date(slot["date"]) for slot in slots[:AI_FIRST_BOOKING_SLOT_LIMIT])
+    return f"{time_value} için birden fazla uygun gün var: {dates}. Hangi günü seçmek istersiniz?"
+
+
+def prepare_ai_first_booking_availability(
+    conn: psycopg.Connection | None,
+    conversation: dict[str, Any],
+    *,
+    detected_date: str | None = None,
+    detected_time: str | None = None,
+    start_date_value: str | None = None,
+) -> dict[str, Any]:
+    result: dict[str, Any] = {"reply_text": None, "ready_to_book": False}
+    if not (conversation.get("service") and conversation.get("full_name") and conversation.get("phone")):
+        return result
+
+    memory = ensure_conversation_memory(conversation)
+    normalized_date = normalize_date_string(detected_date) or normalize_date_string(conversation.get("requested_date"))
+    normalized_time = normalize_time_string(detected_time)
+    pending_time = normalize_time_string(memory.get("pending_requested_time"))
+
+    if normalized_date and pending_time and not normalized_time:
+        conversation["requested_date"] = normalized_date
+        conversation["requested_time"] = pending_time
+        memory["pending_requested_time"] = None
+        conversation["memory_state"] = memory
+        result["ready_to_book"] = True
+        return result
+
+    if normalized_time and not normalized_date:
+        conversation["requested_time"] = None
+        suggested_slots = [
+            slot
+            for slot in (normalize_booking_slot_option(item) for item in memory.get("suggested_booking_slots") or [])
+            if slot
+        ]
+        matching_slots = [slot for slot in suggested_slots if slot["time"] == normalized_time]
+        if len(matching_slots) == 1:
+            conversation["requested_date"] = matching_slots[0]["date"]
+            conversation["requested_time"] = normalized_time
+            memory["pending_requested_time"] = None
+            conversation["memory_state"] = memory
+            result["ready_to_book"] = True
+            return result
+        if len(matching_slots) > 1:
+            memory["pending_requested_time"] = normalized_time
+            conversation["memory_state"] = memory
+            conversation["state"] = "collect_date"
+            result["reply_text"] = build_ambiguous_time_choice_reply(normalized_time, matching_slots)
+            return result
+
+        if conn is not None:
+            next_slots = collect_next_booking_slot_options(
+                conn,
+                conversation,
+                start_date_value=start_date_value,
+                preferred_time=normalized_time,
+            )
+            if next_slots:
+                exact_slots = [slot for slot in next_slots if slot["time"] == normalized_time]
+                if len(exact_slots) == 1:
+                    conversation["requested_date"] = exact_slots[0]["date"]
+                    conversation["requested_time"] = normalized_time
+                    result["ready_to_book"] = True
+                    return result
+                if len(exact_slots) > 1:
+                    memory["pending_requested_time"] = normalized_time
+                    conversation["memory_state"] = memory
+                    conversation["state"] = "collect_date"
+                    result["reply_text"] = build_ambiguous_time_choice_reply(normalized_time, exact_slots)
+                    return result
+                remember_booking_slot_options(conversation, next_slots)
+                conversation["state"] = "collect_time"
+                result["reply_text"] = (
+                    f"{normalized_time} için uygunluk bulamadım. Yakın uygun seçenekler: "
+                    f"{', '.join(format_booking_slot_option(slot) for slot in next_slots)}. Size uyanı yazarsanız kaydı oluşturayım."
+                )
+                return result
+
+    if normalized_date and not (normalize_time_string(conversation.get("requested_time")) or normalized_time):
+        if conn is None:
+            return result
+        open_slots = get_available_booking_slots_for_date(conn, normalized_date, conversation.get("service"))
+        if open_slots:
+            slots = [{"date": normalized_date, "time": slot} for slot in open_slots[:AI_FIRST_BOOKING_SLOT_LIMIT]]
+            remember_booking_slot_options(conversation, slots)
+            conversation["requested_date"] = normalized_date
+            conversation["state"] = "collect_time"
+            result["reply_text"] = build_availability_reply(normalized_date, open_slots)
+            return result
+        next_days = find_next_available_days(conn, normalized_date, service_name=conversation.get("service"))
+        conversation["state"] = "collect_date"
+        result["reply_text"] = build_no_availability_reply(normalized_date, next_days)
+        return result
+
+    if not normalized_date and not normalize_time_string(conversation.get("requested_time")):
+        if conn is None:
+            return result
+        next_slots = collect_next_booking_slot_options(
+            conn,
+            conversation,
+            start_date_value=start_date_value,
+        )
+        if next_slots:
+            remember_booking_slot_options(conversation, next_slots)
+            conversation["state"] = "collect_time"
+            result["reply_text"] = build_ai_first_booking_slot_reply(next_slots)
+            return result
+        conversation["state"] = "human_handoff"
+        conversation["assigned_human"] = True
+        result["reply_text"] = "Şu an uygun saat bulamadım. Kaydınızı manuel kontrol için ekibe iletiyorum."
+        return result
+
+    return result
 
 
 def validate_slot(date_value: Any, time_value: Any) -> str | None:
