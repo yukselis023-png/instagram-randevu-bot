@@ -394,6 +394,49 @@ def test_ai_first_yes_with_punctuation_to_more_details_explains_automation(monke
     assert "3-7 iş günü" in reply
 
 
+def test_ai_first_yes_after_more_details_for_contact_wording_explains_automation(monkeypatch):
+    conversation = {
+        "service": "Otomasyon & Yapay Zeka Cozumleri",
+        "state": "new",
+        "booking_kind": None,
+        "memory_state": {},
+    }
+    history = [
+        {
+            "direction": "out",
+            "message_text": (
+                "Otomasyon & Yapay Zeka Çözümleri'nin teslim süresi standart kurulumlarda 3-7 iş günü sürmektedir. "
+                "Teslim süresi hakkında daha detaylı bilgi almak için bizimle iletişime geçebilir veya başka bir konuda yardımcı olmamı ister misiniz?"
+            ),
+        }
+    ]
+
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text=(
+                "Otomasyon & Yapay Zeka Çözümleri hakkında daha fazla bilgi almak ister misiniz "
+                "yoksa başka bir konuda yardımcı olmamı ister misiniz?"
+            ),
+            intent="info",
+            booking_intent=False,
+            missing_fields=[],
+        ),
+    )
+
+    decision = main.build_ai_first_decision("Evet.", conversation, history, {})
+
+    reply = decision["reply_text"].lower()
+    assert decision["booking_intent"] is False
+    assert "daha fazla bilgi almak ister misiniz" not in reply
+    assert "yardımcı olmamı ister misiniz" not in reply
+    assert "adınız" not in reply and "soyad" not in reply and "telefon numaran" not in reply
+    assert "dm" in reply
+    assert "randevu" in reply
+    assert "3-7 iş günü" in reply
+
+
 def test_ai_first_yes_after_automation_sector_question_still_gives_details(monkeypatch):
     conversation = {
         "service": "Otomasyon & Yapay Zeka Cozumleri",
