@@ -3711,6 +3711,59 @@ def recent_outbound_offered_consultation(history: list[dict[str, Any]] | None) -
     return any(cue in last_outbound for cue in cues)
 
 
+def recent_outbound_offered_more_details(history: list[dict[str, Any]] | None) -> bool:
+    last_outbound = get_last_outbound_text(history).lower()
+    if not last_outbound:
+        return False
+    cues = [
+        "daha detaylı bilgi almak ister",
+        "daha detayli bilgi almak ister",
+        "daha fazla bilgi almak ister",
+        "hizmet hakkında daha fazla bilgi",
+        "hizmet hakkinda daha fazla bilgi",
+        "sistemimizle ilgili daha detaylı bilgi",
+        "sistemimizle ilgili daha detayli bilgi",
+        "detaylı bilgi verebilirim",
+        "detayli bilgi verebilirim",
+        "detaylı anlatayım",
+        "detayli anlatayim",
+    ]
+    return any(cue in last_outbound for cue in cues)
+
+
+def is_positive_more_details_acceptance(text: str) -> bool:
+    lowered = sanitize_text(text).lower()
+    return lowered in {
+        "evet",
+        "evet olur",
+        "olur",
+        "olur tabii",
+        "olur tabi",
+        "tamam",
+        "tamam olur",
+        "anlat",
+        "anlatın",
+        "anlatin",
+        "detay ver",
+        "detaylı anlat",
+        "detayli anlat",
+    }
+
+
+def build_more_details_acceptance_reply(conversation: dict[str, Any]) -> str:
+    service = display_service_name(conversation.get("service"))
+    if service and "Otomasyon" not in service:
+        return (
+            f"Tabii. {service} tarafında kapsam, süreç ve fiyat netliği için önce ihtiyacı kısaca anlamamız gerekir. "
+            "Buradan temel bilgileri paylaşabilirim; isterseniz hangi hedef için düşündüğünüzü yazın, size net şekilde anlatayım."
+        )
+    return (
+        "Tabii. Otomasyon sistemi gelen DM'leri karşılar, sık soruları yanıtlar, uygun talepleri randevu veya CRM kaydına çevirir "
+        "ve panelde takip edilebilir hale getirir. Standart kurulum 3-7 iş günü sürer; özel entegrasyon varsa 1-3 haftaya çıkabilir. "
+        "İsterseniz işletmenizdeki DM akışını yazın, hangi parçaların otomatikleşeceğini net söyleyeyim."
+    )
+
+
 def recent_outbound_requested_priority(history: list[dict[str, Any]] | None) -> bool:
     last_outbound = get_last_outbound_text(history).lower()
     if not last_outbound:
@@ -8335,9 +8388,16 @@ def apply_ai_first_quality_overrides(
     message_text: str,
     decision: dict[str, Any],
     conversation: dict[str, Any],
+    history: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     decision["reply_text"] = cleanup_ai_first_reply_text(decision.get("reply_text"))
     lowered = sanitize_text(message_text).lower()
+    if recent_outbound_offered_more_details(history) and is_positive_more_details_acceptance(message_text):
+        decision["reply_text"] = build_more_details_acceptance_reply(conversation)
+        decision["intent"] = "more_details_acceptance"
+        decision["booking_intent"] = False
+        decision["missing_fields"] = []
+        return decision
     if is_trust_or_scam_question(message_text):
         decision["reply_text"] = build_trust_or_scam_reply()
         decision["intent"] = "reassurance"
@@ -8462,7 +8522,7 @@ def build_ai_first_decision(
             fallback_used=True,
             ai_model_used=selected_models[0] if selected_models else None,
         )
-    decision = apply_ai_first_quality_overrides(message_text, decision, conversation)
+    decision = apply_ai_first_quality_overrides(message_text, decision, conversation, history)
     if should_suppress_ai_booking_collection(message_text, decision, conversation, llm_data):
         decision["booking_intent"] = False
         decision["missing_fields"] = []

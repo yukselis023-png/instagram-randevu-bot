@@ -277,6 +277,42 @@ def test_ai_first_aleykum_greeting_does_not_claim_wellbeing(monkeypatch):
     assert decision["booking_intent"] is False
 
 
+def test_ai_first_yes_to_more_details_explains_automation_without_empty_next_step(monkeypatch):
+    conversation = {
+        "service": "Otomasyon & Yapay Zeka Cozumleri",
+        "state": "new",
+        "booking_kind": None,
+        "memory_state": {},
+    }
+    history = [
+        {
+            "direction": "out",
+            "message_text": "Sistemimizle ilgili daha detaylı bilgi almak ister misiniz?",
+        }
+    ]
+
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text="Kurulum sonrası sistemi kullanmaya başlayabilirsiniz. Bir sonraki adımımız ne olacak?",
+            intent="info",
+            booking_intent=False,
+            missing_fields=[],
+        ),
+    )
+
+    decision = main.build_ai_first_decision("Evet olur", conversation, history, {})
+
+    reply = decision["reply_text"].lower()
+    assert decision["booking_intent"] is False
+    assert "bir sonraki adımımız" not in reply
+    assert "adınız" not in reply and "soyad" not in reply and "telefon numaran" not in reply
+    assert "dm" in reply
+    assert "randevu" in reply
+    assert "3-7 iş günü" in reply
+
+
 def test_phone_reason_question_answers_phone_purpose_in_service_state():
     conversation = {
         "service": "Otomasyon & Yapay Zeka Cozumleri",
