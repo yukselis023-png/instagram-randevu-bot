@@ -1,6 +1,27 @@
 from app import main
 
 
+def _ai_json(**overrides):
+    data = {
+        "reply_text": "Tamam, kaydı tamamlamak için telefon numaranızı paylaşır mısınız?",
+        "intent": "appointment",
+        "should_reply": True,
+        "booking_intent": True,
+        "extracted_service": None,
+        "extracted_name": None,
+        "extracted_phone": None,
+        "requested_date": None,
+        "requested_time": None,
+        "missing_fields": ["phone"],
+        "crm_action": "update_customer",
+        "handoff_needed": False,
+    }
+    data.update(overrides)
+    import json
+
+    return json.dumps(data, ensure_ascii=False)
+
+
 def test_ascii_stored_service_is_displayed_with_turkish_characters_in_clarifications():
     conversation = {
         "service": "Otomasyon & Yapay Zeka Cozumleri",
@@ -164,6 +185,52 @@ def test_meeting_method_question_has_distinct_answer_from_preconsultation_defini
     method_reply = method["reply"].lower()
     assert "telefon numaran" not in method_reply
     assert any(keyword in method_reply for keyword in ["buradan", "online", "telefon", "instagram"])
+
+
+def test_ai_first_method_question_cannot_be_hijacked_to_phone_collection(monkeypatch):
+    conversation = {
+        "service": "Otomasyon & Yapay Zeka Cozumleri",
+        "full_name": "Ahmet Yilmaz",
+        "state": "collect_phone",
+        "booking_kind": "preconsultation",
+        "memory_state": {},
+    }
+
+    monkeypatch.setattr(main, "call_llm_content", lambda *args, **kwargs: _ai_json())
+
+    decision = main.build_ai_first_decision("Nasil gorusecegiz?", conversation, [], {})
+
+    reply = decision["reply_text"].lower()
+    assert decision["booking_intent"] is False
+    assert "telefon numaran" not in reply
+    assert any(keyword in reply for keyword in ["buradan", "online", "telefon", "instagram"])
+
+
+def test_ai_first_delivery_followup_stays_information_answer(monkeypatch):
+    conversation = {
+        "service": "Otomasyon & Yapay Zeka Cozumleri",
+        "state": "collect_name",
+        "booking_kind": "preconsultation",
+        "memory_state": {},
+    }
+
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text="Evet, kapsam büyürse 4 haftaya çıkabilir; entegrasyon sayısı ve özel istekler süreyi belirler.",
+            intent="info",
+            booking_intent=False,
+            missing_fields=[],
+        ),
+    )
+
+    decision = main.build_ai_first_decision("4 haftaya ciktigi oluyor mu?", conversation, [], {})
+
+    reply = decision["reply_text"].lower()
+    assert decision["booking_intent"] is False
+    assert "4 hafta" in reply
+    assert "adınız" not in reply and "soyad" not in reply and "telefon numaran" not in reply
 
 
 def test_phone_reason_question_answers_phone_purpose_in_service_state():

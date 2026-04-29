@@ -8295,6 +8295,26 @@ def should_suppress_ai_booking_collection(
     return False
 
 
+def should_replace_collection_reply_with_clarification(
+    message_text: str,
+    decision: dict[str, Any],
+    conversation: dict[str, Any],
+) -> bool:
+    reply = sanitize_text(str(decision.get("reply_text") or ""))
+    if not reply_requests_booking_details(reply):
+        return False
+    cleaned = sanitize_text(message_text)
+    return any(
+        [
+            is_meeting_method_question(cleaned),
+            is_phone_reason_question(cleaned),
+            is_meeting_clarification_question(cleaned),
+            is_request_reason_question(cleaned),
+            is_trust_or_scam_question(cleaned),
+        ]
+    )
+
+
 def build_ai_first_emergency_reply(message_text: str, conversation: dict[str, Any]) -> str:
     lowered = sanitize_text(message_text).lower()
     if is_simple_greeting(message_text) or "aleykum" in lowered:
@@ -8401,6 +8421,9 @@ def build_ai_first_decision(
     if should_suppress_ai_booking_collection(message_text, decision, conversation, llm_data):
         decision["booking_intent"] = False
         decision["missing_fields"] = []
+        if should_replace_collection_reply_with_clarification(message_text, decision, conversation):
+            decision["reply_text"] = build_contextual_clarification_reply(conversation, message_text)
+            decision["intent"] = "clarification"
     decision = enforce_ai_first_booking_order(decision, conversation, message_text)
     return decision
 
