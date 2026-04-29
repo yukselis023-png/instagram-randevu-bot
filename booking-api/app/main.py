@@ -4358,7 +4358,7 @@ def wants_change_after_confirmation(message_text: str, conversation: dict[str, A
 
 def build_collected_booking_bits(conversation: dict[str, Any]) -> list[str]:
     bits: list[str] = []
-    service = sanitize_text(conversation.get("service") or "")
+    service = display_service_name(conversation.get("service"))
     requested_date = conversation.get("requested_date")
     requested_time = normalize_time_string(conversation.get("requested_time"))
     if service:
@@ -4392,7 +4392,8 @@ def is_same_service_restatement(conversation: dict[str, Any], picked_service: st
 
 def build_collect_name_request_reply(conversation: dict[str, Any], booking_label: str, ack_prefix: str, same_service_restatement: bool = False) -> str:
     if same_service_restatement and conversation.get("service"):
-        return f"Tamam, {conversation['service']} için devam ediyoruz. {booking_label.capitalize()} kaydını açabilmem için adınızı ve soyadınızı yazar mısınız?"
+        service = display_service_name(conversation.get("service"))
+        return f"Tamam, {service} için devam ediyoruz. {booking_label.capitalize()} kaydını açabilmem için adınızı ve soyadınızı yazar mısınız?"
     return f"{ack_prefix}{booking_label.capitalize()} kaydını açabilmem için önce adınız ve soyadınızı paylaşır mısınız?".strip()
 
 
@@ -5153,6 +5154,14 @@ def match_service_catalog(text: str | None, fallback_service: str | None = None)
     return candidates[0] if candidates else None
 
 
+def display_service_name(value: str | None) -> str:
+    cleaned = sanitize_text(value or "")
+    if not cleaned:
+        return ""
+    matched = match_service_catalog(cleaned, cleaned)
+    return (matched or {}).get("display") or (value or "").strip()
+
+
 def is_service_overview_question(text: str) -> bool:
     lowered = sanitize_text(text).lower()
     if any(keyword in lowered for keyword in SERVICE_OVERVIEW_KEYWORDS):
@@ -5646,7 +5655,7 @@ def is_offer_hesitation_message(text: str) -> bool:
 
 
 def build_phone_refusal_reply(conversation: dict[str, Any]) -> str:
-    service = sanitize_text(conversation.get("service") or "")
+    service = display_service_name(conversation.get("service"))
     if service:
         return f"Tamam, sorun değil; telefonu paylaşmak zorunda değilsiniz. İsterseniz {service} tarafında bilgi vermeye buradan devam edeyim. Daha sonra ön görüşme planlamak isterseniz numarayı o aşamada paylaşabilirsiniz."
     return "Tamam, sorun değil; telefonu paylaşmak zorunda değilsiniz. İsterseniz bilgi vermeye buradan devam edelim. Daha sonra ön görüşme planlamak isterseniz numarayı o aşamada paylaşabilirsiniz."
@@ -5659,7 +5668,7 @@ def build_missing_phone_for_booking_reply(conversation: dict[str, Any]) -> str:
 
 def build_offer_hesitation_reply(conversation: dict[str, Any], history: list[dict[str, Any]] | None = None) -> str:
     sector = detect_business_sector(conversation.get("last_customer_message") or "", history)
-    service = sanitize_text(conversation.get("service") or "")
+    service = display_service_name(conversation.get("service"))
     service_hint = f" {service} konusunda" if service else ""
     if sector == "beauty":
         return (
@@ -5681,7 +5690,7 @@ def build_booking_resume_hint(conversation: dict[str, Any]) -> str:
         return "Size nasıl yardımcı olabilirim?"
     state = conversation.get("state", "new")
     requested_date = conversation.get("requested_date")
-    service = sanitize_text(conversation.get("service") or "")
+    service = display_service_name(conversation.get("service"))
     if state == "collect_service" and service:
         service_meta = match_service_catalog(service, service)
         if service_meta:
@@ -5753,7 +5762,7 @@ def build_booking_assumption_reset_reply() -> str:
 
 def build_contextual_clarification_reply(conversation: dict[str, Any], message_text: str | None = None) -> str:
     state = conversation.get("state", "new")
-    service = sanitize_text(conversation.get("service") or "")
+    service = display_service_name(conversation.get("service"))
     booking_label = get_booking_label(conversation)
     memory = ensure_conversation_memory(conversation)
     lowered_message = sanitize_text(message_text or "").lower()
@@ -6679,7 +6688,7 @@ def is_business_fit_question(message_text: str) -> bool:
 
 def build_generic_ai_draft_reply(message_text: str, conversation: dict[str, Any], history: list[dict[str, Any]] | None = None) -> str:
     lowered = sanitize_text(message_text).lower()
-    service = sanitize_text(conversation.get("service") or "")
+    service = display_service_name(conversation.get("service"))
     if any(token in lowered for token in ["turkiye baskenti", "turkiye'nin baskenti", "turkiyenin baskenti", "türkiye baskenti"]):
         return "Türkiye'nin başkenti Ankara'dır."
     if any(token in lowered for token in ["güvenli", "guvenli", "güvenlik", "guvenlik", "güvenli mi", "guvenli mi"]):

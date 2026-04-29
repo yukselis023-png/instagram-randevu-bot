@@ -1,6 +1,30 @@
 from app import main
 
 
+def test_ascii_stored_service_is_displayed_with_turkish_characters_in_clarifications():
+    conversation = {
+        "service": "Otomasyon & Yapay Zeka Cozumleri",
+        "state": "collect_name",
+        "booking_kind": "preconsultation",
+        "memory_state": {},
+    }
+
+    replies = [
+        main.build_contextual_clarification_reply(conversation, "Ne on gorusmesi?"),
+        main.build_phone_refusal_reply(conversation),
+        main.build_collect_name_request_reply(
+            conversation,
+            "on gorusme",
+            main.build_captured_ack_prefix(conversation),
+            same_service_restatement=True,
+        ),
+    ]
+
+    for reply in replies:
+        assert "Otomasyon & Yapay Zeka \u00c7\u00f6z\u00fcmleri" in reply
+        assert "Cozumleri" not in reply
+
+
 def test_numeric_range_after_volume_question_is_not_treated_as_date():
     message = "30-40"
     history = [{"direction": "out", "message_text": "Günlük mesaj yoğunluğunuz yaklaşık kaç?"}]
