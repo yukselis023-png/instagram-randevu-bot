@@ -1,4 +1,5 @@
 import json
+import hashlib
 import logging
 import os
 import re
@@ -924,6 +925,7 @@ def health() -> dict[str, Any]:
 
 @app.get("/version")
 def version() -> dict[str, Any]:
+    llm_key_hash = hashlib.sha256(LLM_API_KEY.encode("utf-8")).hexdigest()[:12] if LLM_API_KEY else None
     return {
         "version": APP_BUILD_VERSION,
         "time": datetime.now(TZ).isoformat(),
@@ -932,6 +934,8 @@ def version() -> dict[str, Any]:
         "llm_configured": bool(LLM_BASE_URL and LLM_API_KEY),
         "llm_base_url_configured": bool(LLM_BASE_URL),
         "llm_api_key_configured": bool(LLM_API_KEY),
+        "llm_api_key_length": len(LLM_API_KEY),
+        "llm_api_key_hash": llm_key_hash,
         "llm_model": LLM_MODEL,
         "llm_reply_advisory_model": LLM_REPLY_ADVISORY_MODEL,
         "llm_reply_quality_model": LLM_REPLY_QUALITY_MODEL,
@@ -943,12 +947,15 @@ def version() -> dict[str, Any]:
 
 @app.get("/api/llm-health")
 def llm_health() -> dict[str, Any]:
+    llm_key_hash = hashlib.sha256(LLM_API_KEY.encode("utf-8")).hexdigest()[:12] if LLM_API_KEY else None
     if not LLM_BASE_URL or not LLM_API_KEY:
         return {
             "ok": False,
             "configured": False,
             "base_url_configured": bool(LLM_BASE_URL),
             "api_key_configured": bool(LLM_API_KEY),
+            "api_key_length": len(LLM_API_KEY),
+            "api_key_hash": llm_key_hash,
             "model": LLM_MODEL,
         }
     headers = {
@@ -977,6 +984,8 @@ def llm_health() -> dict[str, Any]:
             "status_code": response.status_code,
             "model": LLM_REPLY_MICRO_MODEL or LLM_MODEL,
             "base_url": LLM_BASE_URL,
+            "api_key_length": len(LLM_API_KEY),
+            "api_key_hash": llm_key_hash,
             "body_preview": preview,
         }
     except Exception as exc:  # noqa: BLE001
@@ -986,6 +995,8 @@ def llm_health() -> dict[str, Any]:
             "status_code": None,
             "model": LLM_REPLY_MICRO_MODEL or LLM_MODEL,
             "base_url": LLM_BASE_URL,
+            "api_key_length": len(LLM_API_KEY),
+            "api_key_hash": llm_key_hash,
             "error": sanitize_text(str(exc))[:240],
         }
 
