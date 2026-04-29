@@ -97,6 +97,43 @@ def test_meeting_method_question_keeps_clarification_priority_in_service_state()
     assert "telefon numaran" not in result["reply"].lower()
 
 
+def test_meeting_method_question_has_distinct_answer_from_preconsultation_definition():
+    conversation = {
+        "service": "Otomasyon & Yapay Zeka Cozumleri",
+        "state": "collect_name",
+        "booking_kind": "preconsultation",
+        "memory_state": {},
+    }
+
+    definition = main.maybe_build_information_reply("Ne on gorusmesi?", {}, [], conversation.copy(), [])
+    method = main.maybe_build_information_reply("Nasil gorusecegiz?", {}, [], conversation.copy(), [])
+
+    assert definition["kind"] == "clarification"
+    assert method["kind"] == "clarification"
+    assert definition["reply"] != method["reply"]
+    method_reply = method["reply"].lower()
+    assert "telefon numaran" not in method_reply
+    assert any(keyword in method_reply for keyword in ["buradan", "online", "telefon", "instagram"])
+
+
+def test_phone_reason_question_answers_phone_purpose_in_service_state():
+    conversation = {
+        "service": "Otomasyon & Yapay Zeka Cozumleri",
+        "state": "collect_service",
+        "booking_kind": "preconsultation",
+        "memory_state": {},
+    }
+
+    result = main.maybe_build_information_reply("Neden telefon istiyorsun?", {}, [], conversation, [])
+
+    assert result["kind"] == "clarification"
+    reply = result["reply"].lower()
+    assert "telefon" in reply
+    assert "zorunda" in reply or "buradan" in reply
+    assert "net cevap vereyim" not in reply
+    assert "hangi taraf zor geliyor" not in reply
+
+
 def test_angry_complaint_does_not_repeat_collection_prompt():
     conversation = {
         "service": "Otomasyon & Yapay Zeka Cozumleri",

@@ -552,6 +552,9 @@ REQUEST_REASON_KEYWORDS = [
     "ne için gerekli", "ne icin gerekli", "neden gerekli", "niye gerekli", "ne için lazım", "ne icin lazim",
     "ne için istiyorsunuz", "ne icin istiyorsunuz", "neden istiyorsunuz", "niye istiyorsunuz", "bu ne için", "bu ne icin",
     "ne işe yarayacak", "ne ise yarayacak", "telefon neden gerekli", "telefon niye gerekli", "telefon ne için", "telefon ne icin",
+    "neden istiyorsun", "niye istiyorsun", "ne icin istiyorsun",
+    "neden telefon istiyorsun", "niye telefon istiyorsun", "telefonu neden istiyorsun", "telefonu niye istiyorsun",
+    "numara neden gerekli", "numara niye gerekli", "numarayi neden istiyorsun", "numarayi niye istiyorsun",
 ]
 PHONE_REFUSAL_KEYWORDS = [
     "hayır", "hayir", "istemiyorum", "paylaşmak istemiyorum", "paylasmak istemiyorum", "vermek istemiyorum",
@@ -5534,9 +5537,31 @@ def is_meeting_clarification_question(text: str) -> bool:
     return any(phrase in lowered for phrase in phrases)
 
 
+def is_meeting_method_question(text: str) -> bool:
+    lowered = sanitize_text(text).lower()
+    method_phrases = [
+        "nasil gorusecegiz",
+        "nasil gorusulur",
+        "nasil yapacagiz",
+        "nereden gorusecegiz",
+        "nerede gorusecegiz",
+        "gorusecegiz nasil",
+        "online mi gorusecegiz",
+        "telefonla mi gorusecegiz",
+    ]
+    return any(phrase in lowered for phrase in method_phrases)
+
+
+def is_phone_reason_question(text: str) -> bool:
+    lowered = sanitize_text(text).lower()
+    has_phone_subject = any(term in lowered for term in ["telefon", "numara", "numarayi", "iletisim"])
+    asks_reason = any(term in lowered for term in ["neden", "niye", "ne icin", "nicin", "gerekli", "lazim", "istiyorsun", "istiyorsunuz"])
+    return has_phone_subject and asks_reason
+
+
 def is_request_reason_question(text: str) -> bool:
     lowered = sanitize_text(text).lower()
-    return any(keyword in lowered for keyword in REQUEST_REASON_KEYWORDS)
+    return is_phone_reason_question(lowered) or any(keyword in lowered for keyword in REQUEST_REASON_KEYWORDS)
 
 
 def is_angry_complaint_message(text: str) -> bool:
@@ -5721,6 +5746,16 @@ def build_contextual_clarification_reply(conversation: dict[str, Any], message_t
     booking_label = get_booking_label(conversation)
     memory = ensure_conversation_memory(conversation)
     lowered_message = sanitize_text(message_text or "").lower()
+    if is_phone_reason_question(lowered_message):
+        return (
+            "Telefonu sadece ön görüşme planlanırsa size doğrudan ulaşmak ve görüşme detayını netleştirmek için isteriz. "
+            "Telefon paylaşmak zorunda değilsiniz; bilgi vermeye buradan devam edebiliriz."
+        )
+    if is_meeting_method_question(lowered_message):
+        return (
+            "Önce buradan ihtiyacınızı netleştiriyoruz. Uygun görürseniz devamında telefon ya da online görüşme ile ilerliyoruz; "
+            "telefon paylaşmadan da temel bilgileri buradan anlatabilirim."
+        )
     if is_meeting_clarification_question(lowered_message):
         focus = service or "ihtiyacınız"
         return (
