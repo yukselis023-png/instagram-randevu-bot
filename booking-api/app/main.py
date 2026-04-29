@@ -5282,6 +5282,9 @@ def is_greeting_like_message(text: str) -> bool:
         return False
     if any(marker in cleaned for marker in ["👋", "🙋", "🤝"]) and len(cleaned) <= 6:
         return True
+    compact = re.sub(r"[^a-z0-9]+", "", lowered)
+    if compact in {"salamunaleykum", "selamunaleykum", "selaminaleykum", "selamunalekum", "aleykumselam", "aleykumselamlar", "sa"}:
+        return True
     if lowered in GREETING_MESSAGES:
         return True
     if lowered in {"nerhaba", "meraba", "merhba", "mrb", "mrhb", "slm", "selm"}:
@@ -5587,6 +5590,14 @@ def is_request_reason_question(text: str) -> bool:
 def is_angry_complaint_message(text: str) -> bool:
     lowered = sanitize_text(text).lower()
     complaint_phrases = [
+        "yarr",
+        "amk",
+        "aq",
+        "siktir",
+        "siktig",
+        "sikiyim",
+        "bune",
+        "bu ne lan",
         "salak",
         "aptal",
         "anlamiyorsun",
@@ -5709,7 +5720,11 @@ def build_booking_resume_hint(conversation: dict[str, Any]) -> str:
     return "Size nasıl yardımcı olabilirim?"
 
 
-def build_simple_greeting_reply() -> str:
+def build_simple_greeting_reply(message_text: str | None = None) -> str:
+    lowered = sanitize_text(message_text or "").lower()
+    compact = re.sub(r"[^a-z0-9]+", "", lowered)
+    if compact in {"salamunaleykum", "selamunaleykum", "selaminaleykum", "selamunalekum", "aleykumselam", "aleykumselamlar"}:
+        return "Aleyküm selam, hoş geldiniz. Nasıl yardımcı olabilirim?"
     return "Merhaba, hoş geldiniz. Nasıl yardımcı olabilirim?"
 
 
@@ -6376,7 +6391,7 @@ def maybe_build_information_reply(message_text: str, llm_data: dict[str, Any], m
         }
     if is_simple_greeting(message_text) and not has_booking_context and not is_business_context_intro_message(message_text, history):
         return {
-            "reply": build_simple_greeting_reply(),
+            "reply": build_simple_greeting_reply(message_text),
             "kind": "greeting",
             "next_state": "collect_service",
             "set_service": None,

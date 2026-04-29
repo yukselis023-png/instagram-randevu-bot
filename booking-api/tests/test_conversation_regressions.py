@@ -491,6 +491,40 @@ def test_active_booking_state_greeting_gets_greeting_instead_of_collect_prompt()
     assert "soyad" not in reply
 
 
+def test_salamun_aleykum_gets_direct_greeting_not_generic_fallback():
+    conversation = {
+        "service": None,
+        "state": "collect_service",
+        "booking_kind": None,
+        "memory_state": {},
+    }
+
+    result = main.maybe_build_information_reply("Salamun aleykum", {}, [], conversation, [])
+
+    assert result["kind"] == "greeting"
+    reply = result["reply"].lower()
+    assert "aleyk\u00fcm selam" in reply or "aleykum selam" in reply
+    assert "mesaj\u0131n\u0131z\u0131 de\u011ferlendirip" not in reply
+    assert "vermeye \u00e7al\u0131\u015faca\u011f\u0131m" not in reply
+
+
+def test_swearing_reaction_to_bad_reply_gets_complaint_recovery():
+    conversation = {
+        "service": None,
+        "state": "collect_service",
+        "booking_kind": None,
+        "memory_state": {},
+    }
+
+    result = main.maybe_build_information_reply("Bu ne yarragim?", {}, [], conversation, [])
+
+    assert result["kind"] == "complaint"
+    reply = result["reply"].lower()
+    assert "kusura" in reply or "\u00f6z\u00fcr" in reply
+    assert "mesaj\u0131n\u0131z\u0131 de\u011ferlendirip" not in reply
+    assert "telefon numaran" not in reply
+
+
 def test_scam_or_trust_question_gets_answer_instead_of_collect_name_prompt():
     conversation = {
         "service": "Otomasyon & Yapay Zeka Cozumleri",
