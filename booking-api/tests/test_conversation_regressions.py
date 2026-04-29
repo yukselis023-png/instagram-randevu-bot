@@ -571,6 +571,86 @@ def test_ai_first_yes_after_automation_which_service_question_still_gives_detail
     assert "3-7 iş günü" in reply
 
 
+def test_ai_first_yes_after_automation_interest_question_does_not_start_booking(monkeypatch):
+    conversation = {
+        "service": "Otomasyon & Yapay Zeka Cozumleri",
+        "state": "new",
+        "booking_kind": None,
+        "memory_state": {},
+    }
+    history = [
+        {
+            "direction": "out",
+            "message_text": (
+                "Otomasyon & Yapay Zeka Çözümleri hizmetimizin teslim süresi, standart kurulumlarda 3-7 iş günü, "
+                "özel entegrasyonlarda 1-3 haftadır. Bu hizmete ilgi duyuyor musunuz?"
+            ),
+        }
+    ]
+
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text="Tabii, Otomasyon & Yapay Zeka Çözümleri için ön görüşme planlayabiliriz. Önce adınızı ve soyadınızı yazar mısınız?",
+            intent="booking",
+            booking_intent=True,
+            missing_fields=["name"],
+        ),
+    )
+
+    decision = main.build_ai_first_decision("Evet.", conversation, history, {})
+
+    reply = decision["reply_text"].lower()
+    assert decision["booking_intent"] is False
+    assert "adınızı" not in reply and "soyad" not in reply and "telefon numaran" not in reply
+    assert "dm" in reply
+    assert "randevu" in reply
+    assert "3-7 iş günü" in reply
+
+
+def test_ai_first_yes_after_automation_price_reply_does_not_use_empty_next_step(monkeypatch):
+    conversation = {
+        "service": "Otomasyon & Yapay Zeka Cozumleri",
+        "state": "new",
+        "booking_kind": None,
+        "memory_state": {},
+    }
+    history = [
+        {
+            "direction": "out",
+            "message_text": (
+                "Günlük ortalama 20-25 mesaj için bizim Otomasyon & Yapay Zeka Çözümleri hizmetimiz uygun olabilir. "
+                "Fiyat bilgisi için Otomasyon & Yapay Zeka Çözümleri 5.000 ₺ ilk 3 ay indirimli aylık hizmet bedeli sunuyoruz."
+            ),
+        }
+    ]
+
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text=(
+                "Otomasyon & Yapay Zeka Çözümleri hizmetimizle günlük 20-25 mesajı yönetebilirsiniz. "
+                "İlk 3 ay indirimli fiyatımız 5.000 ₺'dir. Bir sonraki adımımız ne olacak?"
+            ),
+            intent="provide_info",
+            booking_intent=False,
+            missing_fields=[],
+        ),
+    )
+
+    decision = main.build_ai_first_decision("Evet.", conversation, history, {})
+
+    reply = decision["reply_text"].lower()
+    assert decision["booking_intent"] is False
+    assert "bir sonraki adım" not in reply
+    assert "ne olacak" not in reply
+    assert "dm" in reply
+    assert "randevu" in reply
+    assert "3-7 iş günü" in reply
+
+
 def test_phone_reason_question_answers_phone_purpose_in_service_state():
     conversation = {
         "service": "Otomasyon & Yapay Zeka Cozumleri",
