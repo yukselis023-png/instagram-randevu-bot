@@ -55,6 +55,10 @@ def test_full_ai_conversational_mode_is_forced_on():
     assert main.FULL_AI_CONVERSATIONAL_MODE is True
 
 
+def test_llm_reply_polish_is_forced_on_for_ai_first():
+    assert main.LLM_REPLY_POLISH_ENABLED is True
+
+
 def test_clarification_about_preconsultation_does_not_repeat_phone_request():
     conversation = {
         "service": "Otomasyon & Yapay Zeka Cozumleri",

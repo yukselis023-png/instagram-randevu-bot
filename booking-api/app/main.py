@@ -67,7 +67,7 @@ LLM_REPLY_MICRO_TIMEOUT_SECONDS = float(os.getenv("LLM_REPLY_MICRO_TIMEOUT_SECON
 LLM_REPLY_ADVISORY_TIMEOUT_SECONDS = float(os.getenv("LLM_REPLY_ADVISORY_TIMEOUT_SECONDS", str(LLM_REPLY_POLISH_TIMEOUT_SECONDS)))
 LLM_REPLY_MICRO_MAX_TOKENS = int(os.getenv("LLM_REPLY_MICRO_MAX_TOKENS", "48"))
 LLM_REPLY_ADVISORY_MAX_TOKENS = int(os.getenv("LLM_REPLY_ADVISORY_MAX_TOKENS", "90"))
-LLM_REPLY_POLISH_ENABLED = os.getenv("LLM_REPLY_POLISH_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
+LLM_REPLY_POLISH_ENABLED = True
 FULL_AI_CONVERSATIONAL_MODE = True
 CRM_SYNC_ENABLED = os.getenv("CRM_SYNC_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
 CRM_SUPABASE_URL = os.getenv("CRM_SUPABASE_URL", "").rstrip("/")
@@ -921,7 +921,12 @@ def health() -> dict[str, Any]:
 
 @app.get("/version")
 def version() -> dict[str, Any]:
-    return {"version": APP_BUILD_VERSION, "time": datetime.now(TZ).isoformat()}
+    return {
+        "version": APP_BUILD_VERSION,
+        "time": datetime.now(TZ).isoformat(),
+        "full_ai_conversational_mode": FULL_AI_CONVERSATIONAL_MODE,
+        "llm_reply_polish_enabled": LLM_REPLY_POLISH_ENABLED,
+    }
 
 
 @app.get("/crm", response_class=HTMLResponse)
