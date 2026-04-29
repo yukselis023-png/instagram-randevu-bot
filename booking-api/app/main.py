@@ -3825,21 +3825,37 @@ def build_more_details_acceptance_reply(conversation: dict[str, Any]) -> str:
     )
 
 
+def infer_recent_service_for_consultation(
+    history: list[dict[str, Any]] | None,
+    conversation: dict[str, Any] | None = None,
+) -> str:
+    last_outbound = get_last_outbound_text(history).lower()
+    if not last_outbound:
+        return ""
+    service = display_service_name((conversation or {}).get("service"))
+    service_meta = match_service_catalog(service, service) if service else None
+    if not service_meta:
+        service_meta = match_service_catalog(last_outbound, last_outbound)
+        service = display_service_name(str((service_meta or {}).get("display") or ""))
+    return service
+
+
 def recent_outbound_can_start_service_consultation(
     history: list[dict[str, Any]] | None,
     conversation: dict[str, Any] | None = None,
 ) -> bool:
-    service = display_service_name((conversation or {}).get("service"))
-    if not service or "otomasyon" in service.lower():
-        return False
     last_outbound = get_last_outbound_text(history).lower()
     if not last_outbound:
         return False
+    service = infer_recent_service_for_consultation(history, conversation)
+    service_meta = match_service_catalog(service, service) if service else None
+    if not service or "otomasyon" in service.lower():
+        return False
     if recent_outbound_offered_consultation(history):
         return True
-    if not recent_outbound_offered_more_details(history):
+    detail_offer = recent_outbound_offered_more_details(history) or "bilgi almak ister" in last_outbound
+    if not detail_offer:
         return False
-    service_meta = match_service_catalog(service, service)
     service_slug = sanitize_text(str((service_meta or {}).get("slug") or "")).lower()
     service_keywords = [sanitize_text(str(item)).lower() for item in (service_meta or {}).get("keywords", [])]
     service_cues = [service.lower(), service_slug, *service_keywords]
@@ -3847,7 +3863,7 @@ def recent_outbound_can_start_service_consultation(
 
 
 def build_service_consultation_acceptance_reply(conversation: dict[str, Any]) -> str:
-    service = display_service_name(conversation.get("service")) or "ilgili hizmet"
+    service = display_service_name(conversation.get("service")) or "Web Tasarım - KOBİ Paketi"
     return (
         f"Tabii. {service} için detayları netleştirmek adına kısa bir ön görüşme planlayabiliriz. "
         "Ön görüşme kaydını açabilmem için adınızı ve soyadınızı yazar mısınız?"
@@ -8483,9 +8499,12 @@ def apply_ai_first_quality_overrides(
     decision["reply_text"] = cleanup_ai_first_reply_text(decision.get("reply_text"))
     lowered = sanitize_text(message_text).lower()
     if recent_outbound_can_start_service_consultation(history, conversation) and is_positive_more_details_acceptance(message_text):
+        inferred_service = infer_recent_service_for_consultation(history, conversation)
         decision["reply_text"] = build_service_consultation_acceptance_reply(conversation)
         decision["intent"] = "service_consultation_acceptance"
         decision["booking_intent"] = True
+        if inferred_service:
+            decision["extracted_service"] = inferred_service
         decision["missing_fields"] = ["name"]
         return decision
     if recent_outbound_can_accept_automation_details(history, conversation) and is_positive_more_details_acceptance(message_text):

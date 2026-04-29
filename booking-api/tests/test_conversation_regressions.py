@@ -692,6 +692,47 @@ def test_ai_first_positive_web_details_acceptance_starts_consultation(monkeypatc
     assert "konuşmaya devam edelim" not in reply
 
 
+def test_ai_first_positive_web_details_acceptance_infers_service_from_history(monkeypatch):
+    conversation = {
+        "service": None,
+        "state": "new",
+        "booking_kind": None,
+        "memory_state": {},
+    }
+    history = [
+        {
+            "direction": "out",
+            "message_text": (
+                "Websitesi hizmetimiz hakkında bilgi almak ister misiniz? Web Tasarım - KOBİ Paketi'miz "
+                "12.900 ₺'dir ve 7-14 iş günü içinde teslim edilir."
+            ),
+        }
+    ]
+
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text=(
+                "Web Tasarım - KOBİ Paketi'miz 12.900 ₺'dir ve 7-14 iş günü içinde teslim edilir. "
+                "İsterseniz detaylı bilgi alabilir veya sorularınızı sorabilirsiniz."
+            ),
+            intent="info",
+            booking_intent=False,
+            missing_fields=[],
+        ),
+    )
+
+    decision = main.build_ai_first_decision("Olur", conversation, history, {})
+
+    reply = decision["reply_text"].lower()
+    assert decision["booking_intent"] is True
+    assert "name" in decision["missing_fields"] or "full_name" in decision["missing_fields"]
+    assert "ön görüşme" in reply or "kısa görüşme" in reply
+    assert "ad" in reply and "soyad" in reply
+    assert "sorularınızı sorabilirsiniz" not in reply
+
+
 def test_phone_reason_question_answers_phone_purpose_in_service_state():
     conversation = {
         "service": "Otomasyon & Yapay Zeka Cozumleri",
