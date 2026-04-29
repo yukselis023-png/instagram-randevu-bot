@@ -233,6 +233,50 @@ def test_ai_first_delivery_followup_stays_information_answer(monkeypatch):
     assert "adınız" not in reply and "soyad" not in reply and "telefon numaran" not in reply
 
 
+def test_ai_first_trust_question_uses_clean_turkish_reassurance(monkeypatch):
+    conversation = {"state": "new", "memory_state": {}}
+
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text="Hayır, DOEL DIGITAL olarak Transparent hizmet veriyoruz. Hangi konuda bilgi almak isteriz?",
+            intent="info",
+            booking_intent=False,
+            missing_fields=[],
+        ),
+    )
+
+    decision = main.build_ai_first_decision("Dolandirici misiniz?", conversation, [], {})
+
+    reply = decision["reply_text"]
+    assert decision["booking_intent"] is False
+    assert "Transparent" not in reply
+    assert "DOEL Digital" in reply
+    assert "bilgi almak isteriz" not in reply
+    assert "hiçbir bilgi paylaşmak zorunda değilsiniz" in reply
+
+
+def test_ai_first_aleykum_greeting_does_not_claim_wellbeing(monkeypatch):
+    conversation = {"state": "new", "memory_state": {}}
+
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text="Merhaba! İyiyim, size nasıl yardımcı olabilirim?",
+            intent="greeting",
+            booking_intent=False,
+            missing_fields=[],
+        ),
+    )
+
+    decision = main.build_ai_first_decision("Salamun aleykum", conversation, [], {})
+
+    assert decision["reply_text"] == "Aleyküm selam, hoş geldiniz. Size nasıl yardımcı olabilirim?"
+    assert decision["booking_intent"] is False
+
+
 def test_phone_reason_question_answers_phone_purpose_in_service_state():
     conversation = {
         "service": "Otomasyon & Yapay Zeka Cozumleri",

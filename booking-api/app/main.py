@@ -8315,6 +8315,50 @@ def should_replace_collection_reply_with_clarification(
     )
 
 
+def cleanup_ai_first_reply_text(reply_text: str | None) -> str | None:
+    reply = normalize_llm_reply_text(reply_text or "")
+    if not reply:
+        return None
+    replacements = {
+        "Transparent": "şeffaf",
+        "transparent": "şeffaf",
+        "Hangi konuda bilgi almak isteriz?": "Hangi konuda bilgi almak istersiniz?",
+        "hangi konuda bilgi almak isteriz?": "hangi konuda bilgi almak istersiniz?",
+        "DOEL DIGITAL": "DOEL Digital",
+    }
+    for source, target in replacements.items():
+        reply = reply.replace(source, target)
+    return reply.strip()
+
+
+def apply_ai_first_quality_overrides(
+    message_text: str,
+    decision: dict[str, Any],
+    conversation: dict[str, Any],
+) -> dict[str, Any]:
+    decision["reply_text"] = cleanup_ai_first_reply_text(decision.get("reply_text"))
+    lowered = sanitize_text(message_text).lower()
+    if is_trust_or_scam_question(message_text):
+        decision["reply_text"] = build_trust_or_scam_reply()
+        decision["intent"] = "reassurance"
+        decision["booking_intent"] = False
+        decision["missing_fields"] = []
+        return decision
+    if is_angry_complaint_message(message_text):
+        decision["reply_text"] = build_angry_complaint_reply()
+        decision["intent"] = "complaint"
+        decision["booking_intent"] = False
+        decision["missing_fields"] = []
+        return decision
+    if ("aleykum" in lowered or "aleyküm" in lowered) and len(sanitize_text(message_text).split()) <= 4:
+        decision["reply_text"] = "Aleyküm selam, hoş geldiniz. Size nasıl yardımcı olabilirim?"
+        decision["intent"] = "greeting"
+        decision["booking_intent"] = False
+        decision["missing_fields"] = []
+        return decision
+    return decision
+
+
 def build_ai_first_emergency_reply(message_text: str, conversation: dict[str, Any]) -> str:
     lowered = sanitize_text(message_text).lower()
     if is_simple_greeting(message_text) or "aleykum" in lowered:
@@ -8418,6 +8462,7 @@ def build_ai_first_decision(
             fallback_used=True,
             ai_model_used=selected_models[0] if selected_models else None,
         )
+    decision = apply_ai_first_quality_overrides(message_text, decision, conversation)
     if should_suppress_ai_booking_collection(message_text, decision, conversation, llm_data):
         decision["booking_intent"] = False
         decision["missing_fields"] = []
