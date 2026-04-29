@@ -51,6 +51,10 @@ def test_full_ai_conversational_mode_defaults_to_enabled():
     assert main.FULL_AI_CONVERSATIONAL_MODE is True
 
 
+def test_full_ai_conversational_mode_is_forced_on():
+    assert main.FULL_AI_CONVERSATIONAL_MODE is True
+
+
 def test_clarification_about_preconsultation_does_not_repeat_phone_request():
     conversation = {
         "service": "Otomasyon & Yapay Zeka Cozumleri",
