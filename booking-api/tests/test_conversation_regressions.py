@@ -1011,3 +1011,29 @@ def test_ai_first_booking_intent_sets_next_missing_field():
     assert main.display_service_name(conversation["service"]) == "Otomasyon & Yapay Zeka \u00c7\u00f6z\u00fcmleri"
     assert conversation["booking_kind"] == "preconsultation"
     assert conversation["state"] == "collect_name"
+
+
+def test_ai_first_booking_reply_asks_name_before_date_or_phone():
+    decision = {
+        "reply_text": "Elbette, toplantı için hangi tarih ve saatler size uygun?",
+        "intent": "booking",
+        "should_reply": True,
+        "booking_intent": True,
+        "extracted_service": "Otomasyon & Yapay Zeka Cozumleri",
+        "extracted_name": None,
+        "extracted_phone": None,
+        "requested_date": None,
+        "requested_time": None,
+        "missing_fields": ["requested_date", "requested_time"],
+        "crm_action": "update_customer",
+        "handoff_needed": False,
+    }
+    conversation = {"state": "collect_service", "service": None, "memory_state": {}}
+
+    enforced = main.enforce_ai_first_booking_order(decision, conversation, "Toplanti yapalim")
+
+    reply = enforced["reply_text"].lower()
+    assert "ad" in reply
+    assert "soyad" in reply
+    assert "hangi tarih" not in reply
+    assert "telefon" not in reply

@@ -8210,6 +8210,50 @@ def normalize_ai_first_decision(
     return decision
 
 
+def enforce_ai_first_booking_order(
+    decision: dict[str, Any],
+    conversation: dict[str, Any],
+    message_text: str,
+) -> dict[str, Any]:
+    if not llm_bool(decision.get("booking_intent")):
+        return decision
+
+    service = sanitize_text(str(decision.get("extracted_service") or conversation.get("service") or ""))
+    service_meta = match_service_catalog(service, service) if service else None
+    service_display = display_service_name(str((service_meta or {}).get("display") or service))
+    booking_label = "ön görüşme"
+    extracted_name = titlecase_name(decision.get("extracted_name"))
+    extracted_phone = canonical_phone(decision.get("extracted_phone"))
+    requested_date = normalize_date_string(decision.get("requested_date"))
+    requested_time = normalize_time_string(decision.get("requested_time"))
+    current_name = titlecase_name(conversation.get("full_name"))
+    current_phone = canonical_phone(conversation.get("phone"))
+    current_date = normalize_date_string(conversation.get("requested_date"))
+    current_time = normalize_time_string(conversation.get("requested_time"))
+
+    if not service_display:
+        decision["reply_text"] = "Tabii, görüşme planlayabiliriz. Hangi hizmet için görüşmek istediğinizi yazar mısınız?"
+        decision["missing_fields"] = ["service"]
+        return decision
+    if not (extracted_name or current_name):
+        decision["reply_text"] = f"Tabii, {service_display} için {booking_label} planlayabiliriz. Önce adınızı ve soyadınızı yazar mısınız?"
+        decision["missing_fields"] = ["full_name", "phone", "requested_date", "requested_time"]
+        return decision
+    if not (extracted_phone or current_phone):
+        decision["reply_text"] = f"Teşekkürler. {booking_label.capitalize()} kaydını tamamlamak için telefon numaranızı paylaşır mısınız?"
+        decision["missing_fields"] = ["phone", "requested_date", "requested_time"]
+        return decision
+    if not (requested_date or current_date):
+        decision["reply_text"] = f"Not aldım. {service_display} için hangi gün görüşmek istersiniz?"
+        decision["missing_fields"] = ["requested_date", "requested_time"]
+        return decision
+    if not (requested_time or current_time):
+        decision["reply_text"] = "Uygun günü aldım. Hangi saat sizin için uygun?"
+        decision["missing_fields"] = ["requested_time"]
+        return decision
+    return decision
+
+
 def build_ai_first_emergency_reply(message_text: str, conversation: dict[str, Any]) -> str:
     lowered = sanitize_text(message_text).lower()
     if is_simple_greeting(message_text) or "aleykum" in lowered:
@@ -8313,6 +8357,7 @@ def build_ai_first_decision(
             fallback_used=True,
             ai_model_used=selected_models[0] if selected_models else None,
         )
+    decision = enforce_ai_first_booking_order(decision, conversation, message_text)
     return decision
 
 
