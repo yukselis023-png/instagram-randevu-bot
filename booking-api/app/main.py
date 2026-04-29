@@ -8201,11 +8201,28 @@ def build_ai_first_decision(
         messages,
         temperature=0.35,
         max_tokens=420,
-        timeout=max(LLM_REPLY_ADVISORY_TIMEOUT_SECONDS, 8),
+        timeout=max(LLM_REPLY_ADVISORY_TIMEOUT_SECONDS, 25),
         models=selected_models,
     )
     parsed = parse_json_like(content or "")
     fallback_used = not bool(parsed)
+    unstructured_reply = normalize_llm_reply_text(content) if content and not parsed else None
+    if not parsed and unstructured_reply:
+        parsed = {
+            "reply_text": unstructured_reply,
+            "intent": "ai_unstructured_reply",
+            "should_reply": True,
+            "booking_intent": False,
+            "extracted_service": None,
+            "extracted_name": None,
+            "extracted_phone": None,
+            "requested_date": None,
+            "requested_time": None,
+            "missing_fields": [],
+            "crm_action": "update_customer",
+            "handoff_needed": False,
+        }
+        fallback_used = False
     if not parsed:
         parsed = {
             "reply_text": build_ai_first_emergency_reply(message_text, conversation),

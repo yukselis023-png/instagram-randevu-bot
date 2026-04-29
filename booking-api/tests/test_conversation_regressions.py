@@ -935,6 +935,26 @@ def test_ai_first_decision_fallback_still_returns_reply(monkeypatch):
     assert decision["fallback_used"] is True
 
 
+def test_ai_first_decision_accepts_unstructured_ai_reply(monkeypatch):
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: "Otomasyon teslimi genelde 3-7 is gunu surer; kapsam buyurse 1-3 haftaya cikabilir.",
+    )
+
+    decision = main.build_ai_first_decision(
+        "Otomasyon teslim suresi ne kadar?",
+        {"state": "collect_service", "memory_state": {}},
+        [],
+        {},
+    )
+
+    assert decision["should_reply"] is True
+    assert "3-7" in decision["reply_text"]
+    assert decision["intent"] == "ai_unstructured_reply"
+    assert decision["fallback_used"] is False
+
+
 def test_ai_first_question_interrupts_active_booking_collection():
     conversation = {
         "service": "Otomasyon & Yapay Zeka Cozumleri",
