@@ -651,6 +651,47 @@ def test_ai_first_yes_after_automation_price_reply_does_not_use_empty_next_step(
     assert "3-7 iş günü" in reply
 
 
+def test_ai_first_positive_web_details_acceptance_starts_consultation(monkeypatch):
+    conversation = {
+        "service": "Web Tasarım - KOBİ Paketi",
+        "state": "new",
+        "booking_kind": None,
+        "memory_state": {},
+    }
+    history = [
+        {
+            "direction": "out",
+            "message_text": (
+                "Websitesini merak ediyorsanız, Web Tasarım - KOBİ Paketimizle ilgilenebilirsiniz. "
+                "Fiyatımız 12.900 ₺'dir ve teslimat süresi 7-14 iş günüdür. Daha fazla bilgi almak ister misiniz?"
+            ),
+        }
+    ]
+
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text=(
+                "Web Tasarım - KOBİ Paketimizle kurumsal web tasarım çözümü sunuyoruz. "
+                "İsterseniz detayları netleştirmek için konuşmaya devam edelim."
+            ),
+            intent="info",
+            booking_intent=False,
+            missing_fields=[],
+        ),
+    )
+
+    decision = main.build_ai_first_decision("Olur", conversation, history, {})
+
+    reply = decision["reply_text"].lower()
+    assert decision["booking_intent"] is True
+    assert "name" in decision["missing_fields"] or "full_name" in decision["missing_fields"]
+    assert "ön görüşme" in reply or "kısa görüşme" in reply
+    assert "ad" in reply and "soyad" in reply
+    assert "konuşmaya devam edelim" not in reply
+
+
 def test_phone_reason_question_answers_phone_purpose_in_service_state():
     conversation = {
         "service": "Otomasyon & Yapay Zeka Cozumleri",

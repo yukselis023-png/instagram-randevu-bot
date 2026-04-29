@@ -3825,6 +3825,35 @@ def build_more_details_acceptance_reply(conversation: dict[str, Any]) -> str:
     )
 
 
+def recent_outbound_can_start_service_consultation(
+    history: list[dict[str, Any]] | None,
+    conversation: dict[str, Any] | None = None,
+) -> bool:
+    service = display_service_name((conversation or {}).get("service"))
+    if not service or "otomasyon" in service.lower():
+        return False
+    last_outbound = get_last_outbound_text(history).lower()
+    if not last_outbound:
+        return False
+    if recent_outbound_offered_consultation(history):
+        return True
+    if not recent_outbound_offered_more_details(history):
+        return False
+    service_meta = match_service_catalog(service, service)
+    service_slug = sanitize_text(str((service_meta or {}).get("slug") or "")).lower()
+    service_keywords = [sanitize_text(str(item)).lower() for item in (service_meta or {}).get("keywords", [])]
+    service_cues = [service.lower(), service_slug, *service_keywords]
+    return any(cue and cue in last_outbound for cue in service_cues)
+
+
+def build_service_consultation_acceptance_reply(conversation: dict[str, Any]) -> str:
+    service = display_service_name(conversation.get("service")) or "ilgili hizmet"
+    return (
+        f"Tabii. {service} için detayları netleştirmek adına kısa bir ön görüşme planlayabiliriz. "
+        "Ön görüşme kaydını açabilmem için adınızı ve soyadınızı yazar mısınız?"
+    )
+
+
 def recent_outbound_requested_priority(history: list[dict[str, Any]] | None) -> bool:
     last_outbound = get_last_outbound_text(history).lower()
     if not last_outbound:
@@ -8453,6 +8482,12 @@ def apply_ai_first_quality_overrides(
 ) -> dict[str, Any]:
     decision["reply_text"] = cleanup_ai_first_reply_text(decision.get("reply_text"))
     lowered = sanitize_text(message_text).lower()
+    if recent_outbound_can_start_service_consultation(history, conversation) and is_positive_more_details_acceptance(message_text):
+        decision["reply_text"] = build_service_consultation_acceptance_reply(conversation)
+        decision["intent"] = "service_consultation_acceptance"
+        decision["booking_intent"] = True
+        decision["missing_fields"] = ["name"]
+        return decision
     if recent_outbound_can_accept_automation_details(history, conversation) and is_positive_more_details_acceptance(message_text):
         decision["reply_text"] = build_more_details_acceptance_reply(conversation)
         decision["intent"] = "more_details_acceptance"
