@@ -3737,6 +3737,30 @@ def recent_outbound_offered_more_details(history: list[dict[str, Any]] | None) -
     return any(cue in last_outbound for cue in cues)
 
 
+def recent_outbound_can_accept_automation_details(history: list[dict[str, Any]] | None) -> bool:
+    last_outbound = get_last_outbound_text(history).lower()
+    if not last_outbound:
+        return False
+    if recent_outbound_offered_more_details(history):
+        return True
+    context_cues = [
+        "otomasyon",
+        "crm",
+        "dm",
+        "mesaj",
+        "randevuları otomatik",
+        "randevulari otomatik",
+    ]
+    question_cues = [
+        "hangi sekt",
+        "hangi iş modeli",
+        "hangi is modeli",
+        "faaliyet göster",
+        "faaliyet goster",
+    ]
+    return any(cue in last_outbound for cue in context_cues) and any(cue in last_outbound for cue in question_cues)
+
+
 def is_positive_more_details_acceptance(text: str) -> bool:
     lowered = sanitize_text(text).lower()
     normalized = re.sub(r"\s+", " ", lowered).strip()
@@ -8402,7 +8426,7 @@ def apply_ai_first_quality_overrides(
 ) -> dict[str, Any]:
     decision["reply_text"] = cleanup_ai_first_reply_text(decision.get("reply_text"))
     lowered = sanitize_text(message_text).lower()
-    if recent_outbound_offered_more_details(history) and is_positive_more_details_acceptance(message_text):
+    if recent_outbound_can_accept_automation_details(history) and is_positive_more_details_acceptance(message_text):
         decision["reply_text"] = build_more_details_acceptance_reply(conversation)
         decision["intent"] = "more_details_acceptance"
         decision["booking_intent"] = False

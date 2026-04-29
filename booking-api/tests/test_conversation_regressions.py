@@ -394,6 +394,51 @@ def test_ai_first_yes_with_punctuation_to_more_details_explains_automation(monke
     assert "3-7 iş günü" in reply
 
 
+def test_ai_first_yes_after_automation_sector_question_still_gives_details(monkeypatch):
+    conversation = {
+        "service": "Otomasyon & Yapay Zeka Cozumleri",
+        "state": "new",
+        "booking_kind": None,
+        "memory_state": {},
+    }
+    history = [
+        {
+            "direction": "out",
+            "message_text": (
+                "Günlük ortalama 20-25 mesaj için CRM otomasyonumuz oldukça etkili olabilir. "
+                "Müşteri mesajlarına 7/24 yanıt, randevuları otomatik ayarlama gibi özelliklerle işinizi kolaylaştırabilir. "
+                "Hangi sektörde faaliyet gösteriyorsunuz?"
+            ),
+        }
+    ]
+
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text=(
+                "CRM otomasyonumuz günlük 20-25 mesajı yönetebilir. "
+                "Bir sonraki adımda sizinle hangi konularda daha detaylı bilgi paylaşmamızı istersiniz?"
+            ),
+            intent="provide_info",
+            booking_intent=False,
+            missing_fields=[],
+        ),
+    )
+
+    decision = main.build_ai_first_decision("Evet.", conversation, history, {})
+
+    reply = decision["reply_text"].lower()
+    assert decision["booking_intent"] is False
+    assert "bir sonraki adım" not in reply
+    assert "hangi konularda" not in reply
+    assert "hangi sektör" not in reply
+    assert "adınız" not in reply and "soyad" not in reply and "telefon numaran" not in reply
+    assert "dm" in reply
+    assert "randevu" in reply
+    assert "3-7 iş günü" in reply
+
+
 def test_phone_reason_question_answers_phone_purpose_in_service_state():
     conversation = {
         "service": "Otomasyon & Yapay Zeka Cozumleri",
