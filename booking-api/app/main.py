@@ -3718,7 +3718,11 @@ def recent_outbound_offered_more_details(history: list[dict[str, Any]] | None) -
     cues = [
         "daha detaylı bilgi almak ister",
         "daha detayli bilgi almak ister",
+        "daha detaylı bilgi için",
+        "daha detayli bilgi icin",
         "daha fazla bilgi almak ister",
+        "daha fazla bilgi için",
+        "daha fazla bilgi icin",
         "hizmet hakkında daha fazla bilgi",
         "hizmet hakkinda daha fazla bilgi",
         "sistemimizle ilgili daha detaylı bilgi",

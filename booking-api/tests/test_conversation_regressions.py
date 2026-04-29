@@ -313,6 +313,41 @@ def test_ai_first_yes_to_more_details_explains_automation_without_empty_next_ste
     assert "3-7 iş günü" in reply
 
 
+def test_ai_first_yes_to_more_details_handles_which_service_wording(monkeypatch):
+    conversation = {
+        "service": None,
+        "state": "new",
+        "booking_kind": None,
+        "memory_state": {},
+    }
+    history = [
+        {
+            "direction": "out",
+            "message_text": "Daha detaylı bilgi için hangi hizmetle ilgileneceğinizi öğrenebilir miyim?",
+        }
+    ]
+
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text="Hangi hizmetle ilgileniyorsunuz?",
+            intent="info",
+            booking_intent=False,
+            missing_fields=[],
+        ),
+    )
+
+    decision = main.build_ai_first_decision("Evet olur", conversation, history, {})
+
+    reply = decision["reply_text"].lower()
+    assert decision["booking_intent"] is False
+    assert "hangi hizmet" not in reply
+    assert "dm" in reply
+    assert "randevu" in reply
+    assert "3-7 iş günü" in reply
+
+
 def test_phone_reason_question_answers_phone_purpose_in_service_state():
     conversation = {
         "service": "Otomasyon & Yapay Zeka Cozumleri",
