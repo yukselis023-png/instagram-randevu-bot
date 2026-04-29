@@ -3720,6 +3720,8 @@ def recent_outbound_offered_more_details(history: list[dict[str, Any]] | None) -
         "daha detayli bilgi almak ister",
         "daha detaylı bilgi için",
         "daha detayli bilgi icin",
+        "detaylı bilgi almak ister",
+        "detayli bilgi almak ister",
         "daha fazla bilgi almak ister",
         "daha fazla bilgi için",
         "daha fazla bilgi icin",
@@ -3737,9 +3739,13 @@ def recent_outbound_offered_more_details(history: list[dict[str, Any]] | None) -
 
 def is_positive_more_details_acceptance(text: str) -> bool:
     lowered = sanitize_text(text).lower()
-    return lowered in {
+    normalized = re.sub(r"\s+", " ", lowered).strip()
+    normalized = re.sub(r"[.!?…,:;]+$", "", normalized).strip()
+    return normalized in {
         "evet",
         "evet olur",
+        "evet tabii",
+        "evet tabi",
         "olur",
         "olur tabii",
         "olur tabi",

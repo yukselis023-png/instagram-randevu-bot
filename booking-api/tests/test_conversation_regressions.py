@@ -348,6 +348,52 @@ def test_ai_first_yes_to_more_details_handles_which_service_wording(monkeypatch)
     assert "3-7 iş günü" in reply
 
 
+def test_ai_first_yes_with_punctuation_to_more_details_explains_automation(monkeypatch):
+    conversation = {
+        "service": "Otomasyon & Yapay Zeka Cozumleri",
+        "state": "new",
+        "booking_kind": None,
+        "memory_state": {},
+    }
+    history = [
+        {
+            "direction": "out",
+            "message_text": (
+                "Günde yaklaşık 20-25 mesaj yoğunluğu için Otomasyon & Yapay Zeka Çözümlerimiz uygun görünüyor. "
+                "İlk 3 ay aylık 5.000 ₺ olacak. Standart kurulum 3-7 iş günü sürer. "
+                "Detaylı bilgi almak isterseniz?"
+            ),
+        }
+    ]
+
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text=(
+                "Otomasyon & Yapay Zeka Çözümlerimizin detaylarına bakalım. "
+                "Fiyatımız ilk 3 ay için aylık 5.000 ₺'dir. Kurulum 3-7 iş günü sürer. "
+                "Bir sonraki adımımız ne olacak?"
+            ),
+            intent="info",
+            booking_intent=False,
+            missing_fields=[],
+        ),
+    )
+
+    decision = main.build_ai_first_decision("Evet.", conversation, history, {})
+
+    reply = decision["reply_text"].lower()
+    assert decision["booking_intent"] is False
+    assert "bir sonraki adımımız" not in reply
+    assert "ne olacak" not in reply
+    assert "hangi hizmet" not in reply
+    assert "adınız" not in reply and "soyad" not in reply and "telefon numaran" not in reply
+    assert "dm" in reply
+    assert "randevu" in reply
+    assert "3-7 iş günü" in reply
+
+
 def test_phone_reason_question_answers_phone_purpose_in_service_state():
     conversation = {
         "service": "Otomasyon & Yapay Zeka Cozumleri",
