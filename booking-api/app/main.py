@@ -69,6 +69,9 @@ LLM_REPLY_MICRO_MAX_TOKENS = int(os.getenv("LLM_REPLY_MICRO_MAX_TOKENS", "48"))
 LLM_REPLY_ADVISORY_MAX_TOKENS = int(os.getenv("LLM_REPLY_ADVISORY_MAX_TOKENS", "90"))
 LLM_REPLY_POLISH_ENABLED = True
 FULL_AI_CONVERSATIONAL_MODE = True
+REPLY_ENGINE = "ai_first_v2"
+AI_FIRST_ENABLED = True
+REPLY_GUARANTEE_ENABLED = True
 CRM_SYNC_ENABLED = os.getenv("CRM_SYNC_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
 CRM_SUPABASE_URL = os.getenv("CRM_SUPABASE_URL", "").rstrip("/")
 CRM_SUPABASE_ANON_KEY = os.getenv("CRM_SUPABASE_ANON_KEY", "")
@@ -932,6 +935,9 @@ def version() -> dict[str, Any]:
         "llm_model": LLM_MODEL,
         "llm_reply_advisory_model": LLM_REPLY_ADVISORY_MODEL,
         "llm_reply_quality_model": LLM_REPLY_QUALITY_MODEL,
+        "reply_engine": REPLY_ENGINE,
+        "ai_first_enabled": AI_FIRST_ENABLED,
+        "reply_guarantee_enabled": REPLY_GUARANTEE_ENABLED,
     }
 
 
@@ -2126,7 +2132,16 @@ def preview_campaign_audience(
 @app.post("/api/process-instagram-message", response_model=ProcessResult)
 def process_instagram_message(payload: IncomingMessage, background_tasks: BackgroundTasks) -> ProcessResult:
     request_started_at = time_module.perf_counter()
-    metrics = {"extract_ms": 0, "polish_ms": 0, "crm_ms": 0}
+    metrics = {
+        "extract_ms": 0,
+        "polish_ms": 0,
+        "crm_ms": 0,
+        "reply_engine": REPLY_ENGINE,
+        "ai_model_used": None,
+        "ai_decision_intent": None,
+        "fallback_used": False,
+        "crm_sync_queued": False,
+    }
     trace_id = sanitize_text(payload.trace_id or ((payload.raw_event or {}).get("trace_id") if isinstance(payload.raw_event, dict) else "") or ((payload.raw_event or {}).get("message_id") if isinstance(payload.raw_event, dict) else "") or payload.sender_id)
     used_llm_extractor = False
     decision_path: list[str] = []
@@ -2221,7 +2236,7 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
         ) -> ProcessResult:
             nonlocal metrics
 
-            compose_enabled = should_ai_compose_reply(
+            compose_enabled = bool(should_polish) and should_ai_compose_reply(
                 message_type,
                 decision_label,
                 handoff=handoff,
@@ -2308,12 +2323,13 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
                 used_llm_extractor,
                 " > ".join(final_path),
             )
-            queue_crm_sync(
+            metrics["crm_sync_queued"] = queue_crm_sync(
                 background_tasks,
                 conversation,
                 appointment_id_value if appointment_created_value else None,
                 metric_snapshot,
             )
+            metric_snapshot["crm_sync_queued"] = metrics["crm_sync_queued"]
             return ProcessResult(
                 sender_id=payload.sender_id,
                 should_reply=bool(final_reply),
@@ -2466,6 +2482,102 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
 
         sanitize_conversation_state(conversation)
         conversation["last_customer_message"] = message_text
+        conversation["llm_notes"] = llm_data.get("notes")
+        if AI_FIRST_ENABLED:
+            if should_trace_decline_memory(message_text, conversation, llm_data):
+                log_decline_memory_trace("before_user_memory_update", payload.sender_id, trace_id, conversation, extra={"llm_objection_type": llm_data.get("objection_type")})
+            update_conversation_memory_from_user_message(
+                message_text,
+                conversation,
+                recent_history,
+                llm_data,
+                extracted_name=extracted_name,
+                detected_phone=detected_phone,
+                detected_date=detected_date,
+                detected_time=detected_time,
+            )
+            if should_trace_decline_memory(message_text, conversation, llm_data):
+                log_decline_memory_trace("after_user_memory_update", payload.sender_id, trace_id, conversation, extra={"llm_objection_type": llm_data.get("objection_type")})
+            decision_path.append(REPLY_ENGINE)
+            ai_decision = build_ai_first_decision(message_text, conversation, recent_history, llm_data)
+            metrics["ai_model_used"] = ai_decision.get("ai_model_used")
+            metrics["ai_decision_intent"] = ai_decision.get("intent")
+            metrics["fallback_used"] = bool(ai_decision.get("fallback_used"))
+            apply_ai_first_decision_to_conversation(conversation, ai_decision, message_text)
+            appointment_created = False
+            appointment_id = None
+            final_reply = ai_decision.get("reply_text")
+            if (
+                llm_bool(ai_decision.get("booking_intent"))
+                and conversation.get("service")
+                and conversation.get("full_name")
+                and conversation.get("phone")
+                and conversation.get("requested_date")
+                and conversation.get("requested_time")
+            ):
+                validation_error = validate_slot(conversation["requested_date"], conversation["requested_time"])
+                if validation_error:
+                    conversation["requested_time"] = None
+                    conversation["state"] = "collect_time"
+                    final_reply = validation_error
+                    decision_path.append("ai_first_booking_invalid_slot")
+                else:
+                    existing = find_existing_appointment(conn, conversation["requested_date"], conversation["requested_time"], conversation.get("service"))
+                    if existing:
+                        suggestions = suggest_alternatives(conn, conversation["requested_date"], conversation["requested_time"], conversation.get("service"))
+                        suggestion_text = ", ".join(suggestions) if suggestions else "aynı gün içinde başka bir uygun saat"
+                        conversation["requested_time"] = None
+                        conversation["state"] = "collect_time"
+                        final_reply = (
+                            f"Seçtiğiniz saat dolu görünüyor. Uygun alternatif saatler: {suggestion_text}. "
+                            "Size uygun olanı yazarsanız devam edebilirim."
+                        )
+                        decision_path.append("ai_first_booking_slot_taken")
+                    else:
+                        try:
+                            appointment_id, crm_ms = create_appointment(conn, conversation, payload.instagram_username)
+                            metrics["crm_ms"] = crm_ms
+                            active_appointment = find_active_appointment_for_user(
+                                conn,
+                                conversation.get("instagram_user_id"),
+                                preferred_date=conversation.get("requested_date"),
+                                preferred_time=conversation.get("requested_time"),
+                            )
+                            if active_appointment:
+                                conversation["requested_date"] = active_appointment.get("appointment_date") or conversation.get("requested_date")
+                                conversation["requested_time"] = active_appointment.get("appointment_time") or conversation.get("requested_time")
+                                conversation["appointment_status"] = "confirmed"
+                                conversation["state"] = "completed"
+                                appointment_created = True
+                                final_reply = build_confirmation_message(conversation)
+                                decision_path.append("ai_first_booking_created")
+                            else:
+                                conversation["state"] = "human_handoff"
+                                conversation["assigned_human"] = True
+                                final_reply = (
+                                    "Kaydınızı oluştururken teknik bir tutarsızlık algıladım; yanlış onay vermemek için sizi yetkili ekibimize yönlendiriyorum. "
+                                    f"İsterseniz {build_contact_text()} üzerinden de bize ulaşabilirsiniz."
+                                )
+                                decision_path.append("ai_first_booking_integrity_handoff")
+                        except HTTPException as exc:
+                            if exc.status_code == 409 and isinstance(exc.detail, dict) and exc.detail.get("type") == "slot_conflict":
+                                conversation["requested_time"] = None
+                                conversation["state"] = "collect_time"
+                                alternatives = suggest_alternatives(conn, conversation["requested_date"], conversation.get("requested_time"), conversation.get("service"))
+                                alt_text = ", ".join(alternatives) if alternatives else "başka bir uygun saat"
+                                final_reply = f"Seçtiğiniz saat dolmuş görünüyor. Uygun alternatif: {alt_text}. Hangisi size uyar?"
+                                decision_path.append("ai_first_booking_slot_conflict")
+                            else:
+                                raise
+            return finalize_result(
+                final_reply,
+                handoff=bool(ai_decision.get("handoff_needed")),
+                message_type="appointment" if appointment_created else ("handoff" if ai_decision.get("handoff_needed") else "reply"),
+                appointment_created_value=appointment_created,
+                appointment_id_value=appointment_id,
+                should_polish=False,
+                decision_label=f"{REPLY_ENGINE}:{ai_decision.get('intent', 'reply')}",
+            )
         if is_invalid_name_attempt(message_text, conversation.get("state", "new")):
             return finalize_result(
                 "Adınızı ve soyadınızı tam olarak yazar mısınız?",
@@ -7900,6 +8012,287 @@ def parse_json_like(content: str) -> dict[str, Any]:
         return {}
 
 
+AI_FIRST_DECISION_KEYS = {
+    "reply_text",
+    "intent",
+    "should_reply",
+    "booking_intent",
+    "extracted_service",
+    "extracted_name",
+    "extracted_phone",
+    "requested_date",
+    "requested_time",
+    "missing_fields",
+    "crm_action",
+    "handoff_needed",
+}
+
+
+def select_ai_first_models(message_text: str, conversation: dict[str, Any]) -> list[str]:
+    cleaned = sanitize_text(message_text).lower()
+    quality_markers = [
+        "mantikli",
+        "mantikli mi",
+        "strateji",
+        "hangisi",
+        "hepsini",
+        "dolandirici",
+        "guven",
+        "neden",
+        "nasil",
+        "fiyat",
+        "teslim",
+    ]
+    simple_markers = ["merhaba", "selam", "aleykum", "nasilsiniz", "tesekkur", "sagol", "kolay gelsin"]
+    active_state = sanitize_text(conversation.get("state") or "")
+    if len(cleaned.split()) <= 4 and any(marker in cleaned for marker in simple_markers):
+        ordered = [LLM_REPLY_MICRO_MODEL, LLM_REPLY_ADVISORY_MODEL, LLM_FALLBACK_MODEL]
+    elif active_state in {"collect_name", "collect_phone", "collect_date", "collect_period", "collect_time"} or any(marker in cleaned for marker in quality_markers):
+        ordered = [LLM_REPLY_QUALITY_MODEL, LLM_REPLY_ADVISORY_MODEL, LLM_FALLBACK_MODEL]
+    else:
+        ordered = [LLM_REPLY_ADVISORY_MODEL, LLM_REPLY_QUALITY_MODEL, LLM_FALLBACK_MODEL]
+    result: list[str] = []
+    for model in ordered:
+        if model and model not in result:
+            result.append(model)
+    return result or list_llm_models()
+
+
+def build_ai_first_service_context() -> list[dict[str, Any]]:
+    services: list[dict[str, Any]] = []
+    for service in DOEL_SERVICE_CATALOG:
+        services.append(
+            {
+                "display": display_service_name(str(service.get("display") or "")),
+                "price": str(service.get("price") or ""),
+                "price_note": str(service.get("price_note") or ""),
+                "delivery_time": str(service.get("delivery_time") or ""),
+                "summary": str(service.get("summary") or ""),
+                "keywords": service.get("keywords") or [],
+            }
+        )
+    return services
+
+
+def build_ai_first_prompt_payload(
+    message_text: str,
+    conversation: dict[str, Any],
+    history: list[dict[str, Any]] | None,
+    llm_data: dict[str, Any] | None,
+) -> dict[str, Any]:
+    return {
+        "today": datetime.now(TZ).date().isoformat(),
+        "timezone": TIMEZONE,
+        "business_name": BUSINESS_NAME or "DOEL Digital",
+        "business_phone": BUSINESS_PHONE,
+        "business_email": BUSINESS_EMAIL,
+        "business_website": BUSINESS_WEBSITE,
+        "service_catalog": build_ai_first_service_context(),
+        "known_state": build_normalized(conversation),
+        "recent_history": history or [],
+        "extractor_hint": llm_data or {},
+        "message": message_text,
+    }
+
+
+def normalize_ai_first_decision(
+    parsed: dict[str, Any],
+    message_text: str,
+    conversation: dict[str, Any],
+    *,
+    fallback_used: bool,
+    ai_model_used: str | None,
+) -> dict[str, Any]:
+    if not isinstance(parsed, dict):
+        parsed = {}
+    reply_text = normalize_llm_reply_text(str(parsed.get("reply_text") or ""))
+    if not reply_text:
+        reply_text = build_ai_first_emergency_reply(message_text, conversation)
+        fallback_used = True
+
+    extracted_service = sanitize_text(str(parsed.get("extracted_service") or ""))
+    service_match = match_service_catalog(extracted_service, extracted_service) if extracted_service else None
+    if service_match:
+        extracted_service = str(service_match.get("display") or extracted_service)
+    else:
+        extracted_service = extracted_service or None
+
+    extracted_name = titlecase_name(parsed.get("extracted_name"))
+    extracted_phone = extract_phone(str(parsed.get("extracted_phone") or "")) if parsed.get("extracted_phone") else None
+    requested_date = normalize_date_string(parsed.get("requested_date"))
+    requested_time = normalize_time_string(parsed.get("requested_time"))
+    missing_fields = parsed.get("missing_fields")
+    if not isinstance(missing_fields, list):
+        missing_fields = []
+    missing_fields = [sanitize_text(str(field)).lower() for field in missing_fields if sanitize_text(str(field))]
+
+    should_reply = parsed.get("should_reply")
+    should_reply = True if should_reply is None else llm_bool(should_reply)
+    if REPLY_GUARANTEE_ENABLED and sanitize_text(message_text):
+        should_reply = True
+
+    decision = {
+        "reply_text": reply_text,
+        "intent": sanitize_text(str(parsed.get("intent") or "general_reply")) or "general_reply",
+        "should_reply": should_reply,
+        "booking_intent": llm_bool(parsed.get("booking_intent")),
+        "extracted_service": extracted_service,
+        "extracted_name": extracted_name,
+        "extracted_phone": extracted_phone,
+        "requested_date": requested_date,
+        "requested_time": requested_time,
+        "missing_fields": missing_fields,
+        "crm_action": sanitize_text(str(parsed.get("crm_action") or "update_customer")) or "update_customer",
+        "handoff_needed": llm_bool(parsed.get("handoff_needed")),
+        "fallback_used": fallback_used,
+        "ai_model_used": ai_model_used,
+    }
+    return decision
+
+
+def build_ai_first_emergency_reply(message_text: str, conversation: dict[str, Any]) -> str:
+    lowered = sanitize_text(message_text).lower()
+    if is_simple_greeting(message_text) or "aleykum" in lowered:
+        return "Merhaba, buradayım. Size nasıl yardımcı olabilirim?"
+    if any(token in lowered for token in ["dolandirici", "guven", "guvenilir", "sahte"]):
+        return "Endişenizi anlıyorum. Süreci şeffaf şekilde anlatabilirim; isterseniz önce hizmet, fiyat ve çalışma şeklini netleştireyim."
+    if any(token in lowered for token in ["fiyat", "ucret", "ne kadar", "kac para"]):
+        return "Fiyat hizmete ve kapsama göre değişir. Web tasarım, otomasyon, reklam veya sosyal medya tarafında hangisini merak ettiğinizi yazarsanız net bilgi vereyim."
+    if any(token in lowered for token in ["teslim", "sure", "kac gun", "hafta"]):
+        service = display_service_name(conversation.get("service"))
+        if service:
+            meta = match_service_catalog(service, service)
+            delivery = str((meta or {}).get("delivery_time") or "kapsama göre netleşir")
+            return f"{service} için tahmini teslim süresi {delivery}. Kapsam büyüdükçe süre değişebilir."
+        return "Teslim süresi hizmetin kapsamına göre değişir. Hangi hizmet için süre öğrenmek istediğinizi yazarsanız net cevap vereyim."
+    if "?" in lowered:
+        return build_generic_ai_draft_reply(message_text, conversation, [])
+    return "Anladım. Size yardımcı olabilmem için mesajınızı dikkate alıyorum; neye ihtiyacınız olduğunu yazarsanız doğrudan cevap vereyim."
+
+
+def build_ai_first_decision(
+    message_text: str,
+    conversation: dict[str, Any],
+    history: list[dict[str, Any]] | None = None,
+    llm_data: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    selected_models = select_ai_first_models(message_text, conversation)
+    payload = build_ai_first_prompt_payload(message_text, conversation, history, llm_data)
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are the AI-first Instagram DM reply engine for DOEL Digital. "
+                "For every real inbound user message, return ONLY minified JSON. "
+                "Never leave the user on seen. Rules and state are context only; the final reply is decided by you. "
+                "Schema keys: reply_text, intent, should_reply, booking_intent, extracted_service, extracted_name, extracted_phone, requested_date, requested_time, missing_fields, crm_action, handoff_needed. "
+                "should_reply must be true for every non-empty user message. reply_text must be natural, useful Turkish. "
+                "Answer the user's actual question first. Do not force name, phone, date, or appointment collection unless the user clearly asks for meeting, appointment, pre-consultation, offer call, or continues a booking. "
+                "If the user asks a question during booking, answer the question first and set booking_intent false unless they also clearly continue booking. "
+                "If the user changes service, extracted_service must use the new service. "
+                "If the user is angry or insults the bot, apologize briefly, avoid repeating old collection prompts, and explain the next useful step. "
+                "Use only the provided service catalog for prices, delivery times, and services. If unsure, say that the team should confirm instead of inventing. "
+                "If booking_intent is true, include one clear next missing field in the reply, not several at once. Do not include markdown."
+            ),
+        },
+        {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+    ]
+    content = call_llm_content(
+        messages,
+        temperature=0.35,
+        max_tokens=420,
+        timeout=max(LLM_REPLY_ADVISORY_TIMEOUT_SECONDS, 8),
+        models=selected_models,
+    )
+    parsed = parse_json_like(content or "")
+    fallback_used = not bool(parsed)
+    if not parsed:
+        parsed = {
+            "reply_text": build_ai_first_emergency_reply(message_text, conversation),
+            "intent": "fallback_reply",
+            "should_reply": True,
+            "booking_intent": False,
+            "extracted_service": None,
+            "extracted_name": None,
+            "extracted_phone": None,
+            "requested_date": None,
+            "requested_time": None,
+            "missing_fields": [],
+            "crm_action": "update_customer",
+            "handoff_needed": False,
+        }
+    decision = normalize_ai_first_decision(
+        parsed,
+        message_text,
+        conversation,
+        fallback_used=fallback_used,
+        ai_model_used=selected_models[0] if selected_models else None,
+    )
+    if not set(decision).issuperset(AI_FIRST_DECISION_KEYS):
+        decision = normalize_ai_first_decision(
+            {},
+            message_text,
+            conversation,
+            fallback_used=True,
+            ai_model_used=selected_models[0] if selected_models else None,
+        )
+    return decision
+
+
+def apply_ai_first_decision_to_conversation(
+    conversation: dict[str, Any],
+    decision: dict[str, Any],
+    message_text: str,
+) -> None:
+    conversation["last_customer_message"] = message_text
+    service = sanitize_text(str(decision.get("extracted_service") or ""))
+    service_meta = match_service_catalog(service, service) if service else None
+    if service_meta:
+        conversation["service"] = service_meta.get("display")
+    name = titlecase_name(decision.get("extracted_name"))
+    if name and not is_invalid_name_attempt(name, "collect_name"):
+        conversation["full_name"] = name
+    phone = canonical_phone(decision.get("extracted_phone"))
+    if phone:
+        conversation["phone"] = phone
+    requested_date = normalize_date_string(decision.get("requested_date"))
+    if requested_date:
+        conversation["requested_date"] = requested_date
+    requested_time = normalize_time_string(decision.get("requested_time"))
+    if requested_time:
+        conversation["requested_time"] = requested_time
+        conversation["preferred_period"] = conversation.get("preferred_period") or infer_period_from_time(requested_time)
+
+    if llm_bool(decision.get("handoff_needed")):
+        conversation["state"] = "human_handoff"
+        conversation["assigned_human"] = True
+        conversation["appointment_status"] = "handoff"
+        return
+
+    booking_intent = llm_bool(decision.get("booking_intent"))
+    if not booking_intent:
+        if sanitize_text(conversation.get("state") or "") in {"collect_name", "collect_phone", "collect_date", "collect_period", "collect_time"}:
+            conversation["state"] = "collect_service"
+        return
+
+    if not conversation.get("booking_kind"):
+        conversation["booking_kind"] = "preconsultation"
+
+    missing = set(decision.get("missing_fields") or [])
+    if not conversation.get("service"):
+        conversation["state"] = "collect_service"
+    elif "full_name" in missing or "name" in missing or not conversation.get("full_name"):
+        conversation["state"] = "collect_name"
+    elif "phone" in missing or not conversation.get("phone"):
+        conversation["state"] = "collect_phone"
+    elif "requested_date" in missing or "date" in missing or not conversation.get("requested_date"):
+        conversation["state"] = "collect_date"
+    elif "requested_time" in missing or "time" in missing or not conversation.get("requested_time"):
+        conversation["state"] = "collect_time"
+    else:
+        conversation["state"] = "collect_time"
+
+
 def get_or_create_conversation(conn: psycopg.Connection, sender_id: str, username: str | None) -> dict[str, Any]:
     with conn.cursor() as cur:
         cur.execute(
@@ -9224,9 +9617,9 @@ def queue_crm_sync(
     conversation: dict[str, Any],
     appointment_id: int | None = None,
     request_metrics: dict[str, Any] | None = None,
-) -> None:
+) -> bool:
     if not CRM_SYNC_ENABLED or not should_sync_crm_conversation(conversation):
-        return
+        return False
 
     sync_payload = dict(conversation)
     observed_at = datetime.now(TZ).isoformat()
@@ -9236,6 +9629,7 @@ def queue_crm_sync(
         with CRM_SYNC_GUARD_LOCK:
             CRM_SYNC_LATEST_OBSERVED[sender_id] = observed_at
     background_tasks.add_task(sync_conversation_to_crm_safe, sync_payload, appointment_id, dict(request_metrics or {}))
+    return True
 
 
 def sync_conversation_to_crm_safe(

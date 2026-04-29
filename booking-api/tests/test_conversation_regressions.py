@@ -884,3 +884,110 @@ def test_answerable_offtopic_question_gets_answer_not_service_picker():
     reply = result["reply"].lower()
     assert "başkenti" in reply or "baskenti" in reply
     assert "hangisini geliştirmek" not in reply
+
+
+def test_version_exposes_ai_first_reply_engine_flags():
+    payload = main.version()
+
+    assert payload["reply_engine"] == "ai_first_v2"
+    assert payload["ai_first_enabled"] is True
+    assert payload["reply_guarantee_enabled"] is True
+
+
+def test_ai_first_decision_parses_schema_and_guarantees_reply(monkeypatch):
+    def fake_call_llm_content(*args, **kwargs):
+        return (
+            '{"reply_text":"Otomasyon teslimi standart kurulumlarda genelde 3-7 is gunu, '
+            'ozel entegrasyonlarda 1-3 hafta surer.","intent":"delivery_time",'
+            '"should_reply":true,"booking_intent":false,"extracted_service":"Otomasyon & Yapay Zeka Cozumleri",'
+            '"extracted_name":null,"extracted_phone":null,"requested_date":null,"requested_time":null,'
+            '"missing_fields":[],"crm_action":"update_customer","handoff_needed":false}'
+        )
+
+    monkeypatch.setattr(main, "call_llm_content", fake_call_llm_content)
+
+    decision = main.build_ai_first_decision(
+        "Otomasyon teslim suresi ne kadar?",
+        {"state": "collect_service", "memory_state": {}},
+        [],
+        {},
+    )
+
+    assert decision["should_reply"] is True
+    assert decision["reply_text"].strip()
+    assert decision["intent"] == "delivery_time"
+    assert decision["booking_intent"] is False
+    assert decision["fallback_used"] is False
+
+
+def test_ai_first_decision_fallback_still_returns_reply(monkeypatch):
+    monkeypatch.setattr(main, "call_llm_content", lambda *args, **kwargs: None)
+
+    decision = main.build_ai_first_decision(
+        "Merhaba",
+        {"state": "collect_service", "memory_state": {}},
+        [],
+        {},
+    )
+
+    assert decision["should_reply"] is True
+    assert decision["reply_text"].strip()
+    assert decision["fallback_used"] is True
+
+
+def test_ai_first_question_interrupts_active_booking_collection():
+    conversation = {
+        "service": "Otomasyon & Yapay Zeka Cozumleri",
+        "state": "collect_name",
+        "booking_kind": "preconsultation",
+        "requested_date": "2026-05-05",
+        "memory_state": {},
+    }
+    decision = {
+        "reply_text": "Hayir, dolandirici degiliz; sureci seffaf sekilde anlatarak ilerliyoruz.",
+        "intent": "trust_question",
+        "should_reply": True,
+        "booking_intent": False,
+        "extracted_service": None,
+        "extracted_name": None,
+        "extracted_phone": None,
+        "requested_date": None,
+        "requested_time": None,
+        "missing_fields": [],
+        "crm_action": "update_customer",
+        "handoff_needed": False,
+    }
+
+    main.apply_ai_first_decision_to_conversation(conversation, decision, "Dolandirici misiniz?")
+
+    assert conversation["state"] == "collect_service"
+    assert conversation["last_customer_message"] == "Dolandirici misiniz?"
+
+
+def test_ai_first_booking_intent_sets_next_missing_field():
+    conversation = {
+        "service": None,
+        "state": "collect_service",
+        "booking_kind": None,
+        "memory_state": {},
+    }
+    decision = {
+        "reply_text": "Tabii, otomasyon icin on gorusme planlayabiliriz. Once ad soyadinizi alayim.",
+        "intent": "booking_request",
+        "should_reply": True,
+        "booking_intent": True,
+        "extracted_service": "Otomasyon & Yapay Zeka Cozumleri",
+        "extracted_name": None,
+        "extracted_phone": None,
+        "requested_date": None,
+        "requested_time": None,
+        "missing_fields": ["full_name", "phone", "requested_date", "requested_time"],
+        "crm_action": "update_customer",
+        "handoff_needed": False,
+    }
+
+    main.apply_ai_first_decision_to_conversation(conversation, decision, "Otomasyon icin toplanti yapalim")
+
+    assert main.display_service_name(conversation["service"]) == "Otomasyon & Yapay Zeka \u00c7\u00f6z\u00fcmleri"
+    assert conversation["booking_kind"] == "preconsultation"
+    assert conversation["state"] == "collect_name"
