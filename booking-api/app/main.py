@@ -6587,6 +6587,20 @@ def maybe_build_information_reply(message_text: str, llm_data: dict[str, Any], m
             "next_state": "collect_service",
             "set_service": conversation.get("service") or ("Otomasyon & Yapay Zeka Çözümleri" if sector in {"beauty", "real_estate"} or matched_services else None),
         }
+    if (
+        not direct_service_match
+        and not is_working_schedule_question(message_text)
+        and not is_company_background_question(message_text)
+        and not is_service_overview_question(message_text)
+        and not match_faq_response(message_text)
+        and should_use_generic_ai_reply(message_text, llm_data, conversation)
+    ):
+        return {
+            "reply": build_generic_ai_draft_reply(message_text, conversation, history),
+            "kind": "generic_ai",
+            "next_state": "collect_service",
+            "set_service": conversation.get("service"),
+        }
     if is_service_advice_request(message_text, llm_data) or is_comparison_request(message_text, matched_services, llm_data):
         return build_service_advice_reply(message_text, matched_services, llm_data, conversation)
     if direct_service_match and matched_service and current_state == "collect_service" and not message_shows_booking_intent(message_text, llm_data) and not asks_detail and not is_price_question(message_text) and not is_price_followup_message(message_text, llm_data) and not is_price_negotiation_message(message_text, llm_data) and len(sanitize_text(message_text).split()) <= 3:

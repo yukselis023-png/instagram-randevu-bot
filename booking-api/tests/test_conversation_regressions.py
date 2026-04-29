@@ -25,6 +25,24 @@ def test_ascii_stored_service_is_displayed_with_turkish_characters_in_clarificat
         assert "Cozumleri" not in reply
 
 
+def test_general_question_does_not_get_hijacked_by_existing_service_context():
+    conversation = {
+        "service": "Otomasyon & Yapay Zeka Cozumleri",
+        "state": "collect_service",
+        "booking_kind": None,
+        "memory_state": {},
+    }
+
+    message = "T\u00fcrkiye ba\u015fkenti neresi?"
+    matched = main.match_service_candidates(message, conversation.get("service"))
+    result = main.maybe_build_information_reply(message, {}, matched, conversation, [])
+
+    assert result["kind"] == "generic_ai"
+    assert "Ankara" in result["reply"]
+    assert "DOEL AI" not in result["reply"]
+    assert "\u00f6n g\u00f6r\u00fc\u015fme" not in result["reply"].lower()
+
+
 def test_numeric_range_after_volume_question_is_not_treated_as_date():
     message = "30-40"
     history = [{"direction": "out", "message_text": "Günlük mesaj yoğunluğunuz yaklaşık kaç?"}]
