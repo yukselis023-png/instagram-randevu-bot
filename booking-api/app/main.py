@@ -3757,6 +3757,7 @@ def recent_outbound_can_accept_automation_details(history: list[dict[str, Any]] 
         "hangi sekt",
         "hangi iş modeli",
         "hangi is modeli",
+        "hangi hizmet",
         "faaliyet göster",
         "faaliyet goster",
     ]
