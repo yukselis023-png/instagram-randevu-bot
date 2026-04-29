@@ -134,6 +134,61 @@ def test_phone_reason_question_answers_phone_purpose_in_service_state():
     assert "hangi taraf zor geliyor" not in reply
 
 
+def test_generic_ai_compose_is_not_blocked_by_legacy_polish_flag(monkeypatch):
+    conversation = {
+        "service": None,
+        "state": "collect_service",
+        "booking_kind": None,
+        "last_customer_message": "Türkiye başkenti neresi?",
+        "memory_state": {},
+    }
+
+    monkeypatch.setattr(main, "FULL_AI_CONVERSATIONAL_MODE", True)
+    monkeypatch.setattr(main, "LLM_REPLY_POLISH_ENABLED", False)
+    monkeypatch.setattr(main, "polish_reply_text", lambda *args, **kwargs: "Türkiye'nin başkenti Ankara'dır.")
+
+    reply, elapsed = main.maybe_polish_reply_text(
+        "Taslak cevap",
+        conversation,
+        [],
+        enabled=True,
+        decision_label="info:generic_ai",
+    )
+
+    assert reply == "Türkiye'nin başkenti Ankara'dır."
+    assert elapsed >= 0
+
+
+def test_generic_ai_draft_answers_common_general_question_without_vague_escape():
+    conversation = {
+        "service": None,
+        "state": "collect_service",
+        "booking_kind": None,
+        "memory_state": {},
+    }
+
+    reply = main.build_generic_ai_draft_reply("Türkiye başkenti neresi?", conversation, [])
+
+    assert "Ankara" in reply
+    assert "elimizde kesin bilgi" not in reply.lower()
+    assert "elimde kesin bilgi" not in reply.lower()
+
+
+def test_generic_ai_draft_invites_unrelated_questions_without_vague_escape():
+    conversation = {
+        "service": None,
+        "state": "collect_service",
+        "booking_kind": None,
+        "memory_state": {},
+    }
+
+    reply = main.build_generic_ai_draft_reply("Alakasız bir soru soruyorum ama cevap verir misin?", conversation, [])
+
+    assert "cevap" in reply.lower()
+    assert "elimizde kesin bilgi" not in reply.lower()
+    assert "elimde kesin bilgi" not in reply.lower()
+
+
 def test_angry_complaint_does_not_repeat_collection_prompt():
     conversation = {
         "service": "Otomasyon & Yapay Zeka Cozumleri",

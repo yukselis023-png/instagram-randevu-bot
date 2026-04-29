@@ -6669,6 +6669,8 @@ def is_business_fit_question(message_text: str) -> bool:
 def build_generic_ai_draft_reply(message_text: str, conversation: dict[str, Any], history: list[dict[str, Any]] | None = None) -> str:
     lowered = sanitize_text(message_text).lower()
     service = sanitize_text(conversation.get("service") or "")
+    if any(token in lowered for token in ["turkiye baskenti", "turkiye'nin baskenti", "turkiyenin baskenti", "türkiye baskenti"]):
+        return "Türkiye'nin başkenti Ankara'dır."
     if any(token in lowered for token in ["güvenli", "guvenli", "güvenlik", "guvenlik", "güvenli mi", "guvenli mi"]):
         return "Evet, doğru kurulumda güvenli çalışır; erişimler, müşteri verisi ve otomasyon adımları kontrollü şekilde yapılandırılır. İsterseniz hangi verilerin işleneceğini yazın, riskleri net söyleyeyim."
     if any(token in lowered for token in ["dünyanın başkenti", "dunyanin baskenti", "dünya başkenti", "dunya baskenti"]):
@@ -6679,10 +6681,12 @@ def build_generic_ai_draft_reply(message_text: str, conversation: dict[str, Any]
         return "Sistem gelen mesajı anlayıp uygun cevabı verir, gerekirse randevu veya müşteri kaydına bağlar. Hangi akışı otomatikleştirmek istiyorsunuz?"
     if any(token in lowered for token in ["ne yapıyorsunuz", "ne yapiyorsunuz", "ne iş", "ne is", "kimsiniz"]):
         return "DOEL; web tasarım, yapay zeka otomasyon, reklam ve sosyal medya süreçlerinde markalara destek verir. Şu an hangi tarafı geliştirmek istiyorsunuz?"
+    if any(token in lowered for token in ["cevap verir misin", "soru soruyorum", "alakasiz", "alakasız"]):
+        return "Evet, sorabilirsiniz; bildiğim konularda doğrudan cevaplarım, DOEL hizmetleriyle ilgiliyse ayrıca net yönlendiririm."
     if service:
         return f"{service} tarafında yardımcı olabilirim. Sorunuzu netleştirirseniz size en pratik yolu söyleyeyim."
     if "?" in lowered:
-        return "Net cevap vereyim: Bu konuda elimde kesin bilgi yoksa uydurmam; bildiğim kısmı açıkça söyler, belirsiz kalan noktayı ekibe netleştiririm. Sorunuzu biraz daha somut yazarsanız doğrudan cevaplayayım."
+        return "Sorunuzu doğrudan cevaplayayım; bildiğim kısmı net aktarırım, emin olmadığım yerde de uydurmadan belirtirim."
     return "Anladım. Buradan mesajınızı değerlendirip size en uygun cevabı vermeye çalışacağım."
 
 
@@ -6760,7 +6764,7 @@ def should_ai_compose_reply(
     appointment_created: bool = False,
     conversation: dict[str, Any] | None = None,
 ) -> bool:
-    if not FULL_AI_CONVERSATIONAL_MODE or not LLM_REPLY_POLISH_ENABLED:
+    if not FULL_AI_CONVERSATIONAL_MODE and not LLM_REPLY_POLISH_ENABLED:
         return False
 
     _ = (message_type, handoff, appointment_created, conversation)
@@ -7106,7 +7110,7 @@ def maybe_polish_reply_text(
 ) -> tuple[str | None, int]:
     if not draft_reply:
         return None, 0
-    if not enabled or not LLM_REPLY_POLISH_ENABLED:
+    if not enabled or not (FULL_AI_CONVERSATIONAL_MODE or LLM_REPLY_POLISH_ENABLED):
         return draft_reply, 0
 
     started_at = time_module.perf_counter()
