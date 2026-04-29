@@ -8254,6 +8254,47 @@ def enforce_ai_first_booking_order(
     return decision
 
 
+def should_suppress_ai_booking_collection(
+    message_text: str,
+    decision: dict[str, Any],
+    conversation: dict[str, Any],
+    llm_data: dict[str, Any] | None = None,
+) -> bool:
+    if not llm_bool(decision.get("booking_intent")):
+        return False
+    if message_shows_booking_intent(message_text, llm_data or {}):
+        return False
+    state = sanitize_text(conversation.get("state") or "")
+    if state in {"collect_name", "collect_phone", "collect_date", "collect_time", "collect_period"}:
+        if state == "collect_name" and titlecase_name(decision.get("extracted_name")):
+            return False
+        if state == "collect_phone" and canonical_phone(decision.get("extracted_phone")):
+            return False
+        if state == "collect_date" and normalize_date_string(decision.get("requested_date")):
+            return False
+        if state == "collect_time" and normalize_time_string(decision.get("requested_time")):
+            return False
+    cleaned = sanitize_text(message_text)
+    if any(
+        [
+            "?" in cleaned,
+            is_price_question(cleaned),
+            is_price_followup_message(cleaned, llm_data or {}),
+            is_delivery_time_question(cleaned),
+            is_delivery_duration_followup(cleaned),
+            is_trust_or_scam_question(cleaned),
+            is_request_reason_question(cleaned),
+            is_clarification_request(cleaned),
+            is_assistant_identity_question(cleaned),
+            is_service_overview_question(cleaned),
+            is_working_schedule_question(cleaned),
+            is_company_background_question(cleaned),
+        ]
+    ):
+        return True
+    return False
+
+
 def build_ai_first_emergency_reply(message_text: str, conversation: dict[str, Any]) -> str:
     lowered = sanitize_text(message_text).lower()
     if is_simple_greeting(message_text) or "aleykum" in lowered:
@@ -8357,6 +8398,9 @@ def build_ai_first_decision(
             fallback_used=True,
             ai_model_used=selected_models[0] if selected_models else None,
         )
+    if should_suppress_ai_booking_collection(message_text, decision, conversation, llm_data):
+        decision["booking_intent"] = False
+        decision["missing_fields"] = []
     decision = enforce_ai_first_booking_order(decision, conversation, message_text)
     return decision
 

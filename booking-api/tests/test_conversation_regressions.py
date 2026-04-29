@@ -1037,3 +1037,32 @@ def test_ai_first_booking_reply_asks_name_before_date_or_phone():
     assert "soyad" in reply
     assert "hangi tarih" not in reply
     assert "telefon" not in reply
+
+
+def test_ai_first_delivery_followup_suppresses_booking_collection():
+    decision = {
+        "reply_text": "4 hafta bazı kapsamlı entegrasyonlarda mümkün olabilir.",
+        "intent": "info",
+        "should_reply": True,
+        "booking_intent": True,
+        "extracted_service": "Otomasyon & Yapay Zeka Cozumleri",
+        "extracted_name": None,
+        "extracted_phone": None,
+        "requested_date": None,
+        "requested_time": None,
+        "missing_fields": ["full_name"],
+        "crm_action": "update_customer",
+        "handoff_needed": False,
+    }
+    conversation = {
+        "state": "collect_service",
+        "service": "Otomasyon & Yapay Zeka Cozumleri",
+        "memory_state": {},
+    }
+
+    assert main.should_suppress_ai_booking_collection(
+        "4 haftaya ciktigi oluyor mu?",
+        decision,
+        conversation,
+        {},
+    )
