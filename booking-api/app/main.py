@@ -926,6 +926,12 @@ def version() -> dict[str, Any]:
         "time": datetime.now(TZ).isoformat(),
         "full_ai_conversational_mode": FULL_AI_CONVERSATIONAL_MODE,
         "llm_reply_polish_enabled": LLM_REPLY_POLISH_ENABLED,
+        "llm_configured": bool(LLM_BASE_URL and LLM_API_KEY),
+        "llm_base_url_configured": bool(LLM_BASE_URL),
+        "llm_api_key_configured": bool(LLM_API_KEY),
+        "llm_model": LLM_MODEL,
+        "llm_reply_advisory_model": LLM_REPLY_ADVISORY_MODEL,
+        "llm_reply_quality_model": LLM_REPLY_QUALITY_MODEL,
     }
 
 
