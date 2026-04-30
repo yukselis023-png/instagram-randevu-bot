@@ -71,7 +71,7 @@ LLM_REPLY_MICRO_MAX_TOKENS = int(os.getenv("LLM_REPLY_MICRO_MAX_TOKENS", "48"))
 LLM_REPLY_ADVISORY_MAX_TOKENS = int(os.getenv("LLM_REPLY_ADVISORY_MAX_TOKENS", "90"))
 LLM_REPLY_POLISH_ENABLED = True
 FULL_AI_CONVERSATIONAL_MODE = True
-REPLY_ENGINE = "ai_first_v4"
+REPLY_ENGINE = "ai_first_v5"
 AI_FIRST_ENABLED = True
 REPLY_GUARANTEE_ENABLED = True
 CRM_SYNC_ENABLED = os.getenv("CRM_SYNC_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
@@ -542,6 +542,8 @@ CONVERSATION_MEMORY_DEFAULTS = {
     "reschedule_requested_date": None,
     "suggested_booking_slots": [],
     "pending_requested_time": None,
+    "contact_channel": None,
+    "phone_refused": False,
 }
 OWNER_CHECK_KEYWORDS = [
     "sahibiyle mi görüşüyorum", "sahibi misiniz", "işletme sahibi", "firma sahibi", "kurucu ile mi görüşüyorum",
@@ -568,6 +570,9 @@ PHONE_REFUSAL_KEYWORDS = [
     "telefon vermek istemiyorum", "numara vermek istemiyorum", "telefon paylaşmak istemiyorum", "telefonu paylaşmak istemiyorum",
     "telefon vermeden", "numara vermeden",
     "gerek yok", "şimdilik vermeyeyim", "simdilik vermeyeyim", "buradan konuşalım", "burdan konusalim",
+    "paylaşamam", "paylasamam", "numara paylaşamam", "numara paylasamam", "telefon paylaşamam", "telefon paylasamam",
+    "veremem", "numara veremem", "telefon veremem", "böyle kaydet", "boyle kaydet",
+    "instagramdan yazın", "instagramdan yazin", "instagram'dan yazın", "instagram'dan yazin", "dmden yazın", "dmden yazin",
 ]
 OFFER_HESITATION_KEYWORDS = [
     "bilmiyorum", "bilmiyom", "emin degilim", "kararsizim", "su an emin degilim",
@@ -2211,6 +2216,11 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
         "booking_progress_override": False,
         "empty_reply_recovered": False,
         "slot_resolution": None,
+        "ai_composed_reply": False,
+        "workflow_action": None,
+        "service_context": None,
+        "contact_channel": None,
+        "booking_stage": None,
     }
     trace_id = sanitize_text(payload.trace_id or ((payload.raw_event or {}).get("trace_id") if isinstance(payload.raw_event, dict) else "") or ((payload.raw_event or {}).get("message_id") if isinstance(payload.raw_event, dict) else "") or payload.sender_id)
     used_llm_extractor = False
@@ -2624,7 +2634,14 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
             metrics["ai_repair_used"] = bool(ai_decision.get("ai_repair_used"))
             metrics["booking_progress_override"] = bool(ai_decision.get("booking_progress_override"))
             metrics["booking_action"] = ai_decision.get("intent") if llm_bool(ai_decision.get("booking_intent")) else None
+            metrics["ai_composed_reply"] = not bool(ai_decision.get("fallback_used"))
+            metrics["workflow_action"] = ai_decision.get("intent")
+            metrics["service_context"] = display_service_name(conversation.get("service") or ai_decision.get("extracted_service"))
+            metrics["contact_channel"] = "instagram_dm" if has_instagram_dm_contact(conversation) else ("phone" if canonical_phone(conversation.get("phone")) else None)
+            metrics["booking_stage"] = conversation.get("state")
             apply_ai_first_decision_to_conversation(conversation, ai_decision, message_text)
+            metrics["contact_channel"] = "instagram_dm" if has_instagram_dm_contact(conversation) else ("phone" if canonical_phone(conversation.get("phone")) else None)
+            metrics["booking_stage"] = conversation.get("state")
             appointment_created = False
             appointment_id = None
             final_reply = ai_decision.get("reply_text")
@@ -2657,7 +2674,7 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
                 and not availability_failed
                 and conversation.get("service")
                 and conversation.get("full_name")
-                and conversation.get("phone")
+                and has_booking_contact_method(conversation)
                 and conversation.get("requested_date")
                 and conversation.get("requested_time")
             ):
@@ -5275,7 +5292,7 @@ def sanitize_conversation_state(conversation: dict[str, Any]) -> None:
         conversation["state"] = "collect_service"
     elif not conversation.get("full_name") and conversation.get("state") in {"collect_phone", "collect_date", "collect_period", "collect_time"}:
         conversation["state"] = "collect_name"
-    elif not conversation.get("phone") and conversation.get("state") in {"collect_date", "collect_period", "collect_time"}:
+    elif not has_booking_contact_method(conversation) and conversation.get("state") in {"collect_date", "collect_period", "collect_time"}:
         conversation["state"] = "collect_phone"
     elif not conversation.get("requested_date") and conversation.get("state") in {"collect_period", "collect_time"}:
         conversation["state"] = "collect_date"
@@ -5303,9 +5320,20 @@ def titlecase_name(value: str | None) -> str | None:
     return " ".join(word[:1].upper() + word[1:].lower() for word in words)
 
 
+def is_instagram_profile_name_reference(text: str | None) -> bool:
+    lowered = sanitize_text(text or "").lower()
+    if not lowered:
+        return False
+    has_profile_source = any(token in lowered for token in ["instagram", "profil", "hesabim", "hesabım", "bio", "biyografi"])
+    has_reference_action = any(token in lowered for token in ["yaziyor", "yazıyor", "var", "bak", "orada", "ordaki", "orada yaziyor", "orada yazıyor"])
+    return has_profile_source and has_reference_action
+
+
 def extract_name(text: str, state: str) -> str | None:
     normalized = sanitize_text(text)
     lowered = normalized.lower()
+    if is_instagram_profile_name_reference(text):
+        return None
     explicit_prefixes = [
         'benim adim soyadim ',
         'adim soyadim ',
@@ -5352,6 +5380,8 @@ def extract_name(text: str, state: str) -> str | None:
 def is_invalid_name_attempt(text: str, state: str) -> bool:
     if state != "collect_name":
         return False
+    if is_instagram_profile_name_reference(text):
+        return True
     if is_next_step_prompt(text) or is_low_signal_message(text):
         return True
     if extract_name(text, state):
@@ -5507,7 +5537,7 @@ def force_ai_first_booking_continuation(
     state = sanitize_text(state_before_update or "")
     service = sanitize_text(conversation.get("service") or "")
     has_name = bool(titlecase_name(extracted_name) or sanitize_text(conversation.get("full_name") or ""))
-    has_phone = bool(canonical_phone(detected_phone) or canonical_phone(conversation.get("phone")))
+    has_phone = bool(canonical_phone(detected_phone) or has_booking_contact_method(conversation))
     has_slot_context = bool(ensure_conversation_memory(conversation).get("suggested_booking_slots"))
     normalized_date = normalize_date_string(detected_date)
     normalized_time = normalize_time_string(detected_time)
@@ -6332,6 +6362,27 @@ def is_phone_share_refusal(text: str) -> bool:
     return any(keyword == lowered or keyword in lowered for keyword in PHONE_REFUSAL_KEYWORDS)
 
 
+def mark_instagram_dm_contact(conversation: dict[str, Any]) -> None:
+    memory = ensure_conversation_memory(conversation)
+    memory["contact_channel"] = "instagram_dm"
+    memory["phone_refused"] = True
+    memory["open_loop"] = "collect_time"
+    conversation["memory_state"] = memory
+
+
+def has_instagram_dm_contact(conversation: dict[str, Any]) -> bool:
+    memory = ensure_conversation_memory(conversation)
+    return sanitize_text(str(memory.get("contact_channel") or "")).lower() == "instagram_dm"
+
+
+def has_booking_contact_method(conversation: dict[str, Any]) -> bool:
+    return bool(canonical_phone(conversation.get("phone")) or has_instagram_dm_contact(conversation))
+
+
+def appointment_contact_value(conversation: dict[str, Any]) -> str | None:
+    return canonical_phone(conversation.get("phone")) or ("Instagram DM" if has_instagram_dm_contact(conversation) else None)
+
+
 def is_offer_hesitation_message(text: str) -> bool:
     lowered = sanitize_text(text).lower()
     return any(keyword == lowered or keyword in lowered for keyword in OFFER_HESITATION_KEYWORDS)
@@ -6340,8 +6391,8 @@ def is_offer_hesitation_message(text: str) -> bool:
 def build_phone_refusal_reply(conversation: dict[str, Any]) -> str:
     service = display_service_name(conversation.get("service"))
     if service:
-        return f"Tamam, sorun değil; telefonu paylaşmak zorunda değilsiniz. İsterseniz {service} tarafında bilgi vermeye buradan devam edeyim. Daha sonra ön görüşme planlamak isterseniz numarayı o aşamada paylaşabilirsiniz."
-    return "Tamam, sorun değil; telefonu paylaşmak zorunda değilsiniz. İsterseniz bilgi vermeye buradan devam edelim. Daha sonra ön görüşme planlamak isterseniz numarayı o aşamada paylaşabilirsiniz."
+        return f"Tamam, sorun değil; telefonu paylaşmak zorunda değilsiniz. {service} için Instagram DM üzerinden ilerleyebiliriz. Size uygun ön görüşme saatlerini paylaşayım."
+    return "Tamam, sorun değil; telefonu paylaşmak zorunda değilsiniz. Instagram DM üzerinden ilerleyebiliriz. Size uygun ön görüşme saatlerini paylaşayım."
 
 
 def override_ai_first_collect_phone_question(
@@ -6356,6 +6407,7 @@ def override_ai_first_collect_phone_question(
     if state != "collect_phone" or detected_phone:
         return False
     if is_phone_share_refusal(message_text):
+        mark_instagram_dm_contact(conversation)
         reply_text = build_phone_refusal_reply(conversation)
         intent = "phone_refusal"
     elif is_phone_reason_question(message_text) or is_phone_collection_hesitation(message_text):
@@ -6369,7 +6421,7 @@ def override_ai_first_collect_phone_question(
             "reply_text": reply_text,
             "intent": intent,
             "should_reply": True,
-            "booking_intent": False,
+            "booking_intent": intent == "phone_refusal",
             "handoff_needed": False,
             "missing_fields": [],
             "phone_collection_question_override": True,
@@ -9254,6 +9306,13 @@ def build_ai_first_emergency_reply(message_text: str, conversation: dict[str, An
         return build_generic_ai_draft_reply(message_text, conversation, [])
     service = display_service_name(conversation.get("service"))
     if service:
+        service_meta = match_service_catalog(service, service)
+        if service_meta and service_meta.get("slug") == "web-tasarim":
+            sector = detect_business_sector(message_text) or ensure_conversation_memory(conversation).get("customer_sector")
+            sector_text = " dövme stüdyonuz" if sector == "beauty" else " işletmeniz"
+            return f"Web sitesi tarafında{sector_text} için şık, güven veren ve dijitalde görünürlüğü artıran bir yapı kurabiliriz. İsterseniz kısa bir ön görüşmeyle tasarım tarzı, sayfa kapsamı ve teslim süresini netleştirelim."
+        if service_meta and service_meta.get("slug") == "otomasyon-ai":
+            return f"{service} tarafında DM, randevu ve müşteri takibini tek akışta toparlayabiliriz. İsterseniz kısa bir ön görüşmeyle işletmenizde hangi kısmın otomatikleşeceğini netleştirelim."
         return f"{service} tarafında ihtiyacınıza göre net ilerleyebiliriz. İsterseniz işletmenizde en çok hangi süreci toparlamak istediğinizi yazın, ona göre öneri yapayım."
     return "Buradayım. Web, otomasyon, reklam veya sosyal medya tarafında neyi merak ettiğinizi yazarsanız net şekilde cevaplayayım."
 
@@ -9415,7 +9474,7 @@ def apply_ai_first_decision_to_conversation(
         conversation["state"] = "collect_service"
     elif "full_name" in missing or "name" in missing or not conversation.get("full_name"):
         conversation["state"] = "collect_name"
-    elif "phone" in missing or not conversation.get("phone"):
+    elif ("phone" in missing or not conversation.get("phone")) and not has_booking_contact_method(conversation):
         conversation["state"] = "collect_phone"
     elif "requested_date" in missing or "date" in missing or not conversation.get("requested_date"):
         conversation["state"] = "collect_date"
@@ -9855,7 +9914,7 @@ def prepare_ai_first_booking_availability(
     start_date_value: str | None = None,
 ) -> dict[str, Any]:
     result: dict[str, Any] = {"reply_text": None, "ready_to_book": False, "slot_resolution": None}
-    if not (conversation.get("service") and conversation.get("full_name") and conversation.get("phone")):
+    if not (conversation.get("service") and conversation.get("full_name") and has_booking_contact_method(conversation)):
         return result
 
     memory = ensure_conversation_memory(conversation)
@@ -10062,6 +10121,7 @@ def create_appointment(conn: psycopg.Connection, conversation: dict[str, Any], u
             requested_date = normalize_date_string(conversation.get("requested_date"))
             requested_time = normalize_time_string(conversation.get("requested_time"))
             requested_service = conversation.get("service")
+            appointment_phone = appointment_contact_value(conversation)
             lock_capacity_slot(cur, requested_date, requested_time, requested_service)
             cur.execute(
                 """
@@ -10100,7 +10160,7 @@ def create_appointment(conn: psycopg.Connection, conversation: dict[str, Any], u
                         conversation.get("instagram_user_id"),
                         username or conversation.get("instagram_username"),
                         conversation.get("full_name"),
-                        conversation.get("phone"),
+                        appointment_phone,
                         conversation.get("service"),
                         resolved_status,
                         conversation.get("llm_notes"),
@@ -10127,7 +10187,7 @@ def create_appointment(conn: psycopg.Connection, conversation: dict[str, Any], u
                         conversation.get("instagram_user_id"),
                         username or conversation.get("instagram_username"),
                         conversation.get("full_name"),
-                        conversation.get("phone"),
+                        appointment_phone,
                         conversation.get("service"),
                         requested_date,
                         requested_time,

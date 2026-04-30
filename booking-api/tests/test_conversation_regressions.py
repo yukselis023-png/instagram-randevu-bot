@@ -1596,7 +1596,7 @@ def test_answerable_offtopic_question_gets_answer_not_service_picker():
 def test_version_exposes_ai_first_reply_engine_flags():
     payload = main.version()
 
-    assert payload["reply_engine"] == "ai_first_v4"
+    assert payload["reply_engine"] == "ai_first_v5"
     assert payload["ai_first_enabled"] is True
     assert payload["reply_guarantee_enabled"] is True
 
@@ -2439,8 +2439,87 @@ def test_reply_guarantee_returns_emergency_text_for_empty_ai_reply():
     assert "web" in reply.lower() or "hizmet" in reply.lower()
 
 
-def test_reply_engine_reports_ai_first_v4():
-    assert main.REPLY_ENGINE == "ai_first_v4"
+def test_reply_engine_reports_ai_first_v5():
+    assert main.REPLY_ENGINE == "ai_first_v5"
+
+
+def test_ai_first_v5_web_emergency_reply_stays_web_context():
+    conversation = {
+        "service": "Web Tasarim - KOBI Paketi",
+        "state": "collect_service",
+        "booking_kind": None,
+        "memory_state": {},
+    }
+
+    reply = main.build_ai_first_emergency_reply("Dijitalde gorunur olmak", conversation)
+    normalized = main.sanitize_text(reply).lower()
+
+    assert "web" in normalized or "site" in normalized
+    assert "sureci toparlamak" not in normalized
+    assert "dm" not in normalized
+
+
+def test_ai_first_v5_instagram_profile_is_not_accepted_as_full_name():
+    assert main.extract_name("Yaziyor Instagram hesabimda", "collect_name") is None
+    assert main.is_invalid_name_attempt("Yaziyor Instagram hesabimda", "collect_name")
+
+
+def test_ai_first_v5_phone_refusal_accepts_instagram_contact_without_pressure():
+    conversation = {
+        "service": "Web Tasarim - KOBI Paketi",
+        "full_name": "Berkay Elbir",
+        "state": "collect_phone",
+        "booking_kind": "preconsultation",
+        "memory_state": {},
+    }
+    decision = {
+        "reply_text": "Telefon numaranizi paylasir misiniz?",
+        "intent": "collect_phone",
+        "should_reply": True,
+        "booking_intent": True,
+        "missing_fields": ["phone"],
+    }
+
+    changed = main.override_ai_first_collect_phone_question(
+        decision,
+        conversation,
+        "Paylasamam boyle kaydet",
+        state_before_update="collect_phone",
+        detected_phone=None,
+    )
+
+    reply = main.sanitize_text(decision["reply_text"]).lower()
+    assert changed is True
+    assert decision["intent"] == "phone_refusal"
+    assert decision["booking_intent"] is True
+    assert decision["missing_fields"] == []
+    assert conversation["memory_state"]["contact_channel"] == "instagram_dm"
+    assert "zorunda" in reply
+    assert "paylasmazsaniz" not in reply
+    assert "planlayamayiz" not in reply
+
+
+def test_ai_first_v5_booking_availability_allows_instagram_contact_without_phone():
+    conversation = {
+        "service": "Web Tasarim - KOBI Paketi",
+        "full_name": "Berkay Elbir",
+        "phone": None,
+        "state": "collect_time",
+        "booking_kind": "preconsultation",
+        "memory_state": {"contact_channel": "instagram_dm"},
+    }
+
+    result = main.prepare_ai_first_booking_availability(
+        None,
+        conversation,
+        detected_date="2026-05-01",
+        detected_time="12:00",
+        start_date_value="2026-04-30",
+    )
+
+    assert result["ready_to_book"] is True
+    assert conversation["requested_date"] == "2026-05-01"
+    assert conversation["requested_time"] == "12:00"
 
 
 def test_ai_first_specific_automation_info_request_overrides_generic_fallback(monkeypatch):
