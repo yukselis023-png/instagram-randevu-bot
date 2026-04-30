@@ -555,6 +555,8 @@ OWNER_CHECK_KEYWORDS = [
 ASSISTANT_IDENTITY_KEYWORDS = [
     "adın ne", "adin ne", "adınız ne", "adiniz ne", "kimsin", "kimsiniz", "kimle görüşüyorum", "kiminle görüşüyorum", "sen misin", "siz misiniz",
     "insanla mı görüşüyorum", "insanla mi gorusuyorum", "insanla mı gorusuyorum", "insanla mi görüşüyorum",
+    "sen yapay zeka mısın", "sen yapay zeka misin", "siz yapay zeka mısınız", "siz yapay zeka misiniz",
+    "yapay zeka mısın", "yapay zeka misin", "bot musun", "bot musunuz",
 ]
 CLARIFICATION_KEYWORDS = [
     "nasıl yani", "nasil yani", "ne demek", "anlamadım", "anlamadim", "tam olarak ne", "yani ne", "nasıl oluyor", "nasil oluyor",
@@ -2500,7 +2502,7 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
         if has_confirmed_booking and wants_new_booking_after_confirmation(message_text):
             reset_conversation_for_restart(conversation)
             decision_path.append("restart_after_confirmation")
-        elif has_confirmed_booking:
+        elif has_confirmed_booking and confirmed_booking_should_take_over_message(message_text, conversation):
             conversation["last_customer_message"] = message_text
             reply = build_post_confirmation_followup_reply(conversation, message_text)
             return finalize_result(reply, message_type="info", should_polish=True, decision_label="confirmed_followup")
@@ -3940,6 +3942,13 @@ def is_positive_more_details_acceptance(text: str) -> bool:
     }
 
 
+def is_explicit_detail_request(text: str) -> bool:
+    lowered = sanitize_text(text).lower()
+    normalized = re.sub(r"\s+", " ", lowered).strip()
+    normalized = re.sub(r"[.!?â€¦,:;]+$", "", normalized).strip()
+    return normalized in {"anlat", "anlatın", "anlatin", "detay ver", "detaylı anlat", "detayli anlat"}
+
+
 def is_next_step_prompt(text: str) -> bool:
     lowered = sanitize_text(text).lower()
     normalized = re.sub(r"\s+", " ", lowered).strip()
@@ -4934,6 +4943,42 @@ def build_post_confirmation_followup_reply(conversation: dict[str, Any], message
     if contact_text:
         reply += f" İhtiyaç olursa {contact_text} üzerinden bize ulaşabilirsiniz."
     return reply
+
+
+def confirmed_booking_should_take_over_message(message_text: str, conversation: dict[str, Any]) -> bool:
+    lowered = sanitize_text(message_text).lower()
+    if is_assistant_identity_question(message_text):
+        return False
+    if is_angry_complaint_message(message_text):
+        return False
+    if is_meeting_method_question(message_text) or is_phone_reason_question(message_text):
+        return False
+    if is_service_information_request(message_text) or is_general_information_request(message_text):
+        return False
+    if wants_new_booking_after_confirmation(message_text):
+        return False
+    if any(k in lowered for k in CANCEL_KEYWORDS) or wants_change_after_confirmation(message_text, conversation):
+        return True
+    if extract_date(message_text) or extract_time(message_text) or has_date_cue(message_text):
+        return True
+    appointment_cues = [
+        "randevu",
+        "ön görüşme",
+        "on gorusme",
+        "görüşme",
+        "gorusme",
+        "saat",
+        "tarih",
+        "kesin",
+        "onay",
+        "teyit",
+        "iptal",
+        "değiş",
+        "degis",
+        "kaydır",
+        "kaydir",
+    ]
+    return any(cue in lowered for cue in appointment_cues)
 
 
 def parse_reschedule_followup_request(text: str, base_date_value: Any, base_time_value: Any) -> tuple[str | None, str | None]:
@@ -9293,11 +9338,25 @@ def apply_ai_first_quality_overrides(
         decision["booking_intent"] = True
         decision["missing_fields"] = ["name"]
         return decision
+    if is_assistant_identity_question(message_text):
+        decision["reply_text"] = build_assistant_identity_reply(conversation)
+        decision["intent"] = "assistant_identity"
+        decision["booking_intent"] = False
+        decision["missing_fields"] = []
+        decision["should_reply"] = True
+        return decision
     if is_meeting_clarification_question(message_text):
         decision["reply_text"] = build_contextual_clarification_reply(conversation, message_text)
         decision["intent"] = "clarification"
         decision["booking_intent"] = False
         decision["missing_fields"] = []
+        return decision
+    if is_meeting_method_question(message_text) or is_phone_reason_question(message_text):
+        decision["reply_text"] = build_contextual_clarification_reply(conversation, message_text)
+        decision["intent"] = "clarification"
+        decision["booking_intent"] = False
+        decision["missing_fields"] = []
+        decision["should_reply"] = True
         return decision
     if is_delivery_time_question(message_text) and sanitize_text(str(decision.get("intent") or "")) in {"fallback_reply", "message_volume", "general_reply"}:
         service_name = conversation.get("service") or pick_service(message_text, decision.get("extracted_service"))
@@ -9319,6 +9378,17 @@ def apply_ai_first_quality_overrides(
         decision["extracted_service"] = service
         decision["missing_fields"] = []
         return decision
+    if is_explicit_detail_request(message_text) and (
+        recent_outbound_offered_consultation(history)
+        or recent_outbound_offered_more_details(history)
+        or recent_outbound_can_accept_automation_details(history, conversation)
+    ):
+        decision["reply_text"] = build_more_details_acceptance_reply(conversation)
+        decision["intent"] = "more_details_acceptance"
+        decision["booking_intent"] = False
+        decision["missing_fields"] = []
+        decision["should_reply"] = True
+        return decision
     direct_service = pick_service(message_text, decision.get("extracted_service") or conversation.get("service"))
     direct_service_meta = match_service_catalog(direct_service, direct_service) if direct_service else None
     direct_booking_intent = message_shows_booking_intent(message_text, {}) or (
@@ -9333,7 +9403,7 @@ def apply_ai_first_quality_overrides(
         decision["extracted_service"] = service_display
         decision["missing_fields"] = ["name"]
         return decision
-    if recent_outbound_offered_consultation(history) and is_next_step_prompt(message_text):
+    if recent_outbound_offered_consultation(history) and is_next_step_prompt(message_text) and not is_explicit_detail_request(message_text):
         inferred_service = infer_recent_service_for_consultation(history, conversation)
         context = {**conversation}
         if inferred_service:
@@ -9345,7 +9415,7 @@ def apply_ai_first_quality_overrides(
             decision["extracted_service"] = inferred_service
         decision["missing_fields"] = ["name"]
         return decision
-    if recent_outbound_can_start_service_consultation(history, conversation) and is_positive_more_details_acceptance(message_text):
+    if recent_outbound_can_start_service_consultation(history, conversation) and is_positive_more_details_acceptance(message_text) and not is_explicit_detail_request(message_text):
         inferred_service = infer_recent_service_for_consultation(history, conversation)
         decision["reply_text"] = build_service_consultation_acceptance_reply(conversation)
         decision["intent"] = "service_consultation_acceptance"

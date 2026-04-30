@@ -2184,6 +2184,88 @@ def test_ai_first_positive_acceptance_after_service_context_starts_consultation(
     assert "web tasar" in decision["extracted_service"].lower()
 
 
+def test_ai_first_detail_request_after_consultation_offer_does_not_collect_name(monkeypatch):
+    conversation = {
+        "service": "Otomasyon & Yapay Zeka Cozumleri",
+        "state": "new",
+        "booking_kind": None,
+        "memory_state": {},
+    }
+    history = [
+        {
+            "direction": "out",
+            "message_text": "Uygun görürseniz kısa bir ön görüşmede sizin DM akışınıza göre hangi parçaların otomatikleşeceğini netleştirebiliriz.",
+        }
+    ]
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text="Tabii, Otomasyon & Yapay Zeka Çözümleri için ön görüşme planlayabiliriz. Önce adınızı ve soyadınızı yazar mısınız?",
+            intent="appointment",
+            booking_intent=True,
+            missing_fields=["name"],
+        ),
+    )
+
+    decision = main.build_ai_first_decision("Anlat", conversation, history, {})
+
+    reply = decision["reply_text"].lower()
+    assert decision["booking_intent"] is False
+    assert "ad" not in reply and "soyad" not in reply
+    assert "dm" in reply or "randevu" in reply or "crm" in reply
+
+
+def test_ai_first_identity_and_meeting_method_questions_are_answered(monkeypatch):
+    cases = [
+        (
+            "Sen yapay zeka misin?",
+            {"service": "Otomasyon & Yapay Zeka Cozumleri", "state": "completed", "appointment_status": "confirmed", "requested_date": "2026-05-02", "requested_time": "12:00", "memory_state": {}},
+            ["yapay zeka", "asistan", "doel"],
+            ["randevu kayd", "onayli", "02.05.2026"],
+        ),
+        (
+            "Ben anlamadim telefonla mi gorusecegiz?",
+            {"service": "Otomasyon & Yapay Zeka Cozumleri", "state": "collect_name", "booking_kind": "preconsultation", "memory_state": {}},
+            ["telefon", "online", "instagram", "buradan"],
+            ["ad soyad", "adınızı", "adinizi", "soyad"],
+        ),
+    ]
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text="Sistemimizde onaylı ön görüşme kaydınız 02.05.2026 saat 12:00 olarak görünüyor.",
+            intent="confirmed_followup",
+            booking_intent=False,
+            missing_fields=[],
+        ),
+    )
+
+    for message, conversation, expected_any, forbidden in cases:
+        decision = main.build_ai_first_decision(message, conversation, [], {})
+        reply = main.sanitize_text(decision["reply_text"]).lower()
+        assert any(term in reply for term in expected_any), reply
+        assert not any(term in reply for term in forbidden), reply
+        assert decision["booking_intent"] is False
+
+
+def test_confirmed_booking_only_takes_over_appointment_related_messages():
+    conversation = {
+        "state": "completed",
+        "appointment_status": "confirmed",
+        "requested_date": "2026-05-02",
+        "requested_time": "12:00",
+        "memory_state": {},
+    }
+
+    assert main.confirmed_booking_should_take_over_message("Randevum kesin mi?", conversation) is True
+    assert main.confirmed_booking_should_take_over_message("Yarın 14:00 olur mu?", conversation) is True
+    assert main.confirmed_booking_should_take_over_message("Sen yapay zeka misin?", conversation) is False
+    assert main.confirmed_booking_should_take_over_message("Bok gibi olmussun amk", conversation) is False
+    assert main.confirmed_booking_should_take_over_message("Otomasyon hizmetiniz nasil calisiyor?", conversation) is False
+
+
 def test_ai_first_invalid_short_name_in_collect_name_does_not_fallback(monkeypatch):
     conversation = {
         "service": "Otomasyon & Yapay Zeka Cozumleri",
