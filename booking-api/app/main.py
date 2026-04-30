@@ -3885,6 +3885,8 @@ def is_positive_more_details_acceptance(text: str) -> bool:
     normalized = re.sub(r"[.!?…,:;]+$", "", normalized).strip()
     return normalized in {
         "evet",
+        "evet isterim",
+        "isterim",
         "evet olur",
         "evet peki",
         "evet tabii",

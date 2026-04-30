@@ -626,6 +626,46 @@ def test_automation_more_details_reply_moves_toward_consultation_without_collect
     assert "ad" not in reply and "soyad" not in reply
 
 
+def test_ai_first_evet_isterim_after_automation_details_offer_uses_detail_bridge(monkeypatch):
+    conversation = {
+        "service": "Otomasyon & Yapay Zeka Cozumleri",
+        "state": "new",
+        "booking_kind": None,
+        "memory_state": {},
+    }
+    history = [
+        {
+            "direction": "out",
+            "message_text": (
+                "Otomasyon & Yapay Zeka Çözümlerimiz, müşteri mesajlarına 7/24 yanıt ve randevuları otomatik ayarlama içerir. "
+                "Hizmet hakkında daha fazla bilgi almak ister misiniz?"
+            ),
+        }
+    ]
+
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text=(
+                "Otomasyon & Yapay Zeka Çözümlerimiz, müşteri mesajlarına 7/24 yanıt ve randevuları otomatik ayarlama içerir. "
+                "Hizmet hakkında daha fazla bilgi almak ister misiniz?"
+            ),
+            intent="info",
+            booking_intent=False,
+            missing_fields=[],
+        ),
+    )
+
+    decision = main.build_ai_first_decision("evet isterim", conversation, history, {})
+
+    reply = decision["reply_text"].lower()
+    assert decision["booking_intent"] is False
+    assert "ön görüşme" in reply or "on gorusme" in reply
+    assert "hizmet hakkında daha fazla bilgi almak ister misiniz" not in reply
+    assert "ad" not in reply and "soyad" not in reply
+
+
 def test_ai_first_next_step_prompt_after_automation_details_starts_consultation(monkeypatch):
     conversation = {
         "service": "Otomasyon & Yapay Zeka Cozumleri",
