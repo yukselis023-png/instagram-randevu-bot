@@ -1988,6 +1988,28 @@ def test_ai_first_service_overview_overrides_generic_fallback(monkeypatch):
     assert "neye ihtiyaciniz" not in reply
 
 
+def test_ai_first_good_wishes_greeting_does_not_answer_as_wellbeing(monkeypatch):
+    conversation = {"service": None, "state": "new", "booking_kind": None, "memory_state": {}}
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text="İyiyim, size nasıl yardımcı olabilirim?",
+            intent="smalltalk",
+            booking_intent=False,
+            missing_fields=[],
+        ),
+    )
+
+    decision = main.build_ai_first_decision("Merhaba kolay gelsin", conversation, [], {})
+
+    reply = decision["reply_text"].lower()
+    assert decision["intent"] == "greeting"
+    assert decision["booking_intent"] is False
+    assert "teşekkür" in reply
+    assert "iyiyim" not in reply
+
+
 def test_ai_first_direct_ascii_preconsultation_starts_booking(monkeypatch):
     conversation = {"service": None, "state": "new", "booking_kind": None, "memory_state": {}}
     monkeypatch.setattr(

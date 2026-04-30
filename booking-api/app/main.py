@@ -8671,6 +8671,15 @@ def apply_ai_first_quality_overrides(
         decision["booking_intent"] = False
         decision["missing_fields"] = []
         return decision
+    if is_good_wishes_message(message_text) and len(sanitize_text(message_text).split()) <= 4:
+        if is_simple_greeting(message_text):
+            decision["reply_text"] = "Merhaba, teşekkür ederiz. Size nasıl yardımcı olabiliriz?"
+        else:
+            decision["reply_text"] = build_good_wishes_reply()
+        decision["intent"] = "greeting"
+        decision["booking_intent"] = False
+        decision["missing_fields"] = []
+        return decision
     if sanitize_text(conversation.get("state") or "") == "collect_name" and is_invalid_name_attempt(message_text, "collect_name"):
         decision["reply_text"] = "Adınızı ve soyadınızı tam olarak yazar mısınız?"
         decision["intent"] = "collect_name_invalid"
