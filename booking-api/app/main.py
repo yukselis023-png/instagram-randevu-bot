@@ -8932,6 +8932,37 @@ def reply_mentions_service_context(reply_text: str | None) -> bool:
     return any(cue in lowered for cue in service_cues)
 
 
+def reply_is_consultative_service_advice(reply_text: str | None) -> bool:
+    lowered = sanitize_text(reply_text or "").lower()
+    consultative_cues = [
+        "ihtiyac",
+        "ihtiyaç",
+        "hedef",
+        "sorun",
+        "zorlayan",
+        "musteri",
+        "müşteri",
+        "dm",
+        "web",
+        "reklam",
+        "otomasyon",
+        "hangi",
+        "netlestirelim",
+        "netleştirelim",
+    ]
+    return sum(1 for cue in consultative_cues if cue in lowered) >= 2
+
+
+def is_service_choice_help_request(message_text: str | None) -> bool:
+    lowered = sanitize_text(message_text or "").lower()
+    if not lowered:
+        return False
+    return (
+        ("hangisi" in lowered and any(cue in lowered for cue in ["lazim", "lazım", "uygun", "mantikli", "mantıklı"]))
+        or ("bilmiyorum" in lowered and any(cue in lowered for cue in ["yardimci", "yardımcı", "hizmet", "lazim", "lazım"]))
+    )
+
+
 def ai_first_decision_needs_repair(
     message_text: str,
     decision: dict[str, Any],
@@ -8941,6 +8972,12 @@ def ai_first_decision_needs_repair(
     if is_low_quality_ai_first_reply(decision.get("reply_text")):
         return True
     if is_general_information_request(message_text) and not reply_mentions_service_context(decision.get("reply_text")):
+        return True
+    if (
+        is_service_advice_request(message_text, {})
+        or is_business_need_analysis_message(message_text)
+        or is_service_choice_help_request(message_text)
+    ) and not reply_is_consultative_service_advice(decision.get("reply_text")):
         return True
     if looks_like_repeated_prompt(decision.get("reply_text"), get_last_outbound_text(history)):
         return True
@@ -8976,6 +9013,7 @@ def repair_ai_first_decision_with_ai(
                 "Do not use canned fallback phrases like 'mesajınızı dikkate alıyorum', 'neye ihtiyacınız olduğunu yazarsanız', or 'hangi konuda yardımcı olabilirim'. "
                 "Answer the current user message directly, using the recent conversation and service catalog. "
                 "If the user is positive after a service explanation, continue naturally with one useful next step. "
+                "If the user says they do not know which service they need, act like a consultant: ask about their business goal or biggest bottleneck instead of telling them to pick a service. "
                 "Only start collecting name/phone/date when the user clearly wants a meeting or accepts a consultation. "
                 "Use natural Turkish, no markdown, no emoji."
             ),
@@ -9204,7 +9242,10 @@ def build_ai_first_emergency_reply(message_text: str, conversation: dict[str, An
         return "Teslim süresi hizmetin kapsamına göre değişir. Hangi hizmet için süre öğrenmek istediğinizi yazarsanız net cevap vereyim."
     if "?" in lowered:
         return build_generic_ai_draft_reply(message_text, conversation, [])
-    return "Anladım. Size yardımcı olabilmem için mesajınızı dikkate alıyorum; neye ihtiyacınız olduğunu yazarsanız doğrudan cevap vereyim."
+    service = display_service_name(conversation.get("service"))
+    if service:
+        return f"{service} tarafında ihtiyacınıza göre net ilerleyebiliriz. İsterseniz işletmenizde en çok hangi süreci toparlamak istediğinizi yazın, ona göre öneri yapayım."
+    return "Buradayım. Web, otomasyon, reklam veya sosyal medya tarafında neyi merak ettiğinizi yazarsanız net şekilde cevaplayayım."
 
 
 def build_ai_first_decision(
@@ -9292,6 +9333,10 @@ def build_ai_first_decision(
         )
     decision = repair_ai_first_decision_with_ai(message_text, decision, conversation, history, llm_data, selected_models)
     decision = apply_ai_first_quality_overrides(message_text, decision, conversation, history)
+    if is_low_quality_ai_first_reply(decision.get("reply_text")):
+        decision["reply_text"] = build_ai_first_emergency_reply(message_text, conversation)
+        decision["intent"] = "recovered_low_quality_reply"
+        decision["fallback_used"] = True
     if should_suppress_ai_booking_collection(message_text, decision, conversation, llm_data):
         decision["booking_intent"] = False
         decision["missing_fields"] = []

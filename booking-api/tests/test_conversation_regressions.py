@@ -2687,6 +2687,78 @@ def test_ai_first_reasks_ai_when_positive_followup_gets_generic_fallback(monkeyp
     assert "neye ihtiyaciniz" not in reply
 
 
+def test_ai_first_reasks_ai_for_service_advice_when_reply_is_not_consultative(monkeypatch):
+    conversation = {"service": None, "state": "new", "booking_kind": None, "memory_state": {}}
+    responses = iter(
+        [
+            _ai_json(
+                reply_text="Hizmetlerimizden birini seçebilirsiniz.",
+                intent="info",
+                booking_intent=False,
+                missing_fields=[],
+            ),
+            _ai_json(
+                reply_text="Önce en büyük ihtiyacınızı netleştirelim: daha çok müşteri kazanmak mı, DM yoğunluğunu azaltmak mı, yoksa güven veren bir web sitesi kurmak mı istiyorsunuz?",
+                intent="service_advice",
+                booking_intent=False,
+                missing_fields=[],
+            ),
+        ]
+    )
+    calls = []
+
+    def fake_llm(*args, **kwargs):
+        calls.append(kwargs)
+        return next(responses)
+
+    monkeypatch.setattr(main, "call_llm_content", fake_llm)
+
+    decision = main.build_ai_first_decision("Bana hangisi lazim bilmiyorum yardimci olur musunuz?", conversation, [], {})
+
+    reply = main.sanitize_text(decision["reply_text"]).lower()
+    assert len(calls) == 2
+    assert decision["intent"] == "service_advice"
+    assert decision["ai_repair_used"] is True
+    assert "dm" in reply or "web" in reply or "musteri" in reply
+    assert "birini secebilirsiniz" not in reply
+
+
+def test_ai_first_never_returns_generic_fallback_when_ai_repair_fails(monkeypatch):
+    conversation = {
+        "service": "Otomasyon & Yapay Zeka Cozumleri",
+        "state": "collect_service",
+        "booking_kind": None,
+        "memory_state": {},
+    }
+    history = [
+        {
+            "direction": "out",
+            "message_text": "Otomasyon, mesajların otomatik cevaplanmasını, randevuların planlanmasını ve müşteri takibini kolaylaştırır.",
+        }
+    ]
+    responses = iter(
+        [
+            _ai_json(
+                reply_text="Anladım. Size yardımcı olabilmem için mesajınızı dikkate alıyorum; neye ihtiyacınız olduğunu yazarsanız doğrudan cevap vereyim.",
+                intent="fallback_reply",
+                booking_intent=False,
+                missing_fields=[],
+            ),
+            "",
+        ]
+    )
+
+    monkeypatch.setattr(main, "call_llm_content", lambda *args, **kwargs: next(responses))
+
+    decision = main.build_ai_first_decision("Güzelmiş", conversation, history, {})
+
+    reply = main.sanitize_text(decision["reply_text"]).lower()
+    assert decision["should_reply"] is True
+    assert "mesajinizi dikkate" not in reply
+    assert "neye ihtiyaciniz" not in reply
+    assert "otomasyon" in reply or "devam" in reply or "netlestirelim" in reply
+
+
 def test_parse_json_like_handles_json_encoded_as_string():
     content = '"{\\"reply_text\\": \\"Tabii, randevu planlayabiliriz.\\", \\"intent\\": \\"appointment\\", \\"should_reply\\": true}"'
 
