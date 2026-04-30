@@ -6124,18 +6124,23 @@ def is_phone_collection_hesitation(text: str) -> bool:
     lowered = sanitize_text(text).lower()
     compact = re.sub(r"\s+", " ", lowered.replace("?", " ")).strip()
     hesitation_phrases = [
+        "\u015fart m\u0131",
         "sart mi",
         "zorunlu mu",
         "mecbur mu",
         "gerekli mi",
         "lazim mi",
         "vermesem olur mu",
+        "payla\u015fmasam olur mu",
         "paylasmasam olur mu",
         "olmasa olur mu",
+        "telefon \u015fart",
         "telefon sart",
+        "numara \u015fart",
         "numara sart",
         "telefon zorunlu",
         "numara zorunlu",
+        "payla\u015fmak zorunda m\u0131y\u0131m",
         "paylasmak zorunda miyim",
         "vermek zorunda miyim",
     ]

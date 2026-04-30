@@ -2298,6 +2298,8 @@ def test_ai_first_nonbooking_question_keeps_resumeable_booking_state():
 
 
 def test_collect_phone_hesitation_overrides_weak_ai_reply():
+    assert main.is_phone_collection_hesitation("sart mi?")
+    assert main.is_phone_collection_hesitation(chr(351) + "art m" + chr(305) + "?")
     conversation = {
         "service": "Web Tasarim - KOBI Paketi",
         "full_name": "Berkay Elbir",
