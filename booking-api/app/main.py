@@ -9059,6 +9059,22 @@ def is_low_quality_ai_first_reply(reply_text: str | None) -> bool:
     return compact in {"anladim", "anladım", "tabii", "olur", "tamam"}
 
 
+def reply_asks_service_after_service_known(reply_text: str | None) -> bool:
+    lowered = sanitize_text(reply_text or "").lower()
+    if not lowered:
+        return False
+    service_selection_cues = [
+        "hangi hizmet",
+        "hangi konuda",
+        "neye ihtiyac",
+        "ne tur hizmet",
+        "ne tür hizmet",
+        "hizmete ihtiyac",
+        "hizmete ihtiyaç",
+    ]
+    return any(cue in lowered for cue in service_selection_cues)
+
+
 def reply_mentions_service_context(reply_text: str | None) -> bool:
     lowered = sanitize_text(reply_text or "").lower()
     service_cues = [
@@ -9220,6 +9236,15 @@ def apply_ai_first_quality_overrides(
     decision_intent = sanitize_text(str(decision.get("intent") or "")).lower()
     direct_service = pick_service(message_text, decision.get("extracted_service") or conversation.get("service"))
     direct_service_meta = match_service_catalog(direct_service, direct_service) if direct_service else None
+    if direct_service_meta and reply_asks_service_after_service_known(decision.get("reply_text")):
+        service_display = str(direct_service_meta.get("display") or direct_service)
+        decision["reply_text"] = build_ai_first_service_information_reply(direct_service_meta, conversation)
+        decision["intent"] = "service_info"
+        decision["booking_intent"] = False
+        decision["extracted_service"] = service_display
+        decision["missing_fields"] = []
+        decision["should_reply"] = True
+        return decision
     if direct_service_meta and is_service_information_request(message_text, direct_service_meta):
         service_display = str(direct_service_meta.get("display") or direct_service)
         if is_low_quality_ai_first_reply(decision.get("reply_text")) or decision_intent in {"fallback_reply", "general_reply"}:

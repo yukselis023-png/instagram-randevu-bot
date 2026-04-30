@@ -67,7 +67,11 @@ def run_smoke(base_url: str, *, prefix: str, timeout: int, pause: float) -> dict
     sender = f"{prefix}-{datetime.now().strftime('%Y%m%d%H%M%S')}"
     username = sender.replace("-", "_")
     messages = [
-        {"text": "Web sitesi actirmak istiyom", "expected_any": ["web", "site"]},
+        {
+            "text": "Web sitesi actirmak istiyom",
+            "expected_any": ["web", "site"],
+            "forbidden": ["hangi hizmet", "hangi konuda", "neye ihtiyac"],
+        },
         {"text": "Tamam", "expected_any": ["on gorusme", "ön görüşme", "ad", "soyad"]},
         {"text": "Berkay Elbir", "expected_any": ["telefon", "numara"]},
         {"text": "05555555555", "expected_any": ["uygun", "secenek", "seçenek", "saat"]},
@@ -100,7 +104,7 @@ def run_smoke(base_url: str, *, prefix: str, timeout: int, pause: float) -> dict
             message,
             compact,
             expected_any=step["expected_any"],
-            forbidden=["anlasilmadi", "lutfen daha acik", "needed bilgi"],
+            forbidden=["anlasilmadi", "lutfen daha acik", "needed bilgi", *(step.get("forbidden") or [])],
         )
         if result.get("appointment_created") and result.get("appointment_id"):
             appointment_ids.append(int(result["appointment_id"]))

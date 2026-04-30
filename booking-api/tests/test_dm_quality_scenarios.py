@@ -61,6 +61,14 @@ def test_dm_quality_service_and_objection_scenarios(monkeypatch):
             "expected_any": ["web", "dovme", "sik", "gorunurluk"],
             "forbidden": ["anlasilmadi", "lutfen daha acik", "otomasyon"],
         },
+        {
+            "name": "web hizmeti bilinirken hizmet sormaz",
+            "message": "Web sitesi actirmak istiyom",
+            "conversation": {"state": "new", "memory_state": {}},
+            "llm": {"reply_text": "Web sitesi icin size yardimci olabilirim. Hangi hizmete ihtiyaciniz var?"},
+            "expected_any": ["12.900", "7-14", "google", "whatsapp", "on gorusme"],
+            "forbidden": ["hangi hizmet", "hangi konuda", "neye ihtiyac"],
+        },
     ]
 
     for case in cases:
