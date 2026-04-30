@@ -5350,6 +5350,8 @@ def extract_name(text: str, state: str) -> str | None:
 def is_invalid_name_attempt(text: str, state: str) -> bool:
     if state != "collect_name":
         return False
+    if is_next_step_prompt(text) or is_low_signal_message(text):
+        return True
     if extract_name(text, state):
         return False
     if match_service_candidates(text, None):

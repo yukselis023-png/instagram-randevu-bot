@@ -2532,6 +2532,39 @@ def test_ai_first_service_info_then_positive_continue_starts_consultation(monkey
     assert "daha fazla bilgi almak ister" not in reply
 
 
+def test_ai_first_collect_name_low_signal_followup_does_not_repeat_booking_prompt(monkeypatch):
+    conversation = {
+        "service": "Otomasyon & Yapay Zeka Cozumleri",
+        "state": "collect_name",
+        "booking_kind": "preconsultation",
+        "memory_state": {},
+    }
+    history = [
+        {
+            "direction": "out",
+            "message_text": "Tabii, Otomasyon & Yapay Zeka Çözümleri için ön görüşme planlayabiliriz. Önce adınızı ve soyadınızı yazar mısınız?",
+        }
+    ]
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text="Tabii, Otomasyon & Yapay Zeka Cozumleri için ön görüşme planlayabiliriz. Önce adınızı ve soyadınızı yazar mısınız?",
+            intent="service_consultation_acceptance",
+            booking_intent=True,
+            missing_fields=["name"],
+        ),
+    )
+
+    decision = main.build_ai_first_decision("eee?", conversation, history, {})
+
+    reply = main.sanitize_text(decision["reply_text"]).lower()
+    assert decision["should_reply"] is True
+    assert decision["intent"] == "collect_name_invalid"
+    assert "ad" in reply and "soyad" in reply
+    assert "planlayabiliriz" not in reply
+
+
 def test_ai_first_reply_guarantee_replaces_low_quality_generic_fallback():
     conversation = {"state": "new", "memory_state": {}}
     decision = {
