@@ -2250,6 +2250,45 @@ def test_ai_first_identity_and_meeting_method_questions_are_answered(monkeypatch
         assert decision["booking_intent"] is False
 
 
+def test_ai_first_keeps_good_ai_reply_for_sensitive_questions(monkeypatch):
+    cases = [
+        (
+            "Sen yapay zeka misin?",
+            "Evet, ben DOEL Digital'in yapay zeka mesaj asistanıyım; sorularınızı yanıtlayıp gerekirse ekibe aktarabilirim.",
+            ["yapay zeka", "asistan"],
+        ),
+        (
+            "Ben anlamadim telefonla mi gorusecegiz?",
+            "Önce buradan netleştiriyoruz; isterseniz devamında telefon ya da online görüşme ile ilerleyebiliriz.",
+            ["telefon", "online"],
+        ),
+        (
+            "Bok gibi olmussun amk",
+            "Haklısınız, önceki cevap net olmamış; sorunuzu yazın, kısa ve direkt cevaplayayım.",
+            ["haklı", "cevap"],
+        ),
+    ]
+
+    for message, ai_reply, expected_any in cases:
+        conversation = {"service": "Otomasyon & Yapay Zeka Cozumleri", "state": "completed", "appointment_status": "confirmed", "requested_date": "2026-05-02", "requested_time": "12:00", "memory_state": {}}
+        monkeypatch.setattr(
+            main,
+            "call_llm_content",
+            lambda *args, _reply=ai_reply, **kwargs: _ai_json(
+                reply_text=_reply,
+                intent="info",
+                booking_intent=False,
+                missing_fields=[],
+            ),
+        )
+
+        decision = main.build_ai_first_decision(message, conversation, [], {})
+        reply = main.sanitize_text(decision["reply_text"]).lower()
+        assert any(term in reply for term in expected_any), reply
+        assert "sistemimizde onayli" not in reply
+        assert decision["fallback_used"] is False
+
+
 def test_confirmed_booking_only_takes_over_appointment_related_messages():
     conversation = {
         "state": "completed",

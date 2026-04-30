@@ -6609,9 +6609,10 @@ def build_owner_check_reply(conversation: dict[str, Any]) -> str:
 
 
 def build_assistant_identity_reply(conversation: dict[str, Any]) -> str:
+    base = "Ben DOEL Digital'in yapay zeka mesaj asistanıyım. Sorularınızı buradan yanıtlayabilir, gerekirse ekibe aktarabilirim."
     if has_resumeable_booking_context(conversation):
-        return f"Ben burada DOEL DIGITAL adına size destek oluyorum. {build_booking_resume_hint(conversation)}"
-    return "Ben burada DOEL DIGITAL adına size destek oluyorum."
+        return f"{base} {build_booking_resume_hint(conversation)}"
+    return base
 
 
 def build_greeting_interrupt_reply(conversation: dict[str, Any]) -> str:
@@ -9120,6 +9121,77 @@ def reply_asks_service_after_service_known(reply_text: str | None) -> bool:
     return any(cue in lowered for cue in service_selection_cues)
 
 
+def reply_is_confirmed_booking_takeover(reply_text: str | None) -> bool:
+    lowered = sanitize_text(reply_text or "").lower()
+    if not lowered:
+        return False
+    has_booking_record = any(
+        cue in lowered
+        for cue in [
+            "sistemimizde onayli",
+            "sistemimizde onaylı",
+            "onayli on gorusme",
+            "onayli ön görüşme",
+            "onayli randevu",
+            "randevu kaydiniz",
+            "randevu kaydınız",
+            "on gorusme kaydiniz",
+            "ön görüşme kaydınız",
+        ]
+    )
+    has_date_or_time = bool(re.search(r"\b\d{1,2}[./]\d{1,2}[./]\d{2,4}\b|\b\d{1,2}:\d{2}\b", lowered))
+    return has_booking_record or (
+        has_date_or_time
+        and "onayli" in lowered
+        and any(cue in lowered for cue in ["randevu", "gorusme", "görüşme"])
+    )
+
+
+def reply_contains_collection_prompt(reply_text: str | None) -> bool:
+    lowered = sanitize_text(reply_text or "").lower()
+    return any(
+        cue in lowered
+        for cue in [
+            "adinizi",
+            "adınızı",
+            "soyadinizi",
+            "soyadınızı",
+            "telefon numaranizi",
+            "telefon numaranızı",
+            "numaranizi paylas",
+            "numaranızı paylaş",
+            "paylasir misiniz",
+            "paylaşır mısınız",
+        ]
+    )
+
+
+def reply_answers_assistant_identity(reply_text: str | None) -> bool:
+    lowered = sanitize_text(reply_text or "").lower()
+    if not lowered or reply_is_confirmed_booking_takeover(lowered):
+        return False
+    return any(cue in lowered for cue in ["yapay zeka", "asistan", "bot"])
+
+
+def reply_answers_meeting_method(reply_text: str | None) -> bool:
+    lowered = sanitize_text(reply_text or "").lower()
+    if not lowered or reply_is_confirmed_booking_takeover(lowered) or reply_contains_collection_prompt(lowered):
+        return False
+    method_hits = sum(
+        1
+        for cue in ["telefon", "online", "instagram", "buradan", "dm", "gorusme", "görüşme"]
+        if cue in lowered
+    )
+    return method_hits >= 2
+
+
+def reply_answers_complaint(reply_text: str | None) -> bool:
+    lowered = sanitize_text(reply_text or "").lower()
+    if not lowered or reply_is_confirmed_booking_takeover(lowered) or reply_contains_collection_prompt(lowered):
+        return False
+    return any(cue in lowered for cue in ["kusura", "ozur", "özür", "hakli", "haklı", "net cevap", "duzelteyim", "düzelteyim"])
+
+
 def reply_mentions_service_context(reply_text: str | None) -> bool:
     lowered = sanitize_text(reply_text or "").lower()
     service_cues = [
@@ -9339,6 +9411,12 @@ def apply_ai_first_quality_overrides(
         decision["missing_fields"] = ["name"]
         return decision
     if is_assistant_identity_question(message_text):
+        if reply_answers_assistant_identity(decision.get("reply_text")):
+            decision["intent"] = "assistant_identity"
+            decision["booking_intent"] = False
+            decision["missing_fields"] = []
+            decision["should_reply"] = True
+            return decision
         decision["reply_text"] = build_assistant_identity_reply(conversation)
         decision["intent"] = "assistant_identity"
         decision["booking_intent"] = False
@@ -9352,6 +9430,12 @@ def apply_ai_first_quality_overrides(
         decision["missing_fields"] = []
         return decision
     if is_meeting_method_question(message_text) or is_phone_reason_question(message_text):
+        if reply_answers_meeting_method(decision.get("reply_text")):
+            decision["intent"] = "clarification"
+            decision["booking_intent"] = False
+            decision["missing_fields"] = []
+            decision["should_reply"] = True
+            return decision
         decision["reply_text"] = build_contextual_clarification_reply(conversation, message_text)
         decision["intent"] = "clarification"
         decision["booking_intent"] = False
@@ -9446,6 +9530,12 @@ def apply_ai_first_quality_overrides(
         decision["missing_fields"] = []
         return decision
     if is_angry_complaint_message(message_text):
+        if reply_answers_complaint(decision.get("reply_text")):
+            decision["intent"] = "complaint"
+            decision["booking_intent"] = False
+            decision["missing_fields"] = []
+            decision["should_reply"] = True
+            return decision
         decision["reply_text"] = build_angry_complaint_reply()
         decision["intent"] = "complaint"
         decision["booking_intent"] = False
