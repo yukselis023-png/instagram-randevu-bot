@@ -2066,6 +2066,77 @@ def test_ai_first_invalid_short_name_in_collect_name_does_not_fallback(monkeypat
     assert decision["booking_intent"] is True
     assert decision["intent"] == "collect_name_invalid"
     assert "ad" in reply and "soyad" in reply
+    assert "tam olarak" in reply
+
+
+def test_delivery_time_question_is_not_treated_as_message_volume():
+    assert not main.is_message_volume_answer("Sistem kac gunde acilir?")
+    assert main.is_delivery_time_question("Sistem kac gunde acilir?")
+
+
+def test_ai_first_delivery_time_overrides_message_volume_fallback(monkeypatch):
+    conversation = {
+        "service": "Otomasyon & Yapay Zeka Cozumleri",
+        "state": "new",
+        "booking_kind": None,
+        "memory_state": {},
+    }
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text="Bu seviye ciddi bir yogunluk.",
+            intent="message_volume",
+            booking_intent=False,
+            missing_fields=[],
+        ),
+    )
+
+    decision = main.build_ai_first_decision("Sistem kac gunde acilir?", conversation, [], {})
+
+    reply = decision["reply_text"].lower()
+    assert decision["intent"] == "delivery_time"
+    assert "3-7" in reply or "1-3" in reply
+    assert "yoğunluk" not in reply
+
+
+def test_slot_context_extracts_standalone_time_after_state_reset():
+    conversation = {
+        "state": "collect_service",
+        "memory_state": {"suggested_booking_slots": [{"date": "2026-05-01", "time": "11:00"}]},
+    }
+
+    assert main.extract_time_from_slot_context("11.00", conversation) == "11:00"
+
+
+def test_ai_first_time_collection_with_slot_memory_cannot_drop_when_state_reset():
+    conversation = {
+        "service": "Web Tasarim - KOBI Paketi",
+        "full_name": "Ali Yilmaz",
+        "phone": "+905550000005",
+        "state": "collect_service",
+        "booking_kind": "preconsultation",
+        "memory_state": {"suggested_booking_slots": [{"date": "2026-05-01", "time": "11:00"}]},
+    }
+    decision = {
+        "reply_text": "Mesajinizi dikkate aliyorum.",
+        "intent": "fallback_reply",
+        "should_reply": True,
+        "booking_intent": False,
+        "missing_fields": [],
+    }
+
+    main.force_ai_first_booking_continuation(
+        decision,
+        conversation,
+        state_before_update="collect_service",
+        extracted_name=None,
+        detected_phone=None,
+        detected_time="11:00",
+    )
+
+    assert decision["booking_intent"] is True
+    assert decision["intent"] == "booking_time_collected"
 
 
 def test_parse_json_like_handles_json_encoded_as_string():

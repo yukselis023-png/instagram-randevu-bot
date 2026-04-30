@@ -2510,7 +2510,7 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
         llm_requested_date = None if ignored_llm_booking_datetime else normalize_date_string(llm_data.get("requested_date"))
         if ignored_llm_booking_datetime:
             decision_path.append("ignored_llm_datetime_from_phone")
-        detected_time = extract_time_for_state(message_text, state_before_update) or llm_requested_time
+        detected_time = extract_time_for_state(message_text, state_before_update) or extract_time_from_slot_context(message_text, conversation) or llm_requested_time
         detected_date = extract_date(message_text) or llm_requested_date
         detected_period = extract_preferred_period(message_text) or infer_period_from_time(detected_time)
         llm_service_hint = llm_data.get("recommended_service") or llm_data.get("service")
@@ -4082,6 +4082,8 @@ def extract_message_volume_estimate(text: str) -> str | None:
 def is_message_volume_answer(text: str) -> bool:
     cleaned = sanitize_text(text)
     lowered = cleaned.lower()
+    if re.search(r"\b(?:ka[cç]|kaç)\s+g[üu]nde\b", lowered) or is_delivery_time_question(cleaned):
+        return False
     if NUMERIC_RANGE_ANSWER_PATTERN.match(cleaned):
         return True
     if MESSAGE_VOLUME_PATTERN.search(cleaned):
@@ -5385,6 +5387,22 @@ def extract_time_for_state(text: str, state: str | None = None) -> str | None:
     return None
 
 
+def extract_time_from_slot_context(text: str, conversation: dict[str, Any] | None) -> str | None:
+    cleaned = sanitize_text(text)
+    standalone = STANDALONE_TIME_PATTERN.match(cleaned)
+    if not standalone:
+        return None
+    memory = ensure_conversation_memory(conversation or {})
+    suggested_slots = [
+        slot
+        for slot in (normalize_booking_slot_option(item) for item in memory.get("suggested_booking_slots") or [])
+        if slot
+    ]
+    if not suggested_slots:
+        return None
+    return f"{int(standalone.group(1)):02d}:{int(standalone.group(2)):02d}"
+
+
 def should_ignore_llm_booking_datetime_from_phone_message(
     message_text: str,
     state: str | None,
@@ -5413,6 +5431,7 @@ def force_ai_first_booking_continuation(
     service = sanitize_text(conversation.get("service") or "")
     has_name = bool(titlecase_name(extracted_name) or sanitize_text(conversation.get("full_name") or ""))
     has_phone = bool(canonical_phone(detected_phone) or canonical_phone(conversation.get("phone")))
+    has_slot_context = bool(ensure_conversation_memory(conversation).get("suggested_booking_slots"))
     if state == "collect_name" and service and titlecase_name(extracted_name):
         decision["booking_intent"] = True
         decision["intent"] = "booking_name_collected"
@@ -5425,7 +5444,7 @@ def force_ai_first_booking_continuation(
         decision["should_reply"] = True
         decision["missing_fields"] = ["requested_date", "requested_time"]
         decision["reply_text"] = "Telefon numaranızı aldım. Uygun saatleri kontrol ediyorum."
-    elif state in {"collect_time", "collect_period"} and service and has_name and has_phone and normalize_time_string(detected_time):
+    elif (state in {"collect_time", "collect_period"} or has_slot_context) and service and has_name and has_phone and normalize_time_string(detected_time):
         decision["booking_intent"] = True
         decision["intent"] = "booking_time_collected"
         decision["should_reply"] = True
@@ -5657,7 +5676,7 @@ def is_delivery_time_question(text: str) -> bool:
     ]
     service_cues = [
         "web", "website", "websitesi", "site", "tasarim", "tasarım", "landing",
-        "otomasyon", "reklam", "sosyal medya", "hizmet",
+        "otomasyon", "reklam", "sosyal medya", "hizmet", "sistem", "kurulum", "acilir", "açılır",
     ]
     return any(cue in lowered for cue in delivery_cues) and any(cue in lowered for cue in service_cues)
 
@@ -8519,6 +8538,8 @@ def enforce_ai_first_booking_order(
 ) -> dict[str, Any]:
     if not llm_bool(decision.get("booking_intent")):
         return decision
+    if sanitize_text(str(decision.get("intent") or "")) == "collect_name_invalid":
+        return decision
 
     service = sanitize_text(str(decision.get("extracted_service") or conversation.get("service") or ""))
     service_meta = match_service_catalog(service, service) if service else None
@@ -8650,6 +8671,17 @@ def apply_ai_first_quality_overrides(
     if is_meeting_clarification_question(message_text):
         decision["reply_text"] = build_contextual_clarification_reply(conversation, message_text)
         decision["intent"] = "clarification"
+        decision["booking_intent"] = False
+        decision["missing_fields"] = []
+        return decision
+    if is_delivery_time_question(message_text) and sanitize_text(str(decision.get("intent") or "")) in {"fallback_reply", "message_volume", "general_reply"}:
+        service_name = conversation.get("service") or pick_service(message_text, decision.get("extracted_service"))
+        service_meta = match_service_catalog(service_name, service_name) if service_name else None
+        if is_delivery_duration_followup(message_text):
+            decision["reply_text"] = build_delivery_duration_followup_reply(service_meta, message_text)
+        else:
+            decision["reply_text"] = build_delivery_time_reply(service_meta)
+        decision["intent"] = "delivery_time"
         decision["booking_intent"] = False
         decision["missing_fields"] = []
         return decision
