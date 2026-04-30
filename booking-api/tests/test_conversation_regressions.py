@@ -2528,6 +2528,44 @@ def test_ai_first_v5_service_interest_does_not_start_name_collection(monkeypatch
     assert "ad" not in reply and "soyad" not in reply
 
 
+def test_ai_first_v5_rejects_mixed_language_needed_reply():
+    conversation = {"service": "Web Tasarim - KOBI Paketi", "state": "new", "memory_state": {}}
+    decision = {
+        "reply_text": "Bu hizmeti almak icin needed bilgiler nelerdir?",
+        "intent": "info",
+        "should_reply": True,
+        "booking_intent": False,
+        "missing_fields": [],
+    }
+
+    result = main.apply_ai_first_quality_overrides("Web sitesi actirmak istiyom", decision, conversation, [])
+
+    reply = main.sanitize_text(result["reply_text"]).lower()
+    assert "needed" not in reply
+    assert result["should_reply"] is True
+
+
+def test_ai_first_v5_rejects_generic_misunderstood_reply(monkeypatch):
+    conversation = {"service": "Web Tasarim - KOBI Paketi", "state": "new", "memory_state": {"customer_sector": "beauty"}}
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text="Uzgunuz, anlasilmadi. Lutfen daha acik bir sekilde sorunuz.",
+            intent="info",
+            booking_intent=False,
+            missing_fields=[],
+        ),
+    )
+
+    result = main.build_ai_first_decision("Dovmeciyim iste uygun olsun sik olsun falan", conversation, [], {})
+
+    reply = main.sanitize_text(result["reply_text"]).lower()
+    assert "anlasilmadi" not in reply
+    assert "dovme" in reply or "web" in reply
+    assert result["should_reply"] is True
+
+
 def test_ai_first_v5_phone_refusal_accepts_instagram_contact_without_pressure():
     conversation = {
         "service": "Web Tasarim - KOBI Paketi",

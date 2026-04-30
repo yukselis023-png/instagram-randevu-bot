@@ -9046,6 +9046,12 @@ def is_low_quality_ai_first_reply(reply_text: str | None) -> bool:
         "daha fazla bilgi almak ister misiniz",
         "bir sonraki adimimiz ne olacak",
         "bir sonraki adımımız ne olacak",
+        "needed bilgiler",
+        "needed bilgi",
+        "uzgunuz anlasilmadi",
+        "üzgünüz anlaşılmadı",
+        "lutfen daha acik",
+        "lütfen daha açık",
     ]
     if any(cue in lowered for cue in bad_cues):
         return True
@@ -9355,6 +9361,13 @@ def apply_ai_first_quality_overrides(
         decision["intent"] = "greeting"
         decision["booking_intent"] = False
         decision["missing_fields"] = []
+        return decision
+    if is_low_quality_ai_first_reply(decision.get("reply_text")):
+        decision["reply_text"] = build_ai_first_emergency_reply(message_text, conversation)
+        decision["intent"] = "recovered_low_quality_reply"
+        decision["booking_intent"] = False
+        decision["missing_fields"] = []
+        decision["should_reply"] = True
         return decision
     return decision
 
