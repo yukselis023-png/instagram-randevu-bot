@@ -733,6 +733,51 @@ def test_ai_first_positive_web_details_acceptance_infers_service_from_history(mo
     assert "sorularınızı sorabilirsiniz" not in reply
 
 
+def test_ai_first_web_details_continue_acceptance_starts_consultation(monkeypatch):
+    conversation = {
+        "service": "Web Tasar\u0131m - KOB\u0130 Paketi",
+        "state": "new",
+        "booking_kind": None,
+        "memory_state": {},
+    }
+    history = [
+        {
+            "direction": "out",
+            "message_text": (
+                "Evet, website hizmetimiz iyi sonu\u00e7lar getiriyor. Web Tasar\u0131m - KOB\u0130 Paketimizle "
+                "kurumsal web tasar\u0131m \u00e7\u00f6z\u00fcm\u00fc sunuyoruz. Google uyumlu, t\u00fcm cihazlara tam uyumlu, "
+                "WhatsApp butonlu ve 1 y\u0131l altyap\u0131 garantili. Fiyat\u0131m\u0131z 12.900 \u20ba, teslimat s\u00fcresi "
+                "7-14 i\u015f g\u00fcn\u00fc. \u0130sterseniz detaylar\u0131 netle\u015ftirmek i\u00e7in konu\u015fmaya devam edelim."
+            ),
+        }
+    ]
+
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text=(
+                "Websitemiz iyi sonu\u00e7lar getiriyor. Web Tasar\u0131m - KOB\u0130 Paketimizle kurumsal web tasar\u0131m "
+                "\u00e7\u00f6z\u00fcm\u00fc sunuyoruz. Fiyat\u0131m\u0131z 12.900 \u20ba, teslimat s\u00fcresi 7-14 i\u015f g\u00fcn\u00fc. "
+                "\u0130sterseniz detaylar\u0131 netle\u015ftirmek i\u00e7in konu\u015fmaya devam edelim."
+            ),
+            intent="info",
+            booking_intent=False,
+            missing_fields=[],
+        ),
+    )
+
+    decision = main.build_ai_first_decision("Olur peki", conversation, history, {})
+
+    reply = decision["reply_text"].lower()
+    assert decision["booking_intent"] is True
+    assert "name" in decision["missing_fields"] or "full_name" in decision["missing_fields"]
+    assert "\u00f6n g\u00f6r\u00fc\u015fme" in reply or "k\u0131sa" in reply
+    assert "ad" in reply and "soyad" in reply
+    assert "websitemiz iyi sonu\u00e7lar getiriyor" not in reply
+    assert "konu\u015fmaya devam edelim" not in reply
+
+
 def test_phone_reason_question_answers_phone_purpose_in_service_state():
     conversation = {
         "service": "Otomasyon & Yapay Zeka Cozumleri",

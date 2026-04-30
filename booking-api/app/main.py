@@ -3794,6 +3794,12 @@ def recent_outbound_offered_more_details(history: list[dict[str, Any]] | None) -
         "detayli bilgi verebilirim",
         "detaylı anlatayım",
         "detayli anlatayim",
+        "detayları netleştirmek için konuşmaya devam",
+        "detaylari netlestirmek icin konusmaya devam",
+        "detayları netleştirmek için",
+        "detaylari netlestirmek icin",
+        "konuşmaya devam edelim",
+        "konusmaya devam edelim",
     ]
     return any(cue in last_outbound for cue in cues)
 
@@ -3854,13 +3860,17 @@ def is_positive_more_details_acceptance(text: str) -> bool:
     return normalized in {
         "evet",
         "evet olur",
+        "evet peki",
         "evet tabii",
         "evet tabi",
         "olur",
+        "olur peki",
         "olur tabii",
         "olur tabi",
+        "peki olur",
         "tamam",
         "tamam olur",
+        "tamam peki",
         "anlat",
         "anlatın",
         "anlatin",
