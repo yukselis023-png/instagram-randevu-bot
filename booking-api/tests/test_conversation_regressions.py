@@ -2351,14 +2351,14 @@ def test_ai_first_booking_progress_override_handles_date_and_time_when_ai_says_f
         state_before_update="collect_time",
         extracted_name=None,
         detected_phone=None,
-        detected_date=main.extract_date(message),
+        detected_date="2026-05-01",
         detected_time=main.extract_time_for_state(message, "collect_time"),
     )
     main.apply_ai_first_decision_to_conversation(conversation, decision, message)
     result = main.prepare_ai_first_booking_availability(
         None,
         conversation,
-        detected_date=main.extract_date(message),
+        detected_date="2026-05-01",
         detected_time=main.extract_time_for_state(message, "collect_time"),
         start_date_value="2026-04-30",
     )
@@ -2467,6 +2467,42 @@ def test_ai_first_v5_instagram_profile_is_not_accepted_as_full_name():
 def test_ai_first_v5_business_goal_is_not_accepted_as_full_name():
     assert main.extract_name("Dijitalde gorunur olmak", "collect_name") is None
     assert main.is_invalid_name_attempt("Dijitalde gorunur olmak", "collect_name")
+
+
+def test_ai_first_v5_name_refusal_uses_instagram_identity_fallback():
+    conversation = {
+        "instagram_user_id": "codex-live-user",
+        "instagram_username": "codex_live_user",
+        "service": "Web Tasarim - KOBI Paketi",
+        "state": "collect_name",
+        "booking_kind": "preconsultation",
+        "memory_state": {},
+    }
+    decision = {
+        "reply_text": "Adinizi ve soyadinizi yazar misiniz?",
+        "intent": "collect_name",
+        "should_reply": True,
+        "booking_intent": True,
+        "missing_fields": ["name"],
+        "extracted_name": None,
+    }
+
+    changed = main.override_ai_first_collect_name_refusal(
+        decision,
+        conversation,
+        "Paylasamam boyle kaydet",
+        state_before_update="collect_name",
+    )
+
+    reply = main.sanitize_text(decision["reply_text"]).lower()
+    assert changed is True
+    assert decision["intent"] == "name_refusal_instagram_fallback"
+    assert decision["missing_fields"] == []
+    assert conversation["full_name"] == "Instagram kullanicisi"
+    assert conversation["memory_state"]["name_source"] == "instagram_username"
+    assert conversation["memory_state"]["contact_channel"] == "instagram_dm"
+    assert "instagram" in reply
+    assert "telefon" not in reply
 
 
 def test_ai_first_v5_service_interest_does_not_start_name_collection(monkeypatch):

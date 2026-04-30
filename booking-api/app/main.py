@@ -544,6 +544,8 @@ CONVERSATION_MEMORY_DEFAULTS = {
     "pending_requested_time": None,
     "contact_channel": None,
     "phone_refused": False,
+    "name_source": None,
+    "instagram_identity": None,
 }
 OWNER_CHECK_KEYWORDS = [
     "sahibiyle mi görüşüyorum", "sahibi misiniz", "işletme sahibi", "firma sahibi", "kurucu ile mi görüşüyorum",
@@ -2620,6 +2622,13 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
                 detected_date=detected_date,
                 detected_time=detected_time,
             )
+            if override_ai_first_collect_name_refusal(
+                ai_decision,
+                conversation,
+                message_text,
+                state_before_update=state_before_update,
+            ):
+                decision_path.append("ai_first_name_refusal_instagram_fallback")
             if override_ai_first_collect_phone_question(
                 ai_decision,
                 conversation,
@@ -5341,10 +5350,22 @@ def is_business_goal_name_rejection(text: str | None) -> bool:
     return any(cue in lowered for cue in goal_cues)
 
 
+def is_name_share_refusal(text: str | None) -> bool:
+    lowered = sanitize_text(text or "").lower()
+    if not lowered:
+        return False
+    refusal_cues = [
+        "paylasamam", "paylaşamam", "veremem", "soyleyemem", "söyleyemem",
+        "ad vermek istemiyorum", "ismimi vermek istemiyorum", "boyle kaydet", "böyle kaydet",
+        "instagramdan devam", "instagram'dan devam", "dmden devam", "dm'den devam",
+    ]
+    return any(cue in lowered for cue in refusal_cues)
+
+
 def extract_name(text: str, state: str) -> str | None:
     normalized = sanitize_text(text)
     lowered = normalized.lower()
-    if is_instagram_profile_name_reference(text) or is_business_goal_name_rejection(text):
+    if is_instagram_profile_name_reference(text) or is_business_goal_name_rejection(text) or is_name_share_refusal(text):
         return None
     explicit_prefixes = [
         'benim adim soyadim ',
@@ -6382,6 +6403,17 @@ def mark_instagram_dm_contact(conversation: dict[str, Any]) -> None:
     conversation["memory_state"] = memory
 
 
+def mark_instagram_identity_fallback(conversation: dict[str, Any]) -> None:
+    memory = ensure_conversation_memory(conversation)
+    memory["name_source"] = "instagram_username"
+    username = sanitize_text(conversation.get("instagram_username") or conversation.get("instagram_user_id") or "")
+    if username:
+        memory["instagram_identity"] = username
+    if not conversation.get("full_name"):
+        conversation["full_name"] = "Instagram kullanicisi"
+    conversation["memory_state"] = memory
+
+
 def has_instagram_dm_contact(conversation: dict[str, Any]) -> bool:
     memory = ensure_conversation_memory(conversation)
     return sanitize_text(str(memory.get("contact_channel") or "")).lower() == "instagram_dm"
@@ -6405,6 +6437,33 @@ def build_phone_refusal_reply(conversation: dict[str, Any]) -> str:
     if service:
         return f"Tamam, sorun değil; telefonu paylaşmak zorunda değilsiniz. {service} için Instagram DM üzerinden ilerleyebiliriz. Size uygun ön görüşme saatlerini paylaşayım."
     return "Tamam, sorun değil; telefonu paylaşmak zorunda değilsiniz. Instagram DM üzerinden ilerleyebiliriz. Size uygun ön görüşme saatlerini paylaşayım."
+
+
+def override_ai_first_collect_name_refusal(
+    decision: dict[str, Any],
+    conversation: dict[str, Any],
+    message_text: str,
+    *,
+    state_before_update: str | None = None,
+) -> bool:
+    state = sanitize_text(state_before_update or conversation.get("state") or "")
+    if state != "collect_name" or not is_name_share_refusal(message_text):
+        return False
+    mark_instagram_identity_fallback(conversation)
+    mark_instagram_dm_contact(conversation)
+    decision.update(
+        {
+            "reply_text": "Sorun degil, Instagram hesabiniz uzerinden kayit aciyorum. Size uygun on gorusme saatlerini paylasayim.",
+            "intent": "name_refusal_instagram_fallback",
+            "should_reply": True,
+            "booking_intent": True,
+            "handoff_needed": False,
+            "missing_fields": [],
+            "extracted_name": None,
+            "name_refusal_fallback": True,
+        }
+    )
+    return True
 
 
 def override_ai_first_collect_phone_question(
