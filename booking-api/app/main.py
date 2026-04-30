@@ -8912,6 +8912,23 @@ def is_low_quality_ai_first_reply(reply_text: str | None) -> bool:
     return compact in {"anladim", "anladım", "tabii", "olur", "tamam"}
 
 
+def reply_mentions_service_context(reply_text: str | None) -> bool:
+    lowered = sanitize_text(reply_text or "").lower()
+    service_cues = [
+        "web",
+        "website",
+        "otomasyon",
+        "yapay zeka",
+        "pazarlama",
+        "reklam",
+        "sosyal medya",
+        "marka",
+        "kreatif",
+        "crm",
+    ]
+    return any(cue in lowered for cue in service_cues)
+
+
 def apply_ai_first_quality_overrides(
     message_text: str,
     decision: dict[str, Any],
@@ -8934,7 +8951,9 @@ def apply_ai_first_quality_overrides(
         decision["should_reply"] = True
         return decision
     if is_general_information_request(message_text) and (
-        is_low_quality_ai_first_reply(decision.get("reply_text")) or decision_intent in {"fallback_reply", "general_reply"}
+        is_low_quality_ai_first_reply(decision.get("reply_text"))
+        or decision_intent in {"fallback_reply", "general_reply"}
+        or not reply_mentions_service_context(decision.get("reply_text"))
     ):
         detail_keyword_match = any(keyword in lowered for keyword in DETAIL_KEYWORDS)
         decision["reply_text"] = build_detailed_services_overview_reply() if detail_keyword_match else build_services_overview_reply()
