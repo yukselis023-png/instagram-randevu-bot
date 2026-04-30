@@ -2204,6 +2204,10 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
         "ai_decision_intent": None,
         "fallback_used": False,
         "crm_sync_queued": False,
+        "dm_flow_stage": None,
+        "booking_progress_override": False,
+        "empty_reply_recovered": False,
+        "slot_resolution": None,
     }
     trace_id = sanitize_text(payload.trace_id or ((payload.raw_event or {}).get("trace_id") if isinstance(payload.raw_event, dict) else "") or ((payload.raw_event or {}).get("message_id") if isinstance(payload.raw_event, dict) else "") or payload.sender_id)
     used_llm_extractor = False
@@ -2321,10 +2325,13 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
             if decision_label:
                 final_path.append(decision_label)
             if not final_reply:
-                fallback_reply = (reply_text or "").strip()
-                if not fallback_reply:
-                    fallback_reply = build_emergency_reply(message_text, conversation, decision_label)
-                final_reply = fallback_reply
+                final_reply, recovered_empty_reply = guarantee_nonempty_reply_text(
+                    reply_text,
+                    message_text,
+                    conversation,
+                    decision_label,
+                )
+                metrics["empty_reply_recovered"] = bool(recovered_empty_reply)
                 final_path.append("reply_fallback:guaranteed")
                 logger.warning(
                     "instagram_message_reply_fallback trace_id=%s sender_id=%s decision_label=%s compose_enabled=%s",
@@ -2366,6 +2373,7 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
                 )
 
             total_ms = elapsed_ms(request_started_at)
+            metrics["dm_flow_stage"] = decision_label
             metric_snapshot = {
                 **metrics,
                 "total_ms": total_ms,
@@ -2595,11 +2603,13 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
                 state_before_update=state_before_update,
                 extracted_name=extracted_name,
                 detected_phone=detected_phone,
+                detected_date=detected_date,
                 detected_time=detected_time,
             )
             metrics["ai_model_used"] = ai_decision.get("ai_model_used")
             metrics["ai_decision_intent"] = ai_decision.get("intent")
             metrics["fallback_used"] = bool(ai_decision.get("fallback_used"))
+            metrics["booking_progress_override"] = bool(ai_decision.get("booking_progress_override"))
             apply_ai_first_decision_to_conversation(conversation, ai_decision, message_text)
             appointment_created = False
             appointment_id = None
@@ -2613,6 +2623,8 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
                         detected_date=detected_date,
                         detected_time=detected_time,
                     )
+                    if availability_result.get("slot_resolution"):
+                        metrics["slot_resolution"] = availability_result.get("slot_resolution")
                     if availability_result.get("reply_text"):
                         final_reply = availability_result["reply_text"]
                         decision_path.append("ai_first_booking_availability")
@@ -2624,6 +2636,7 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
                     conversation["assigned_human"] = True
                     final_reply = "Müsaitlik kontrolünde sorun yaşadım, kaydınızı manuel kontrol için ekibe iletiyorum."
                     decision_path.append("ai_first_booking_availability_error")
+                    metrics["slot_resolution"] = "availability_error"
                     availability_failed = True
             if (
                 llm_bool(ai_decision.get("booking_intent"))
@@ -2640,6 +2653,7 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
                     conversation["state"] = "collect_time"
                     final_reply = validation_error
                     decision_path.append("ai_first_booking_invalid_slot")
+                    metrics["slot_resolution"] = "invalid_slot"
                 else:
                     existing = find_existing_appointment(conn, conversation["requested_date"], conversation["requested_time"], conversation.get("service"))
                     if existing:
@@ -2652,6 +2666,7 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
                             "Size uygun olanı yazarsanız devam edebilirim."
                         )
                         decision_path.append("ai_first_booking_slot_taken")
+                        metrics["slot_resolution"] = "slot_taken"
                     else:
                         try:
                             appointment_id, crm_ms = create_appointment(conn, conversation, payload.instagram_username)
@@ -2670,6 +2685,7 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
                                 appointment_created = True
                                 final_reply = build_confirmation_message(conversation)
                                 decision_path.append("ai_first_booking_created")
+                                metrics["slot_resolution"] = "created"
                             else:
                                 conversation["state"] = "human_handoff"
                                 conversation["assigned_human"] = True
@@ -2678,6 +2694,7 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
                                     f"İsterseniz {build_contact_text()} üzerinden de bize ulaşabilirsiniz."
                                 )
                                 decision_path.append("ai_first_booking_integrity_handoff")
+                                metrics["slot_resolution"] = "integrity_handoff"
                         except HTTPException as exc:
                             if exc.status_code == 409 and isinstance(exc.detail, dict) and exc.detail.get("type") == "slot_conflict":
                                 conversation["requested_time"] = None
@@ -2686,6 +2703,7 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
                                 alt_text = ", ".join(alternatives) if alternatives else "başka bir uygun saat"
                                 final_reply = f"Seçtiğiniz saat dolmuş görünüyor. Uygun alternatif: {alt_text}. Hangisi size uyar?"
                                 decision_path.append("ai_first_booking_slot_conflict")
+                                metrics["slot_resolution"] = "slot_conflict"
                             else:
                                 raise
             return finalize_result(
@@ -5370,6 +5388,15 @@ def extract_time_for_state(text: str, state: str | None = None) -> str | None:
     if state not in {"collect_date", "collect_period", "collect_time"} and not explicit_time_context:
         return None
 
+    if contains_numeric_date and has_date_cue(cleaned):
+        without_date = DATE_CUE_PATTERN.sub(" ", cleaned, count=1)
+        after_date_direct = extract_time(without_date)
+        if after_date_direct:
+            return after_date_direct
+        after_date_hour = re.search(r"(?<![:.])\b([01]?\d|2[0-3])\s*\??\s*$", without_date)
+        if after_date_hour and state in {"collect_date", "collect_period", "collect_time"}:
+            return f"{int(after_date_hour.group(1)):02d}:00"
+
     direct = extract_time(text)
     if direct:
         return direct
@@ -5384,6 +5411,11 @@ def extract_time_for_state(text: str, state: str | None = None) -> str | None:
         return None
     if dotted and (has_date_cue(cleaned) or state in {"collect_period", "collect_time"}):
         return f"{int(dotted.group(1)):02d}:{int(dotted.group(2)):02d}"
+    if state in {"collect_date", "collect_period", "collect_time"} and has_date_cue(cleaned):
+        without_date = DATE_CUE_PATTERN.sub(" ", cleaned, count=1)
+        bare_hour = re.search(r"(?<![:.])\b([01]?\d|2[0-3])\s*\??\s*$", without_date)
+        if bare_hour:
+            return f"{int(bare_hour.group(1)):02d}:00"
     return None
 
 
@@ -5425,6 +5457,7 @@ def force_ai_first_booking_continuation(
     state_before_update: str | None,
     extracted_name: str | None,
     detected_phone: str | None,
+    detected_date: str | None = None,
     detected_time: str | None = None,
 ) -> None:
     state = sanitize_text(state_before_update or "")
@@ -5432,22 +5465,38 @@ def force_ai_first_booking_continuation(
     has_name = bool(titlecase_name(extracted_name) or sanitize_text(conversation.get("full_name") or ""))
     has_phone = bool(canonical_phone(detected_phone) or canonical_phone(conversation.get("phone")))
     has_slot_context = bool(ensure_conversation_memory(conversation).get("suggested_booking_slots"))
+    normalized_date = normalize_date_string(detected_date)
+    normalized_time = normalize_time_string(detected_time)
     if state == "collect_name" and service and titlecase_name(extracted_name):
         decision["booking_intent"] = True
         decision["intent"] = "booking_name_collected"
         decision["should_reply"] = True
+        decision["booking_progress_override"] = True
         decision["missing_fields"] = ["phone", "requested_date", "requested_time"]
         decision["reply_text"] = "Teşekkürler. Ön görüşme kaydını tamamlamak için telefon numaranızı paylaşır mısınız?"
     elif state == "collect_phone" and service and has_name and has_phone:
         decision["booking_intent"] = True
         decision["intent"] = "booking_phone_collected"
         decision["should_reply"] = True
+        decision["booking_progress_override"] = True
         decision["missing_fields"] = ["requested_date", "requested_time"]
         decision["reply_text"] = "Telefon numaranızı aldım. Uygun saatleri kontrol ediyorum."
-    elif (state in {"collect_time", "collect_period"} or has_slot_context) and service and has_name and has_phone and normalize_time_string(detected_time):
+    elif state == "collect_date" and service and has_name and has_phone and normalized_date:
+        decision["booking_intent"] = True
+        decision["intent"] = "booking_date_collected"
+        decision["should_reply"] = True
+        decision["booking_progress_override"] = True
+        decision["requested_date"] = normalized_date
+        decision["missing_fields"] = ["requested_time"]
+        decision["reply_text"] = "Günü aldım. Uygun saatleri kontrol ediyorum."
+    elif (state in {"collect_time", "collect_period", "collect_date"} or has_slot_context) and service and has_name and has_phone and normalized_time:
         decision["booking_intent"] = True
         decision["intent"] = "booking_time_collected"
         decision["should_reply"] = True
+        decision["booking_progress_override"] = True
+        decision["requested_time"] = normalized_time
+        if normalized_date:
+            decision["requested_date"] = normalized_date
         decision["missing_fields"] = ["requested_time"]
         decision["reply_text"] = "Saati aldım. Uygunluğu kontrol ediyorum."
 
@@ -7677,6 +7726,18 @@ def build_emergency_reply(message_text: str, conversation: dict[str, Any], decis
     return "Size en doğru şekilde yardımcı olabilmem için kısaca ilgilendiğiniz hizmeti (web, otomasyon, reklam vb.) yazar mısınız?"
 
 
+def guarantee_nonempty_reply_text(
+    reply_text: str | None,
+    message_text: str,
+    conversation: dict[str, Any],
+    decision_label: str | None = None,
+) -> tuple[str, bool]:
+    cleaned = sanitize_text(reply_text or "")
+    if cleaned:
+        return cleaned, False
+    return build_emergency_reply(message_text, conversation, decision_label), True
+
+
 def summarize_memory_trace(memory: dict[str, Any] | None) -> dict[str, Any]:
     memory = memory or {}
     return {
@@ -8917,7 +8978,21 @@ def apply_ai_first_decision_to_conversation(
 
     booking_intent = llm_bool(decision.get("booking_intent"))
     if not booking_intent:
-        if sanitize_text(conversation.get("state") or "") in {"collect_name", "collect_phone", "collect_date", "collect_period", "collect_time"}:
+        active_state = sanitize_text(conversation.get("state") or "")
+        if (
+            active_state in {"collect_name", "collect_phone", "collect_date", "collect_period", "collect_time"}
+            and has_resumeable_booking_context(conversation)
+            and not is_booking_assumption_rejection(message_text)
+            and not is_booking_ownership_rejection(message_text)
+            and not is_closeout_message(message_text)
+            and not is_trust_or_scam_question(message_text)
+            and not is_angry_complaint_message(message_text)
+        ):
+            memory = ensure_conversation_memory(conversation)
+            memory["open_loop"] = active_state
+            conversation["memory_state"] = memory
+            return
+        if active_state in {"collect_name", "collect_phone", "collect_date", "collect_period", "collect_time"}:
             conversation["state"] = "collect_service"
         return
 
@@ -9368,7 +9443,7 @@ def prepare_ai_first_booking_availability(
     detected_time: str | None = None,
     start_date_value: str | None = None,
 ) -> dict[str, Any]:
-    result: dict[str, Any] = {"reply_text": None, "ready_to_book": False}
+    result: dict[str, Any] = {"reply_text": None, "ready_to_book": False, "slot_resolution": None}
     if not (conversation.get("service") and conversation.get("full_name") and conversation.get("phone")):
         return result
 
@@ -9377,12 +9452,22 @@ def prepare_ai_first_booking_availability(
     normalized_time = normalize_time_string(detected_time)
     pending_time = normalize_time_string(memory.get("pending_requested_time"))
 
+    if normalized_date and normalized_time:
+        conversation["requested_date"] = normalized_date
+        conversation["requested_time"] = normalized_time
+        memory["pending_requested_time"] = None
+        conversation["memory_state"] = memory
+        result["ready_to_book"] = True
+        result["slot_resolution"] = "ready_to_book"
+        return result
+
     if normalized_date and pending_time and not normalized_time:
         conversation["requested_date"] = normalized_date
         conversation["requested_time"] = pending_time
         memory["pending_requested_time"] = None
         conversation["memory_state"] = memory
         result["ready_to_book"] = True
+        result["slot_resolution"] = "ready_to_book"
         return result
 
     if normalized_time and not normalized_date:
@@ -9399,12 +9484,14 @@ def prepare_ai_first_booking_availability(
             memory["pending_requested_time"] = None
             conversation["memory_state"] = memory
             result["ready_to_book"] = True
+            result["slot_resolution"] = "ready_to_book"
             return result
         if len(matching_slots) > 1:
             memory["pending_requested_time"] = normalized_time
             conversation["memory_state"] = memory
             conversation["state"] = "collect_date"
             result["reply_text"] = build_ambiguous_time_choice_reply(normalized_time, matching_slots)
+            result["slot_resolution"] = "ambiguous_time"
             return result
 
         if conn is not None:
@@ -9420,12 +9507,14 @@ def prepare_ai_first_booking_availability(
                     conversation["requested_date"] = exact_slots[0]["date"]
                     conversation["requested_time"] = normalized_time
                     result["ready_to_book"] = True
+                    result["slot_resolution"] = "ready_to_book"
                     return result
                 if len(exact_slots) > 1:
                     memory["pending_requested_time"] = normalized_time
                     conversation["memory_state"] = memory
                     conversation["state"] = "collect_date"
                     result["reply_text"] = build_ambiguous_time_choice_reply(normalized_time, exact_slots)
+                    result["slot_resolution"] = "ambiguous_time"
                     return result
                 remember_booking_slot_options(conversation, next_slots)
                 conversation["state"] = "collect_time"
@@ -9433,6 +9522,7 @@ def prepare_ai_first_booking_availability(
                     f"{normalized_time} için uygunluk bulamadım. Yakın uygun seçenekler: "
                     f"{', '.join(format_booking_slot_option(slot) for slot in next_slots)}. Size uyanı yazarsanız kaydı oluşturayım."
                 )
+                result["slot_resolution"] = "alternatives"
                 return result
 
     if normalized_date and not (normalize_time_string(conversation.get("requested_time")) or normalized_time):
@@ -9445,10 +9535,12 @@ def prepare_ai_first_booking_availability(
             conversation["requested_date"] = normalized_date
             conversation["state"] = "collect_time"
             result["reply_text"] = build_availability_reply(normalized_date, open_slots)
+            result["slot_resolution"] = "date_slots"
             return result
         next_days = find_next_available_days(conn, normalized_date, service_name=conversation.get("service"))
         conversation["state"] = "collect_date"
         result["reply_text"] = build_no_availability_reply(normalized_date, next_days)
+        result["slot_resolution"] = "no_availability"
         return result
 
     if not normalized_date and not normalize_time_string(conversation.get("requested_time")):
@@ -9463,10 +9555,12 @@ def prepare_ai_first_booking_availability(
             remember_booking_slot_options(conversation, next_slots)
             conversation["state"] = "collect_time"
             result["reply_text"] = build_ai_first_booking_slot_reply(next_slots)
+            result["slot_resolution"] = "suggestions"
             return result
         conversation["state"] = "human_handoff"
         conversation["assigned_human"] = True
         result["reply_text"] = "Şu an uygun saat bulamadım. Kaydınızı manuel kontrol için ekibe iletiyorum."
+        result["slot_resolution"] = "handoff"
         return result
 
     return result

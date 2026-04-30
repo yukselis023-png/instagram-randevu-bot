@@ -2186,6 +2186,132 @@ def test_ai_first_time_collection_with_slot_memory_cannot_drop_when_state_reset(
     assert decision["intent"] == "booking_time_collected"
 
 
+def test_ai_first_date_and_time_after_suggestions_is_ready_to_book():
+    conversation = {
+        "service": "Web Tasarim - KOBI Paketi",
+        "full_name": "Berkay Elbir",
+        "phone": "+905539088633",
+        "state": "collect_time",
+        "booking_kind": "preconsultation",
+        "memory_state": {
+            "suggested_booking_slots": [
+                {"date": "2026-05-01", "time": "10:00"},
+                {"date": "2026-05-01", "time": "11:00"},
+                {"date": "2026-05-01", "time": "12:00"},
+                {"date": "2026-05-01", "time": "13:00"},
+            ]
+        },
+    }
+
+    result = main.prepare_ai_first_booking_availability(
+        None,
+        conversation,
+        detected_date="2026-05-01",
+        detected_time="12:00",
+        start_date_value="2026-04-30",
+    )
+
+    assert result["ready_to_book"] is True
+    assert result["reply_text"] is None
+    assert result["slot_resolution"] == "ready_to_book"
+    assert conversation["requested_date"] == "2026-05-01"
+    assert conversation["requested_time"] == "12:00"
+
+
+def test_time_extraction_handles_bare_hour_with_date_cue():
+    assert main.extract_time_for_state("yarın 12", "collect_time") == "12:00"
+    assert main.extract_time_for_state("yarın saat 12", "collect_time") == "12:00"
+    assert main.extract_time_for_state("yarın 12:00", "collect_time") == "12:00"
+    assert main.extract_time_for_state("01.05.2026 12", "collect_time") == "12:00"
+
+
+def test_ai_first_booking_progress_override_handles_date_and_time_when_ai_says_false():
+    message = "Yarın 12.00?"
+    conversation = {
+        "service": "Web Tasarim - KOBI Paketi",
+        "full_name": "Berkay Elbir",
+        "phone": "+905539088633",
+        "state": "collect_time",
+        "booking_kind": "preconsultation",
+        "memory_state": {
+            "suggested_booking_slots": [
+                {"date": "2026-05-01", "time": "10:00"},
+                {"date": "2026-05-01", "time": "11:00"},
+                {"date": "2026-05-01", "time": "12:00"},
+                {"date": "2026-05-01", "time": "13:00"},
+            ]
+        },
+    }
+    decision = {
+        "reply_text": "",
+        "intent": "fallback_reply",
+        "should_reply": True,
+        "booking_intent": False,
+        "missing_fields": [],
+    }
+
+    main.force_ai_first_booking_continuation(
+        decision,
+        conversation,
+        state_before_update="collect_time",
+        extracted_name=None,
+        detected_phone=None,
+        detected_date=main.extract_date(message),
+        detected_time=main.extract_time_for_state(message, "collect_time"),
+    )
+    main.apply_ai_first_decision_to_conversation(conversation, decision, message)
+    result = main.prepare_ai_first_booking_availability(
+        None,
+        conversation,
+        detected_date=main.extract_date(message),
+        detected_time=main.extract_time_for_state(message, "collect_time"),
+        start_date_value="2026-04-30",
+    )
+
+    assert decision["booking_intent"] is True
+    assert decision["booking_progress_override"] is True
+    assert result["ready_to_book"] is True
+    assert conversation["requested_date"] == "2026-05-01"
+    assert conversation["requested_time"] == "12:00"
+
+
+def test_ai_first_nonbooking_question_keeps_resumeable_booking_state():
+    conversation = {
+        "service": "Web Tasarim - KOBI Paketi",
+        "full_name": "Berkay Elbir",
+        "state": "collect_phone",
+        "booking_kind": "preconsultation",
+        "memory_state": {},
+    }
+    decision = {
+        "reply_text": "Telefon şart değil; buradan bilgi vermeye devam edebiliriz.",
+        "intent": "phone_refusal",
+        "should_reply": True,
+        "booking_intent": False,
+        "missing_fields": [],
+    }
+
+    main.apply_ai_first_decision_to_conversation(conversation, decision, "şart mı?")
+
+    assert conversation["state"] == "collect_phone"
+    assert conversation["memory_state"]["open_loop"] == "collect_phone"
+
+
+def test_reply_guarantee_returns_emergency_text_for_empty_ai_reply():
+    conversation = {"state": "new", "memory_state": {}}
+
+    reply, recovered = main.guarantee_nonempty_reply_text(
+        "",
+        "Hizmetleriniz hakkında bilgi almak istiyorum",
+        conversation,
+        "ai_first_v2:fallback_reply",
+    )
+
+    assert recovered is True
+    assert reply
+    assert "web" in reply.lower() or "hizmet" in reply.lower()
+
+
 def test_parse_json_like_handles_json_encoded_as_string():
     content = '"{\\"reply_text\\": \\"Tabii, randevu planlayabiliriz.\\", \\"intent\\": \\"appointment\\", \\"should_reply\\": true}"'
 
