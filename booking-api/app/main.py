@@ -71,7 +71,7 @@ LLM_REPLY_MICRO_MAX_TOKENS = int(os.getenv("LLM_REPLY_MICRO_MAX_TOKENS", "48"))
 LLM_REPLY_ADVISORY_MAX_TOKENS = int(os.getenv("LLM_REPLY_ADVISORY_MAX_TOKENS", "90"))
 LLM_REPLY_POLISH_ENABLED = True
 FULL_AI_CONVERSATIONAL_MODE = True
-REPLY_ENGINE = "ai_first_v2"
+REPLY_ENGINE = "ai_first_v3"
 AI_FIRST_ENABLED = True
 REPLY_GUARANTEE_ENABLED = True
 CRM_SYNC_ENABLED = os.getenv("CRM_SYNC_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
@@ -2205,6 +2205,8 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
         "fallback_used": False,
         "crm_sync_queued": False,
         "dm_flow_stage": None,
+        "reply_guaranteed": False,
+        "booking_action": None,
         "booking_progress_override": False,
         "empty_reply_recovered": False,
         "slot_resolution": None,
@@ -2341,6 +2343,7 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
                     compose_enabled,
                 )
             if final_reply:
+                metrics["reply_guaranteed"] = True
                 update_conversation_memory_after_bot_reply(conversation, final_reply, decision_label)
             if should_trace_decline_memory(message_text, conversation):
                 log_decline_memory_trace("before_upsert", payload.sender_id, trace_id, conversation, extra={"decision_label": decision_label, "final_reply": final_reply})
@@ -2618,6 +2621,7 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
             metrics["ai_decision_intent"] = ai_decision.get("intent")
             metrics["fallback_used"] = bool(ai_decision.get("fallback_used"))
             metrics["booking_progress_override"] = bool(ai_decision.get("booking_progress_override"))
+            metrics["booking_action"] = ai_decision.get("intent") if llm_bool(ai_decision.get("booking_intent")) else None
             apply_ai_first_decision_to_conversation(conversation, ai_decision, message_text)
             appointment_created = False
             appointment_id = None
@@ -5743,6 +5747,58 @@ def is_service_overview_question(text: str) -> bool:
     return False
 
 
+def is_general_information_request(text: str) -> bool:
+    lowered = sanitize_text(text).lower()
+    if not lowered or match_service_candidates(text, None):
+        return False
+    if is_service_overview_question(text):
+        return True
+    information_cues = [
+        "bilgi edinmek",
+        "bilgi almak",
+        "bilgi istiyorum",
+        "bilgi almak istiyorum",
+        "bilgi ver",
+        "bilgi verir",
+        "detayli bilgi",
+        "detayli anlat",
+        "detay almak",
+        "merak ediyorum",
+        "neler yapiyorsunuz",
+    ]
+    return any(cue in lowered for cue in information_cues)
+
+
+def is_service_information_request(text: str, service: dict[str, Any] | None = None) -> bool:
+    lowered = sanitize_text(text).lower()
+    if not lowered:
+        return False
+    if service is None and not match_service_candidates(text, None):
+        return False
+    information_cues = [
+        "bilgi",
+        "detay",
+        "hakkinda",
+        "hakkında",
+        "anlat",
+        "nasil",
+        "nasıl",
+        "calis",
+        "çalış",
+        "isliyor",
+        "işliyor",
+        "verim",
+        "yarar",
+        "fayda",
+        "sonuc",
+        "sonuç",
+        "iyi mi",
+        "ne ise yarar",
+        "ne işe yarar",
+    ]
+    return any(cue in lowered for cue in information_cues)
+
+
 def is_price_question(text: str) -> bool:
     lowered = text.lower()
     if is_delivery_time_question(text):
@@ -5972,6 +6028,25 @@ def build_service_context_intro(service: dict[str, Any]) -> str:
 def build_service_info_reply(service: dict[str, Any], conversation: dict[str, Any] | None = None) -> str:
     suffix = _price_reply_suffix(service, conversation)
     return f"{build_service_context_intro(service)} {suffix}"
+
+
+def build_ai_first_service_information_reply(service: dict[str, Any], conversation: dict[str, Any] | None = None) -> str:
+    display = display_service_name(str(service.get("display") or "")) or "Bu hizmet"
+    summary = str(service.get("summary") or "").strip()
+    price = str(service.get("price") or "").strip()
+    price_note = str(service.get("price_note") or "").strip()
+    delivery_time = str(service.get("delivery_time") or "").strip()
+
+    parts = [f"{display}: {summary}" if summary else build_service_context_intro(service)]
+    if price:
+        price_text = f"Fiyat {price}"
+        if price_note:
+            price_text += f" ({price_note})"
+        parts.append(price_text + ".")
+    if delivery_time:
+        parts.append(f"Tahmini teslim süresi {delivery_time}.")
+    parts.append("İsterseniz kısa bir ön görüşmede ihtiyacınıza göre en doğru yapıyı netleştirebiliriz.")
+    return " ".join(part for part in parts if part).strip()
 
 
 def is_recurring_service(service: dict[str, Any]) -> bool:
@@ -8812,6 +8887,28 @@ def cleanup_ai_first_reply_text(reply_text: str | None) -> str | None:
     return reply.strip()
 
 
+def is_low_quality_ai_first_reply(reply_text: str | None) -> bool:
+    lowered = sanitize_text(reply_text or "").lower()
+    if not lowered:
+        return True
+    bad_cues = [
+        "mesajinizi dikkate",
+        "mesajınızı dikkate",
+        "neye ihtiyaciniz oldugunu yazarsaniz",
+        "neye ihtiyacınız olduğunu yazarsanız",
+        "dogrudan cevap vereyim",
+        "doğrudan cevap vereyim",
+        "hizmetimizle ilgili bilgi almak ister misiniz",
+        "daha fazla bilgi almak ister misiniz",
+        "bir sonraki adimimiz ne olacak",
+        "bir sonraki adımımız ne olacak",
+    ]
+    if any(cue in lowered for cue in bad_cues):
+        return True
+    compact = re.sub(r"\s+", " ", lowered).strip(" .!?")
+    return compact in {"anladim", "anladım", "tabii", "olur", "tamam"}
+
+
 def apply_ai_first_quality_overrides(
     message_text: str,
     decision: dict[str, Any],
@@ -8820,6 +8917,29 @@ def apply_ai_first_quality_overrides(
 ) -> dict[str, Any]:
     decision["reply_text"] = cleanup_ai_first_reply_text(decision.get("reply_text"))
     lowered = sanitize_text(message_text).lower()
+    decision_intent = sanitize_text(str(decision.get("intent") or "")).lower()
+    direct_service = pick_service(message_text, decision.get("extracted_service") or conversation.get("service"))
+    direct_service_meta = match_service_catalog(direct_service, direct_service) if direct_service else None
+    if direct_service_meta and is_service_information_request(message_text, direct_service_meta):
+        service_display = str(direct_service_meta.get("display") or direct_service)
+        if is_low_quality_ai_first_reply(decision.get("reply_text")) or decision_intent in {"fallback_reply", "general_reply"}:
+            decision["reply_text"] = build_ai_first_service_information_reply(direct_service_meta, conversation)
+        decision["intent"] = "service_info"
+        decision["booking_intent"] = False
+        decision["extracted_service"] = service_display
+        decision["missing_fields"] = []
+        decision["should_reply"] = True
+        return decision
+    if is_general_information_request(message_text) and (
+        is_low_quality_ai_first_reply(decision.get("reply_text")) or decision_intent in {"fallback_reply", "general_reply"}
+    ):
+        detail_keyword_match = any(keyword in lowered for keyword in DETAIL_KEYWORDS)
+        decision["reply_text"] = build_detailed_services_overview_reply() if detail_keyword_match else build_services_overview_reply()
+        decision["intent"] = "detailed_service_overview" if detail_keyword_match else "service_overview"
+        decision["booking_intent"] = False
+        decision["missing_fields"] = []
+        decision["should_reply"] = True
+        return decision
     if is_service_overview_question(message_text):
         detail_keyword_match = any(keyword in lowered for keyword in DETAIL_KEYWORDS)
         if detail_keyword_match:
@@ -8945,6 +9065,12 @@ def apply_ai_first_quality_overrides(
 
 def build_ai_first_emergency_reply(message_text: str, conversation: dict[str, Any]) -> str:
     lowered = sanitize_text(message_text).lower()
+    direct_service = pick_service(message_text, conversation.get("service"))
+    direct_service_meta = match_service_catalog(direct_service, direct_service) if direct_service else None
+    if direct_service_meta and is_service_information_request(message_text, direct_service_meta):
+        return build_ai_first_service_information_reply(direct_service_meta, conversation)
+    if is_general_information_request(message_text):
+        return build_services_overview_reply()
     if is_simple_greeting(message_text) or "aleykum" in lowered:
         return "Merhaba, buradayım. Size nasıl yardımcı olabilirim?"
     if any(token in lowered for token in ["dolandirici", "guven", "guvenilir", "sahte"]):

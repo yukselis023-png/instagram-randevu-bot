@@ -1596,7 +1596,7 @@ def test_answerable_offtopic_question_gets_answer_not_service_picker():
 def test_version_exposes_ai_first_reply_engine_flags():
     payload = main.version()
 
-    assert payload["reply_engine"] == "ai_first_v2"
+    assert payload["reply_engine"] == "ai_first_v3"
     assert payload["ai_first_enabled"] is True
     assert payload["reply_guarantee_enabled"] is True
 
@@ -2437,6 +2437,125 @@ def test_reply_guarantee_returns_emergency_text_for_empty_ai_reply():
     assert recovered is True
     assert reply
     assert "web" in reply.lower() or "hizmet" in reply.lower()
+
+
+def test_reply_engine_reports_ai_first_v3():
+    assert main.REPLY_ENGINE == "ai_first_v3"
+
+
+def test_ai_first_specific_automation_info_request_overrides_generic_fallback(monkeypatch):
+    conversation = {"service": None, "state": "new", "booking_kind": None, "memory_state": {}}
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text="Anladim. Size yardimci olabilmem icin mesajinizi dikkate aliyorum; neye ihtiyaciniz oldugunu yazarsaniz dogrudan cevap vereyim.",
+            intent="fallback_reply",
+            booking_intent=False,
+            missing_fields=[],
+        ),
+    )
+
+    decision = main.build_ai_first_decision("Otomasyon hakkinda bilgi verin", conversation, [], {})
+
+    reply = main.sanitize_text(decision["reply_text"]).lower()
+    raw_reply = decision["reply_text"].lower()
+    assert decision["should_reply"] is True
+    assert decision["booking_intent"] is False
+    assert decision["intent"] == "service_info"
+    assert "otomasyon" in reply
+    assert "dm" in reply or "mesaj" in reply
+    assert "müşteri" in raw_reply
+    assert "mesajinizi dikkate" not in reply
+    assert "neye ihtiyaciniz" not in reply
+
+
+def test_ai_first_generic_information_request_gets_service_overview_not_fallback(monkeypatch):
+    conversation = {"service": None, "state": "new", "booking_kind": None, "memory_state": {}}
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text="Anladim. Size yardimci olabilmem icin mesajinizi dikkate aliyorum; neye ihtiyaciniz oldugunu yazarsaniz dogrudan cevap vereyim.",
+            intent="fallback_reply",
+            booking_intent=False,
+            missing_fields=[],
+        ),
+    )
+
+    decision = main.build_ai_first_decision("Bilgi edinmek icin yaziyorum", conversation, [], {})
+
+    reply = main.sanitize_text(decision["reply_text"]).lower()
+    assert decision["should_reply"] is True
+    assert decision["booking_intent"] is False
+    assert decision["intent"] in {"service_overview", "detailed_service_overview"}
+    assert "web" in reply
+    assert "otomasyon" in reply
+    assert "mesajinizi dikkate" not in reply
+    assert "neye ihtiyaciniz" not in reply
+
+
+def test_ai_first_service_info_then_positive_continue_starts_consultation(monkeypatch):
+    conversation = {
+        "service": "Otomasyon & Yapay Zeka Cozumleri",
+        "state": "new",
+        "booking_kind": None,
+        "memory_state": {},
+    }
+    history = [
+        {
+            "direction": "out",
+            "message_text": (
+                "Otomasyon sistemi gelen DM'leri karsilar, sik sorulari yanitlar, uygun talepleri "
+                "randevu veya CRM kaydina cevirir. Isterseniz kisa bir on gorusmede netlestirebiliriz."
+            ),
+        }
+    ]
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text="Otomasyon & Yapay Zeka Cozumlerimizle ilgili daha fazla bilgi almak ister misiniz?",
+            intent="info",
+            booking_intent=False,
+            missing_fields=[],
+        ),
+    )
+
+    decision = main.build_ai_first_decision("evet", conversation, history, {})
+
+    reply = main.sanitize_text(decision["reply_text"]).lower()
+    assert decision["should_reply"] is True
+    assert decision["booking_intent"] is True
+    assert decision["intent"] == "service_consultation_acceptance"
+    assert "ad" in reply and "soyad" in reply
+    assert "daha fazla bilgi almak ister" not in reply
+
+
+def test_ai_first_reply_guarantee_replaces_low_quality_generic_fallback():
+    conversation = {"state": "new", "memory_state": {}}
+    decision = {
+        "reply_text": "Anladim. Size yardimci olabilmem icin mesajinizi dikkate aliyorum; neye ihtiyaciniz oldugunu yazarsaniz dogrudan cevap vereyim.",
+        "intent": "fallback_reply",
+        "should_reply": True,
+        "booking_intent": False,
+        "missing_fields": [],
+    }
+
+    fixed = main.apply_ai_first_quality_overrides(
+        "Hizmetleriniz hakkinda detayli bilgi almak istiyorum",
+        decision,
+        conversation,
+        [],
+    )
+
+    reply = main.sanitize_text(fixed["reply_text"]).lower()
+    assert fixed["should_reply"] is True
+    assert fixed["booking_intent"] is False
+    assert "web" in reply
+    assert "otomasyon" in reply
+    assert "mesajinizi dikkate" not in reply
+    assert "neye ihtiyaciniz" not in reply
 
 
 def test_parse_json_like_handles_json_encoded_as_string():
