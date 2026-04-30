@@ -5329,10 +5329,22 @@ def is_instagram_profile_name_reference(text: str | None) -> bool:
     return has_profile_source and has_reference_action
 
 
+def is_business_goal_name_rejection(text: str | None) -> bool:
+    lowered = sanitize_text(text or "").lower()
+    if not lowered:
+        return False
+    goal_cues = [
+        "dijitalde gorunur", "dijitalde görünür", "gorunur olmak", "görünür olmak",
+        "musteri kazan", "müşteri kazan", "uygun olsun", "sik olsun", "şık olsun",
+        "modern olsun", "guven versin", "güven versin", "site acmak", "site açmak",
+    ]
+    return any(cue in lowered for cue in goal_cues)
+
+
 def extract_name(text: str, state: str) -> str | None:
     normalized = sanitize_text(text)
     lowered = normalized.lower()
-    if is_instagram_profile_name_reference(text):
+    if is_instagram_profile_name_reference(text) or is_business_goal_name_rejection(text):
         return None
     explicit_prefixes = [
         'benim adim soyadim ',
@@ -5380,7 +5392,7 @@ def extract_name(text: str, state: str) -> str | None:
 def is_invalid_name_attempt(text: str, state: str) -> bool:
     if state != "collect_name":
         return False
-    if is_instagram_profile_name_reference(text):
+    if is_instagram_profile_name_reference(text) or is_business_goal_name_rejection(text):
         return True
     if is_next_step_prompt(text) or is_low_signal_message(text):
         return True
@@ -8182,7 +8194,7 @@ def reply_requests_booking_details(text: str) -> bool:
     patterns = [
         "ad soyad", "telefon numaran", "telefonunuzu", "uygun gün", "uygun gun", "hangi gün", "hangi gun", "hangi g?n", "hangi tarih",
         "hangi saat", "gün ve saat", "gun ve saat", "g?n ve saat", "size uygun gün", "size uygun gun", "randevu kaydı", "ön görüşme kaydı", "on gorusme kaydi",
-        "telefon numarası", "telefon numarasi"
+        "telefon numarası", "telefon numarasi", "adınızı", "adinizi", "soyadınızı", "soyadinizi"
     ]
     return any(pattern in lowered for pattern in patterns)
 
@@ -8873,6 +8885,17 @@ def should_suppress_ai_booking_collection(
 ) -> bool:
     if not llm_bool(decision.get("booking_intent")):
         return False
+    if sanitize_text(str(decision.get("intent") or "")).lower() == "collect_name_invalid":
+        return False
+    direct_service = pick_service(message_text, decision.get("extracted_service"))
+    direct_service_meta = match_service_catalog(direct_service, direct_service) if direct_service else None
+    if (
+        direct_service_meta
+        and not explicitly_starts_consultation_collection(message_text)
+        and not accepts_pending_consultation_offer(message_text, conversation, None, llm_data or {})
+        and not any([extract_phone(message_text), extract_date(message_text), extract_time_for_state(message_text, conversation.get("state"))])
+    ):
+        return True
     if sanitize_text(str(decision.get("intent") or "")).lower() == "service_consultation_acceptance":
         return False
     if message_shows_booking_intent(message_text, llm_data or {}):
@@ -9409,6 +9432,16 @@ def build_ai_first_decision(
     if should_suppress_ai_booking_collection(message_text, decision, conversation, llm_data):
         decision["booking_intent"] = False
         decision["missing_fields"] = []
+        if reply_requests_booking_details(decision.get("reply_text")):
+            service_name = decision.get("extracted_service") or pick_service(message_text, conversation.get("service"))
+            service_meta = match_service_catalog(service_name, service_name) if service_name else None
+            if service_meta:
+                decision["reply_text"] = build_ai_first_service_information_reply(service_meta, conversation)
+                decision["intent"] = "service_info"
+                decision["extracted_service"] = service_meta.get("display")
+            else:
+                decision["reply_text"] = build_ai_first_emergency_reply(message_text, conversation)
+                decision["intent"] = "booking_suppressed_info"
         if should_replace_collection_reply_with_clarification(message_text, decision, conversation):
             decision["reply_text"] = build_contextual_clarification_reply(conversation, message_text)
             decision["intent"] = "clarification"

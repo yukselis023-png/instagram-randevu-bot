@@ -2464,6 +2464,34 @@ def test_ai_first_v5_instagram_profile_is_not_accepted_as_full_name():
     assert main.is_invalid_name_attempt("Yaziyor Instagram hesabimda", "collect_name")
 
 
+def test_ai_first_v5_business_goal_is_not_accepted_as_full_name():
+    assert main.extract_name("Dijitalde gorunur olmak", "collect_name") is None
+    assert main.is_invalid_name_attempt("Dijitalde gorunur olmak", "collect_name")
+
+
+def test_ai_first_v5_service_interest_does_not_start_name_collection(monkeypatch):
+    conversation = {"service": None, "state": "new", "booking_kind": None, "memory_state": {}}
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text="Tabii, Web Tasarim - KOBI Paketi icin on gorusme planlayabiliriz. Once adinizi ve soyadinizi yazar misiniz?",
+            intent="provide_service_details",
+            booking_intent=True,
+            extracted_service="Web Tasarim - KOBI Paketi",
+            missing_fields=["name"],
+        ),
+    )
+
+    decision = main.build_ai_first_decision("Web sitesi actirmak istiyom", conversation, [], {"wants_booking": True})
+
+    reply = main.sanitize_text(decision["reply_text"]).lower()
+    assert decision["should_reply"] is True
+    assert decision["booking_intent"] is False
+    assert decision["missing_fields"] == []
+    assert "ad" not in reply and "soyad" not in reply
+
+
 def test_ai_first_v5_phone_refusal_accepts_instagram_contact_without_pressure():
     conversation = {
         "service": "Web Tasarim - KOBI Paketi",
