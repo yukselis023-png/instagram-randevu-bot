@@ -1911,6 +1911,105 @@ def test_ai_first_time_collection_cannot_drop_booking_flow():
     assert "requested_time" in decision["missing_fields"]
 
 
+def test_ai_first_time_collection_uses_existing_name_without_revalidating_words():
+    conversation = {
+        "service": "Web Tasarim - KOBI Paketi",
+        "full_name": "Full Akis Test Kullanici",
+        "phone": "+905550000003",
+        "state": "collect_time",
+        "booking_kind": "preconsultation",
+        "memory_state": {},
+    }
+    decision = {
+        "reply_text": "Mesajinizi dikkate aliyorum.",
+        "intent": "fallback_reply",
+        "should_reply": True,
+        "booking_intent": False,
+        "missing_fields": [],
+    }
+
+    main.force_ai_first_booking_continuation(
+        decision,
+        conversation,
+        state_before_update="collect_time",
+        extracted_name=None,
+        detected_phone=None,
+        detected_time="11:00",
+    )
+
+    assert decision["booking_intent"] is True
+    assert decision["intent"] == "booking_time_collected"
+
+
+def test_ai_first_message_volume_direct_reply_overrides_fallback(monkeypatch):
+    conversation = {"service": None, "state": "new", "booking_kind": None, "memory_state": {}}
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text="Anladim. Size yardimci olabilmem icin mesajinizi dikkate aliyorum.",
+            intent="fallback_reply",
+            booking_intent=False,
+            missing_fields=[],
+        ),
+    )
+
+    decision = main.build_ai_first_decision("Gunde 30-40 kisi yaziyor", conversation, [], {})
+
+    reply = decision["reply_text"].lower()
+    assert decision["intent"] == "message_volume"
+    assert decision["booking_intent"] is False
+    assert "30-40" in reply
+    assert "otomatik" in reply or "otomasyon" in reply
+
+
+def test_ai_first_direct_ascii_preconsultation_starts_booking(monkeypatch):
+    conversation = {"service": None, "state": "new", "booking_kind": None, "memory_state": {}}
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text="Anladim. Size yardimci olabilmem icin mesajinizi dikkate aliyorum.",
+            intent="fallback_reply",
+            booking_intent=False,
+            missing_fields=[],
+        ),
+    )
+
+    decision = main.build_ai_first_decision("Web tasarim icin on gorusme planlayalim", conversation, [], {})
+
+    reply = decision["reply_text"].lower()
+    assert decision["booking_intent"] is True
+    assert "web tasar" in decision["extracted_service"].lower()
+    assert "ad" in reply and "soyad" in reply
+
+
+def test_ai_first_ascii_preconsultation_question_gets_explanation(monkeypatch):
+    conversation = {
+        "service": "Web Tasarim - KOBI Paketi",
+        "state": "collect_name",
+        "booking_kind": "preconsultation",
+        "memory_state": {},
+    }
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text="Anladim. Size yardimci olabilmem icin mesajinizi dikkate aliyorum.",
+            intent="fallback_reply",
+            booking_intent=False,
+            missing_fields=[],
+        ),
+    )
+
+    decision = main.build_ai_first_decision("Ne on gorusmesi?", conversation, [], {})
+
+    reply = decision["reply_text"].lower()
+    assert decision["booking_intent"] is False
+    assert "görüşme" in reply or "gorusme" in reply
+    assert "ad" not in reply or "soyad" not in reply
+
+
 def test_parse_json_like_handles_json_encoded_as_string():
     content = '"{\\"reply_text\\": \\"Tabii, randevu planlayabiliriz.\\", \\"intent\\": \\"appointment\\", \\"should_reply\\": true}"'
 

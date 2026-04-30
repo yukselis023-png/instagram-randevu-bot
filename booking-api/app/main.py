@@ -4067,6 +4067,9 @@ def extract_message_volume_estimate(text: str) -> str | None:
     range_match = NUMERIC_RANGE_ANSWER_PATTERN.match(cleaned)
     if range_match:
         return f"{range_match.group(1)}-{range_match.group(2)}"
+    ranged_with_unit = re.search(r"\b(\d{1,5})\s*[-–]\s*(\d{1,5})\s*(kişi|kisi|mesaj|dm|lead)\b", cleaned, re.IGNORECASE)
+    if ranged_with_unit:
+        return f"{ranged_with_unit.group(1)}-{ranged_with_unit.group(2)}"
     direct = MESSAGE_VOLUME_PATTERN.search(cleaned)
     if direct:
         return direct.group(1)
@@ -5408,7 +5411,7 @@ def force_ai_first_booking_continuation(
 ) -> None:
     state = sanitize_text(state_before_update or "")
     service = sanitize_text(conversation.get("service") or "")
-    has_name = bool(titlecase_name(extracted_name) or titlecase_name(conversation.get("full_name")))
+    has_name = bool(titlecase_name(extracted_name) or sanitize_text(conversation.get("full_name") or ""))
     has_phone = bool(canonical_phone(detected_phone) or canonical_phone(conversation.get("phone")))
     if state == "collect_name" and service and titlecase_name(extracted_name):
         decision["booking_intent"] = True
@@ -8638,6 +8641,35 @@ def apply_ai_first_quality_overrides(
 ) -> dict[str, Any]:
     decision["reply_text"] = cleanup_ai_first_reply_text(decision.get("reply_text"))
     lowered = sanitize_text(message_text).lower()
+    if is_meeting_clarification_question(message_text):
+        decision["reply_text"] = build_contextual_clarification_reply(conversation, message_text)
+        decision["intent"] = "clarification"
+        decision["booking_intent"] = False
+        decision["missing_fields"] = []
+        return decision
+    if is_message_volume_answer(message_text):
+        service = conversation.get("service") or "Otomasyon & Yapay Zeka Çözümleri"
+        context = {**conversation, "service": service}
+        decision["reply_text"] = build_message_volume_reply(message_text, context, history)
+        decision["intent"] = "message_volume"
+        decision["booking_intent"] = False
+        decision["extracted_service"] = service
+        decision["missing_fields"] = []
+        return decision
+    direct_service = pick_service(message_text, decision.get("extracted_service") or conversation.get("service"))
+    direct_service_meta = match_service_catalog(direct_service, direct_service) if direct_service else None
+    direct_booking_intent = message_shows_booking_intent(message_text, {}) or (
+        bool(direct_service_meta)
+        and any(cue in lowered for cue in ["yapalim", "yapalım", "alalim", "alalım", "goruselim", "görüşelim", "planlayalim", "planlayalım"])
+    )
+    if direct_service_meta and direct_booking_intent and sanitize_text(conversation.get("state") or "") in {"new", "collect_service", "collect_name"}:
+        service_display = str(direct_service_meta.get("display") or direct_service)
+        decision["reply_text"] = build_service_consultation_acceptance_reply({"service": service_display})
+        decision["intent"] = "service_consultation_acceptance"
+        decision["booking_intent"] = True
+        decision["extracted_service"] = service_display
+        decision["missing_fields"] = ["name"]
+        return decision
     if recent_outbound_can_start_service_consultation(history, conversation) and is_positive_more_details_acceptance(message_text):
         inferred_service = infer_recent_service_for_consultation(history, conversation)
         decision["reply_text"] = build_service_consultation_acceptance_reply(conversation)
