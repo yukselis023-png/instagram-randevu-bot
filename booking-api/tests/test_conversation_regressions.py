@@ -2297,6 +2297,36 @@ def test_ai_first_nonbooking_question_keeps_resumeable_booking_state():
     assert conversation["memory_state"]["open_loop"] == "collect_phone"
 
 
+def test_collect_phone_hesitation_overrides_weak_ai_reply():
+    conversation = {
+        "service": "Web Tasarim - KOBI Paketi",
+        "full_name": "Berkay Elbir",
+        "state": "collect_phone",
+        "booking_kind": "preconsultation",
+        "memory_state": {},
+    }
+    decision = {
+        "reply_text": "Telefon numaranizi paylasir misiniz?",
+        "intent": "collect_phone",
+        "should_reply": True,
+        "booking_intent": True,
+        "missing_fields": ["phone"],
+    }
+
+    changed = main.override_ai_first_collect_phone_question(
+        decision,
+        conversation,
+        "sart mi?",
+        state_before_update="collect_phone",
+        detected_phone=None,
+    )
+
+    assert changed is True
+    assert decision["intent"] == "phone_reason"
+    assert decision["booking_intent"] is False
+    assert "Telefonu sadece" in decision["reply_text"]
+
+
 def test_reply_guarantee_returns_emergency_text_for_empty_ai_reply():
     conversation = {"state": "new", "memory_state": {}}
 

@@ -2606,6 +2606,14 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
                 detected_date=detected_date,
                 detected_time=detected_time,
             )
+            if override_ai_first_collect_phone_question(
+                ai_decision,
+                conversation,
+                message_text,
+                state_before_update=state_before_update,
+                detected_phone=detected_phone,
+            ):
+                decision_path.append("ai_first_phone_collection_question_override")
             metrics["ai_model_used"] = ai_decision.get("ai_model_used")
             metrics["ai_decision_intent"] = ai_decision.get("intent")
             metrics["fallback_used"] = bool(ai_decision.get("fallback_used"))
@@ -6112,6 +6120,28 @@ def is_phone_reason_question(text: str) -> bool:
     return has_phone_subject and asks_reason
 
 
+def is_phone_collection_hesitation(text: str) -> bool:
+    lowered = sanitize_text(text).lower()
+    compact = re.sub(r"\s+", " ", lowered.replace("?", " ")).strip()
+    hesitation_phrases = [
+        "sart mi",
+        "zorunlu mu",
+        "mecbur mu",
+        "gerekli mi",
+        "lazim mi",
+        "vermesem olur mu",
+        "paylasmasam olur mu",
+        "olmasa olur mu",
+        "telefon sart",
+        "numara sart",
+        "telefon zorunlu",
+        "numara zorunlu",
+        "paylasmak zorunda miyim",
+        "vermek zorunda miyim",
+    ]
+    return any(phrase in compact for phrase in hesitation_phrases)
+
+
 def is_request_reason_question(text: str) -> bool:
     lowered = sanitize_text(text).lower()
     return is_phone_reason_question(lowered) or any(keyword in lowered for keyword in REQUEST_REASON_KEYWORDS)
@@ -6200,6 +6230,40 @@ def build_phone_refusal_reply(conversation: dict[str, Any]) -> str:
     if service:
         return f"Tamam, sorun değil; telefonu paylaşmak zorunda değilsiniz. İsterseniz {service} tarafında bilgi vermeye buradan devam edeyim. Daha sonra ön görüşme planlamak isterseniz numarayı o aşamada paylaşabilirsiniz."
     return "Tamam, sorun değil; telefonu paylaşmak zorunda değilsiniz. İsterseniz bilgi vermeye buradan devam edelim. Daha sonra ön görüşme planlamak isterseniz numarayı o aşamada paylaşabilirsiniz."
+
+
+def override_ai_first_collect_phone_question(
+    decision: dict[str, Any],
+    conversation: dict[str, Any],
+    message_text: str,
+    *,
+    state_before_update: str | None = None,
+    detected_phone: str | None = None,
+) -> bool:
+    state = sanitize_text(state_before_update or conversation.get("state") or "")
+    if state != "collect_phone" or detected_phone:
+        return False
+    if is_phone_share_refusal(message_text):
+        reply_text = build_phone_refusal_reply(conversation)
+        intent = "phone_refusal"
+    elif is_phone_reason_question(message_text) or is_phone_collection_hesitation(message_text):
+        reply_text = build_contextual_clarification_reply(conversation, message_text)
+        intent = "phone_reason"
+    else:
+        return False
+
+    decision.update(
+        {
+            "reply_text": reply_text,
+            "intent": intent,
+            "should_reply": True,
+            "booking_intent": False,
+            "handoff_needed": False,
+            "missing_fields": [],
+            "phone_collection_question_override": True,
+        }
+    )
+    return True
 
 
 def build_missing_phone_for_booking_reply(conversation: dict[str, Any]) -> str:
