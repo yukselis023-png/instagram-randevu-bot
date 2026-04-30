@@ -5802,19 +5802,17 @@ def is_invalid_service_candidate(text: str | None) -> bool:
 
 def build_services_overview_reply() -> str:
     return (
-        "Merhaba 👋\n"
-        "Web Sitesi kurulumu • Mesaj Otomasyonu • Reklamcılık\n"
-        "Hangi hizmetimiz hakkında bilgi almak istersiniz?"
+        "Web tasarım, otomasyon & yapay zeka, performans reklamları ve sosyal medya yönetimi tarafında destek veriyoruz. "
+        "Hangisini merak ettiğinizi yazarsanız fiyat, kapsam ve teslim süresini net anlatayım."
     )
 
 
 def build_detailed_services_overview_reply() -> str:
     return (
-        "Elbette. Kısaca özetleyeyim:\n\n"
-        "Web Tasarım: Markanıza özel, mobil uyumlu ve dönüşüm odaklı siteler.\n"
-        "Otomasyon: Müşteri mesajlarını karşılayan, bilgi veren ve görüşme planlayan AI sistemleri.\n"
-        "Reklam: Yeni başvuru kazanmanızı sağlayan sponsorlu reklamlar.\n\n"
-        "Size en uygun hizmeti netleştirmek için çok kısa bir telefon görüşmesi planlayabiliriz. Hangi gün ve saat uygundur?"
+        "Elbette. Web tasarım tarafında mobil uyumlu, Google uyumlu ve dönüşüm odaklı kurumsal siteler hazırlıyoruz. "
+        "Otomasyon & yapay zeka tarafında DM cevaplama, CRM kaydı, randevu planlama ve takip süreçlerini otomatikleştiriyoruz. "
+        "Performans reklamlarında Meta/TikTok kampanyaları, hedef kitle ve raporlama yönetiyoruz; sosyal medya tarafında içerik ve hesap yönetimi sunuyoruz. "
+        "İsterseniz hangi hizmeti merak ettiğinizi yazın, size kapsam, fiyat ve teslim süresini net anlatayım."
     )
 
 
@@ -8662,6 +8660,17 @@ def apply_ai_first_quality_overrides(
 ) -> dict[str, Any]:
     decision["reply_text"] = cleanup_ai_first_reply_text(decision.get("reply_text"))
     lowered = sanitize_text(message_text).lower()
+    if is_service_overview_question(message_text):
+        detail_keyword_match = any(keyword in lowered for keyword in DETAIL_KEYWORDS)
+        if detail_keyword_match:
+            decision["reply_text"] = build_detailed_services_overview_reply()
+            decision["intent"] = "detailed_service_overview"
+        else:
+            decision["reply_text"] = build_services_overview_reply()
+            decision["intent"] = "service_overview"
+        decision["booking_intent"] = False
+        decision["missing_fields"] = []
+        return decision
     if sanitize_text(conversation.get("state") or "") == "collect_name" and is_invalid_name_attempt(message_text, "collect_name"):
         decision["reply_text"] = "Adınızı ve soyadınızı tam olarak yazar mısınız?"
         decision["intent"] = "collect_name_invalid"

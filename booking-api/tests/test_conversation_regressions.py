@@ -1963,6 +1963,31 @@ def test_ai_first_message_volume_direct_reply_overrides_fallback(monkeypatch):
     assert "otomatik" in reply or "otomasyon" in reply
 
 
+def test_ai_first_service_overview_overrides_generic_fallback(monkeypatch):
+    conversation = {"service": None, "state": "new", "booking_kind": None, "memory_state": {}}
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text="Anladim. Size yardimci olabilmem icin mesajinizi dikkate aliyorum; neye ihtiyaciniz oldugunu yazarsaniz dogrudan cevap vereyim.",
+            intent="fallback_reply",
+            booking_intent=False,
+            missing_fields=[],
+        ),
+    )
+
+    decision = main.build_ai_first_decision("Hizmetleriniz hakkında detaylı bilgi almak istiyorum", conversation, [], {})
+
+    reply = decision["reply_text"].lower()
+    assert decision["intent"] == "detailed_service_overview"
+    assert decision["booking_intent"] is False
+    assert "web tasar" in reply
+    assert "otomasyon" in reply
+    assert "reklam" in reply
+    assert "mesajinizi dikkate" not in reply
+    assert "neye ihtiyaciniz" not in reply
+
+
 def test_ai_first_direct_ascii_preconsultation_starts_booking(monkeypatch):
     conversation = {"service": None, "state": "new", "booking_kind": None, "memory_state": {}}
     monkeypatch.setattr(
