@@ -8641,6 +8641,12 @@ def apply_ai_first_quality_overrides(
 ) -> dict[str, Any]:
     decision["reply_text"] = cleanup_ai_first_reply_text(decision.get("reply_text"))
     lowered = sanitize_text(message_text).lower()
+    if sanitize_text(conversation.get("state") or "") == "collect_name" and is_invalid_name_attempt(message_text, "collect_name"):
+        decision["reply_text"] = "Adınızı ve soyadınızı tam olarak yazar mısınız?"
+        decision["intent"] = "collect_name_invalid"
+        decision["booking_intent"] = True
+        decision["missing_fields"] = ["name"]
+        return decision
     if is_meeting_clarification_question(message_text):
         decision["reply_text"] = build_contextual_clarification_reply(conversation, message_text)
         decision["intent"] = "clarification"
@@ -8685,6 +8691,15 @@ def apply_ai_first_quality_overrides(
         decision["booking_intent"] = False
         decision["missing_fields"] = []
         return decision
+    if is_positive_more_details_acceptance(message_text):
+        inferred_service = infer_recent_service_for_consultation(history, conversation)
+        if inferred_service:
+            decision["reply_text"] = build_service_consultation_acceptance_reply({"service": inferred_service})
+            decision["intent"] = "service_consultation_acceptance"
+            decision["booking_intent"] = True
+            decision["extracted_service"] = inferred_service
+            decision["missing_fields"] = ["name"]
+            return decision
     if is_trust_or_scam_question(message_text):
         decision["reply_text"] = build_trust_or_scam_reply()
         decision["intent"] = "reassurance"

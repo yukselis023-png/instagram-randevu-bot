@@ -2010,6 +2010,64 @@ def test_ai_first_ascii_preconsultation_question_gets_explanation(monkeypatch):
     assert "ad" not in reply or "soyad" not in reply
 
 
+def test_ai_first_positive_acceptance_after_service_context_starts_consultation(monkeypatch):
+    conversation = {
+        "service": "Web Tasarim - KOBI Paketi",
+        "state": "new",
+        "booking_kind": None,
+        "memory_state": {},
+    }
+    history = [
+        {
+            "direction": "out",
+            "message_text": "Evet, web tasarım hizmetimiz ile hedeflediğiniz sonucu elde edebilirsiniz.",
+        }
+    ]
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text="Anladim. Size yardimci olabilmem icin mesajinizi dikkate aliyorum.",
+            intent="fallback_reply",
+            booking_intent=False,
+            missing_fields=[],
+        ),
+    )
+
+    decision = main.build_ai_first_decision("Olur peki", conversation, history, {})
+
+    reply = decision["reply_text"].lower()
+    assert decision["booking_intent"] is True
+    assert "ad" in reply and "soyad" in reply
+    assert "web tasar" in decision["extracted_service"].lower()
+
+
+def test_ai_first_invalid_short_name_in_collect_name_does_not_fallback(monkeypatch):
+    conversation = {
+        "service": "Otomasyon & Yapay Zeka Cozumleri",
+        "state": "collect_name",
+        "booking_kind": "preconsultation",
+        "memory_state": {},
+    }
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text="Anladim. Size yardimci olabilmem icin mesajinizi dikkate aliyorum.",
+            intent="fallback_reply",
+            booking_intent=False,
+            missing_fields=[],
+        ),
+    )
+
+    decision = main.build_ai_first_decision("G", conversation, [], {})
+
+    reply = decision["reply_text"].lower()
+    assert decision["booking_intent"] is True
+    assert decision["intent"] == "collect_name_invalid"
+    assert "ad" in reply and "soyad" in reply
+
+
 def test_parse_json_like_handles_json_encoded_as_string():
     content = '"{\\"reply_text\\": \\"Tabii, randevu planlayabiliriz.\\", \\"intent\\": \\"appointment\\", \\"should_reply\\": true}"'
 
