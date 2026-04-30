@@ -71,7 +71,7 @@ LLM_REPLY_MICRO_MAX_TOKENS = int(os.getenv("LLM_REPLY_MICRO_MAX_TOKENS", "48"))
 LLM_REPLY_ADVISORY_MAX_TOKENS = int(os.getenv("LLM_REPLY_ADVISORY_MAX_TOKENS", "90"))
 LLM_REPLY_POLISH_ENABLED = True
 FULL_AI_CONVERSATIONAL_MODE = True
-REPLY_ENGINE = "ai_first_v3"
+REPLY_ENGINE = "ai_first_v4"
 AI_FIRST_ENABLED = True
 REPLY_GUARANTEE_ENABLED = True
 CRM_SYNC_ENABLED = os.getenv("CRM_SYNC_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
@@ -2207,6 +2207,7 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
         "dm_flow_stage": None,
         "reply_guaranteed": False,
         "booking_action": None,
+        "ai_repair_used": False,
         "booking_progress_override": False,
         "empty_reply_recovered": False,
         "slot_resolution": None,
@@ -2620,6 +2621,7 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
             metrics["ai_model_used"] = ai_decision.get("ai_model_used")
             metrics["ai_decision_intent"] = ai_decision.get("intent")
             metrics["fallback_used"] = bool(ai_decision.get("fallback_used"))
+            metrics["ai_repair_used"] = bool(ai_decision.get("ai_repair_used"))
             metrics["booking_progress_override"] = bool(ai_decision.get("booking_progress_override"))
             metrics["booking_action"] = ai_decision.get("intent") if llm_bool(ai_decision.get("booking_intent")) else None
             apply_ai_first_decision_to_conversation(conversation, ai_decision, message_text)
@@ -8760,6 +8762,7 @@ def normalize_ai_first_decision(
         "handoff_needed": llm_bool(parsed.get("handoff_needed")),
         "fallback_used": fallback_used,
         "ai_model_used": ai_model_used,
+        "ai_repair_used": llm_bool(parsed.get("ai_repair_used")),
     }
     return decision
 
@@ -8927,6 +8930,99 @@ def reply_mentions_service_context(reply_text: str | None) -> bool:
         "crm",
     ]
     return any(cue in lowered for cue in service_cues)
+
+
+def ai_first_decision_needs_repair(
+    message_text: str,
+    decision: dict[str, Any],
+    conversation: dict[str, Any],
+    history: list[dict[str, Any]] | None = None,
+) -> bool:
+    if is_low_quality_ai_first_reply(decision.get("reply_text")):
+        return True
+    if is_general_information_request(message_text) and not reply_mentions_service_context(decision.get("reply_text")):
+        return True
+    if looks_like_repeated_prompt(decision.get("reply_text"), get_last_outbound_text(history)):
+        return True
+    if is_next_step_prompt(message_text) and not llm_bool(decision.get("booking_intent")):
+        return True
+    return False
+
+
+def repair_ai_first_decision_with_ai(
+    message_text: str,
+    decision: dict[str, Any],
+    conversation: dict[str, Any],
+    history: list[dict[str, Any]] | None,
+    llm_data: dict[str, Any] | None,
+    selected_models: list[str],
+) -> dict[str, Any]:
+    if not ai_first_decision_needs_repair(message_text, decision, conversation, history):
+        return decision
+
+    payload = build_ai_first_prompt_payload(message_text, conversation, history, llm_data)
+    repair_payload = {
+        "reason": "Previous reply was too generic, repeated, or did not answer the user's actual message.",
+        "rejected_decision": {key: decision.get(key) for key in AI_FIRST_DECISION_KEYS},
+        "conversation_payload": payload,
+    }
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are the AI-first Instagram DM reply engine for DOEL Digital. "
+                "The previous answer was rejected because it sounded generic or did not move the conversation naturally. "
+                "Return ONLY minified JSON with keys: reply_text, intent, should_reply, booking_intent, extracted_service, extracted_name, extracted_phone, requested_date, requested_time, missing_fields, crm_action, handoff_needed. "
+                "Do not use canned fallback phrases like 'mesajınızı dikkate alıyorum', 'neye ihtiyacınız olduğunu yazarsanız', or 'hangi konuda yardımcı olabilirim'. "
+                "Answer the current user message directly, using the recent conversation and service catalog. "
+                "If the user is positive after a service explanation, continue naturally with one useful next step. "
+                "Only start collecting name/phone/date when the user clearly wants a meeting or accepts a consultation. "
+                "Use natural Turkish, no markdown, no emoji."
+            ),
+        },
+        {"role": "user", "content": json.dumps(repair_payload, ensure_ascii=False)},
+    ]
+    content = call_llm_content(
+        messages,
+        temperature=0.45,
+        max_tokens=420,
+        timeout=max(LLM_REPLY_ADVISORY_TIMEOUT_SECONDS, 25),
+        models=selected_models,
+    )
+    parsed = parse_json_like(content or "")
+    if not parsed:
+        unstructured_reply = normalize_llm_reply_text(content)
+        if unstructured_reply:
+            parsed = {
+                "reply_text": unstructured_reply,
+                "intent": "ai_repaired_reply",
+                "should_reply": True,
+                "booking_intent": False,
+                "extracted_service": decision.get("extracted_service"),
+                "extracted_name": None,
+                "extracted_phone": None,
+                "requested_date": None,
+                "requested_time": None,
+                "missing_fields": [],
+                "crm_action": "update_customer",
+                "handoff_needed": False,
+            }
+    if not parsed:
+        return decision
+
+    repaired = normalize_ai_first_decision(
+        parsed,
+        message_text,
+        conversation,
+        fallback_used=False,
+        ai_model_used=selected_models[0] if selected_models else decision.get("ai_model_used"),
+    )
+    if is_low_quality_ai_first_reply(repaired.get("reply_text")):
+        return decision
+    if is_general_information_request(message_text) and not reply_mentions_service_context(repaired.get("reply_text")):
+        return decision
+    repaired["ai_repair_used"] = True
+    return repaired
 
 
 def apply_ai_first_quality_overrides(
@@ -9194,6 +9290,7 @@ def build_ai_first_decision(
             fallback_used=True,
             ai_model_used=selected_models[0] if selected_models else None,
         )
+    decision = repair_ai_first_decision_with_ai(message_text, decision, conversation, history, llm_data, selected_models)
     decision = apply_ai_first_quality_overrides(message_text, decision, conversation, history)
     if should_suppress_ai_booking_collection(message_text, decision, conversation, llm_data):
         decision["booking_intent"] = False

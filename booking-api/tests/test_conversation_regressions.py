@@ -1596,7 +1596,7 @@ def test_answerable_offtopic_question_gets_answer_not_service_picker():
 def test_version_exposes_ai_first_reply_engine_flags():
     payload = main.version()
 
-    assert payload["reply_engine"] == "ai_first_v3"
+    assert payload["reply_engine"] == "ai_first_v4"
     assert payload["ai_first_enabled"] is True
     assert payload["reply_guarantee_enabled"] is True
 
@@ -2439,8 +2439,8 @@ def test_reply_guarantee_returns_emergency_text_for_empty_ai_reply():
     assert "web" in reply.lower() or "hizmet" in reply.lower()
 
 
-def test_reply_engine_reports_ai_first_v3():
-    assert main.REPLY_ENGINE == "ai_first_v3"
+def test_reply_engine_reports_ai_first_v4():
+    assert main.REPLY_ENGINE == "ai_first_v4"
 
 
 def test_ai_first_specific_automation_info_request_overrides_generic_fallback(monkeypatch):
@@ -2633,6 +2633,56 @@ def test_ai_first_reply_guarantee_replaces_low_quality_generic_fallback():
     assert fixed["booking_intent"] is False
     assert "web" in reply
     assert "otomasyon" in reply
+    assert "mesajinizi dikkate" not in reply
+    assert "neye ihtiyaciniz" not in reply
+
+
+def test_ai_first_reasks_ai_when_positive_followup_gets_generic_fallback(monkeypatch):
+    conversation = {
+        "service": "Otomasyon & Yapay Zeka Cozumleri",
+        "state": "collect_service",
+        "booking_kind": None,
+        "memory_state": {},
+    }
+    history = [
+        {
+            "direction": "out",
+            "message_text": "Otomasyon, mesajların otomatik cevaplanmasını, randevuların planlanmasını ve müşteri takibini kolaylaştırır.",
+        }
+    ]
+    responses = iter(
+        [
+            _ai_json(
+                reply_text="Anladım. Size yardımcı olabilmem için mesajınızı dikkate alıyorum; neye ihtiyacınız olduğunu yazarsanız doğrudan cevap vereyim.",
+                intent="info",
+                booking_intent=False,
+                missing_fields=[],
+            ),
+            _ai_json(
+                reply_text="Evet, bu yapı özellikle yoğun DM alan işletmelerde ciddi zaman kazandırır. İsterseniz günlük mesaj akışınıza göre size uygun kurulumu netleştirelim.",
+                intent="positive_followup",
+                booking_intent=False,
+                extracted_service="Otomasyon & Yapay Zeka Cozumleri",
+                missing_fields=[],
+            ),
+        ]
+    )
+    calls = []
+
+    def fake_llm(*args, **kwargs):
+        calls.append(kwargs)
+        return next(responses)
+
+    monkeypatch.setattr(main, "call_llm_content", fake_llm)
+
+    decision = main.build_ai_first_decision("Güzelmiş", conversation, history, {})
+
+    reply = main.sanitize_text(decision["reply_text"]).lower()
+    assert len(calls) == 2
+    assert decision["should_reply"] is True
+    assert decision["intent"] == "positive_followup"
+    assert decision["ai_repair_used"] is True
+    assert "zaman" in reply or "kurulum" in reply
     assert "mesajinizi dikkate" not in reply
     assert "neye ihtiyaciniz" not in reply
 
