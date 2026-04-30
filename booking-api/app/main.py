@@ -8900,6 +8900,7 @@ def is_low_quality_ai_first_reply(reply_text: str | None) -> bool:
         "neye ihtiyacınız olduğunu yazarsanız",
         "dogrudan cevap vereyim",
         "doğrudan cevap vereyim",
+        "hangi konuda bilgi",
         "hizmetimizle ilgili bilgi almak ister misiniz",
         "daha fazla bilgi almak ister misiniz",
         "bir sonraki adimimiz ne olacak",

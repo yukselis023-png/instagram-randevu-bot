@@ -2495,6 +2495,29 @@ def test_ai_first_generic_information_request_gets_service_overview_not_fallback
     assert "neye ihtiyaciniz" not in reply
 
 
+def test_ai_first_generic_information_request_replaces_which_topic_question(monkeypatch):
+    conversation = {"service": None, "state": "new", "booking_kind": None, "memory_state": {}}
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text="Merhabalar, DOEL Digital olarak size nasıl yardımcı olabiliriz? Hangi konuda bilgi edinmek istiyorsunuz?",
+            intent="info",
+            booking_intent=False,
+            missing_fields=[],
+        ),
+    )
+
+    decision = main.build_ai_first_decision("Bilgi edinmek icin yaziyorum", conversation, [], {})
+
+    reply = main.sanitize_text(decision["reply_text"]).lower()
+    assert decision["should_reply"] is True
+    assert decision["intent"] in {"service_overview", "detailed_service_overview"}
+    assert "web" in reply
+    assert "otomasyon" in reply
+    assert "hangi konuda bilgi" not in reply
+
+
 def test_ai_first_service_info_then_positive_continue_starts_consultation(monkeypatch):
     conversation = {
         "service": "Otomasyon & Yapay Zeka Cozumleri",
