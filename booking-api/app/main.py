@@ -8903,6 +8903,10 @@ def is_low_quality_ai_first_reply(reply_text: str | None) -> bool:
         "neye ihtiyacınız olduğunu yazarsanız",
         "dogrudan cevap vereyim",
         "doğrudan cevap vereyim",
+        "sorunuzu dogrudan cevaplayayim",
+        "sorunuzu doğrudan cevaplayayım",
+        "bildigim kismi net aktaririm",
+        "bildiğim kısmı net aktarırım",
         "hangi konuda bilgi",
         "hizmetimizle ilgili bilgi almak ister misiniz",
         "daha fazla bilgi almak ister misiniz",
@@ -9244,6 +9248,8 @@ def build_ai_first_emergency_reply(message_text: str, conversation: dict[str, An
             delivery = str((meta or {}).get("delivery_time") or "kapsama göre netleşir")
             return f"{service} için tahmini teslim süresi {delivery}. Kapsam büyüdükçe süre değişebilir."
         return "Teslim süresi hizmetin kapsamına göre değişir. Hangi hizmet için süre öğrenmek istediğinizi yazarsanız net cevap vereyim."
+    if is_service_choice_help_request(message_text):
+        return "En doğru öneri için önce hedefi netleştirelim: daha çok müşteri kazanmak mı, DM yoğunluğunu azaltmak mı, yoksa güven veren bir web sitesi kurmak mı istiyorsunuz?"
     if "?" in lowered:
         return build_generic_ai_draft_reply(message_text, conversation, [])
     service = display_service_name(conversation.get("service"))

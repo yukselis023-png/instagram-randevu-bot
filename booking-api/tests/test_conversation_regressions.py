@@ -2746,6 +2746,29 @@ def test_ai_first_service_benefit_question_has_useful_emergency_when_repair_fail
     assert "mesaj" in reply or "randevu" in reply or "musteri" in reply
 
 
+def test_ai_first_service_choice_help_has_useful_emergency_when_repair_fails(monkeypatch):
+    conversation = {"service": None, "state": "new", "booking_kind": None, "memory_state": {}}
+    responses = iter(
+        [
+            _ai_json(
+                reply_text="Sorunuzu doğrudan cevaplayayım; bildiğim kısmı net aktarırım, emin olmadığım yerde de uydurmadan belirtirim.",
+                intent="fallback_reply",
+                booking_intent=False,
+                missing_fields=[],
+            ),
+            "",
+        ]
+    )
+    monkeypatch.setattr(main, "call_llm_content", lambda *args, **kwargs: next(responses))
+
+    decision = main.build_ai_first_decision("Bana hangisi lazim bilmiyorum yardimci olur musunuz?", conversation, [], {})
+
+    reply = main.sanitize_text(decision["reply_text"]).lower()
+    assert "sorunuzu dogrudan" not in reply
+    assert "hangi hizmete ihtiyaciniz" not in reply
+    assert "hedef" in reply or "dm" in reply or "web" in reply or "musteri" in reply
+
+
 def test_ai_first_never_returns_generic_fallback_when_ai_repair_fails(monkeypatch):
     conversation = {
         "service": "Otomasyon & Yapay Zeka Cozumleri",
