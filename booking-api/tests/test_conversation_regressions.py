@@ -2692,7 +2692,7 @@ def test_ai_first_reasks_ai_for_service_advice_when_reply_is_not_consultative(mo
     responses = iter(
         [
             _ai_json(
-                reply_text="Hizmetlerimizden birini seçebilirsiniz.",
+                reply_text="Hangi hizmete ihtiyacınız olduğunu yazarsanız fiyat, kapsam ve teslim süresini anlatacağım.",
                 intent="info",
                 booking_intent=False,
                 missing_fields=[],
@@ -2720,7 +2720,30 @@ def test_ai_first_reasks_ai_for_service_advice_when_reply_is_not_consultative(mo
     assert decision["intent"] == "service_advice"
     assert decision["ai_repair_used"] is True
     assert "dm" in reply or "web" in reply or "musteri" in reply
-    assert "birini secebilirsiniz" not in reply
+    assert "hangi hizmete ihtiyaciniz" not in reply
+
+
+def test_ai_first_service_benefit_question_has_useful_emergency_when_repair_fails(monkeypatch):
+    conversation = {"service": None, "state": "new", "booking_kind": None, "memory_state": {}}
+    responses = iter(
+        [
+            _ai_json(
+                reply_text="Anladım. Size yardımcı olabilmem için mesajınızı dikkate alıyorum; neye ihtiyacınız olduğunu yazarsanız doğrudan cevap vereyim.",
+                intent="fallback_reply",
+                booking_intent=False,
+                missing_fields=[],
+            ),
+            "",
+        ]
+    )
+    monkeypatch.setattr(main, "call_llm_content", lambda *args, **kwargs: next(responses))
+
+    decision = main.build_ai_first_decision("Otomasyon ne isime yarayacak", conversation, [], {})
+
+    reply = main.sanitize_text(decision["reply_text"]).lower()
+    assert "mesajinizi dikkate" not in reply
+    assert "otomasyon" in reply
+    assert "mesaj" in reply or "randevu" in reply or "musteri" in reply
 
 
 def test_ai_first_never_returns_generic_fallback_when_ai_repair_fails(monkeypatch):

@@ -8934,6 +8934,8 @@ def reply_mentions_service_context(reply_text: str | None) -> bool:
 
 def reply_is_consultative_service_advice(reply_text: str | None) -> bool:
     lowered = sanitize_text(reply_text or "").lower()
+    if any(cue in lowered for cue in ["hangi hizmete ihtiyaciniz", "hangi hizmete ihtiyac", "birini sec", "birini seç", "hizmetlerimizden birini"]):
+        return False
     consultative_cues = [
         "ihtiyac",
         "ihtiyaç",
@@ -9224,6 +9226,8 @@ def build_ai_first_emergency_reply(message_text: str, conversation: dict[str, An
     direct_service = pick_service(message_text, conversation.get("service"))
     direct_service_meta = match_service_catalog(direct_service, direct_service) if direct_service else None
     if direct_service_meta and is_service_information_request(message_text, direct_service_meta):
+        return build_ai_first_service_information_reply(direct_service_meta, conversation)
+    if direct_service_meta:
         return build_ai_first_service_information_reply(direct_service_meta, conversation)
     if is_general_information_request(message_text):
         return build_services_overview_reply()
