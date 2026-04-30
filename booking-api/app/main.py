@@ -3906,6 +3906,32 @@ def is_positive_more_details_acceptance(text: str) -> bool:
     }
 
 
+def is_next_step_prompt(text: str) -> bool:
+    lowered = sanitize_text(text).lower()
+    normalized = re.sub(r"\s+", " ", lowered).strip()
+    normalized = re.sub(r"[.!?â€¦,:;]+$", "", normalized).strip()
+    return normalized in {
+        "eee",
+        "ee",
+        "e",
+        "sonra",
+        "sonrasi",
+        "sonrası",
+        "simdi",
+        "şimdi",
+        "devam",
+        "devam edelim",
+        "nasil ilerleyecegiz",
+        "nasıl ilerleyeceğiz",
+        "ne yapalim",
+        "ne yapalım",
+        "siradaki adim ne",
+        "sıradaki adım ne",
+        "sonraki adim ne",
+        "sonraki adım ne",
+    }
+
+
 def build_more_details_acceptance_reply(conversation: dict[str, Any]) -> str:
     service = display_service_name(conversation.get("service"))
     if service and "Otomasyon" not in service:
@@ -3916,7 +3942,7 @@ def build_more_details_acceptance_reply(conversation: dict[str, Any]) -> str:
     return (
         "Tabii. Otomasyon sistemi gelen DM'leri karşılar, sık soruları yanıtlar, uygun talepleri randevu veya CRM kaydına çevirir "
         "ve panelde takip edilebilir hale getirir. Standart kurulum 3-7 iş günü sürer; özel entegrasyon varsa 1-3 haftaya çıkabilir. "
-        "İsterseniz işletmenizdeki DM akışını yazın, hangi parçaların otomatikleşeceğini net söyleyeyim."
+        "Uygun görürseniz kısa bir ön görüşmede sizin DM akışınıza göre hangi parçaların otomatikleşeceğini netleştirebiliriz."
     )
 
 
@@ -8713,6 +8739,8 @@ def should_suppress_ai_booking_collection(
 ) -> bool:
     if not llm_bool(decision.get("booking_intent")):
         return False
+    if sanitize_text(str(decision.get("intent") or "")).lower() == "service_consultation_acceptance":
+        return False
     if message_shows_booking_intent(message_text, llm_data or {}):
         return False
     state = sanitize_text(conversation.get("state") or "")
@@ -8854,6 +8882,18 @@ def apply_ai_first_quality_overrides(
         decision["intent"] = "service_consultation_acceptance"
         decision["booking_intent"] = True
         decision["extracted_service"] = service_display
+        decision["missing_fields"] = ["name"]
+        return decision
+    if recent_outbound_offered_consultation(history) and is_next_step_prompt(message_text):
+        inferred_service = infer_recent_service_for_consultation(history, conversation)
+        context = {**conversation}
+        if inferred_service:
+            context["service"] = inferred_service
+        decision["reply_text"] = build_service_consultation_acceptance_reply(context)
+        decision["intent"] = "service_consultation_acceptance"
+        decision["booking_intent"] = True
+        if inferred_service:
+            decision["extracted_service"] = inferred_service
         decision["missing_fields"] = ["name"]
         return decision
     if recent_outbound_can_start_service_consultation(history, conversation) and is_positive_more_details_acceptance(message_text):

@@ -609,6 +609,61 @@ def test_ai_first_yes_after_automation_interest_question_does_not_start_booking(
     assert "3-7 iş günü" in reply
 
 
+def test_automation_more_details_reply_moves_toward_consultation_without_collecting_name():
+    conversation = {
+        "service": "Otomasyon & Yapay Zeka Cozumleri",
+        "state": "new",
+        "booking_kind": None,
+        "memory_state": {},
+    }
+
+    reply = main.build_more_details_acceptance_reply(conversation).lower()
+
+    assert "dm" in reply
+    assert "randevu" in reply
+    assert "3-7 i" in reply
+    assert "ön görüşme" in reply or "on gorusme" in reply
+    assert "ad" not in reply and "soyad" not in reply
+
+
+def test_ai_first_next_step_prompt_after_automation_details_starts_consultation(monkeypatch):
+    conversation = {
+        "service": "Otomasyon & Yapay Zeka Cozumleri",
+        "state": "new",
+        "booking_kind": None,
+        "memory_state": {},
+    }
+    history = [
+        {
+            "direction": "out",
+            "message_text": (
+                "Tabii. Otomasyon sistemi gelen DM'leri karşılar, sık soruları yanıtlar, uygun talepleri randevu veya CRM kaydına çevirir "
+                "ve panelde takip edilebilir hale getirir. Standart kurulum 3-7 iş günü sürer. İsterseniz kısa bir ön görüşmede size özel akışı netleştirebiliriz."
+            ),
+        }
+    ]
+
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text="Otomasyon & Yapay Zeka Çözümlerimizin detaylarına dair sorularınız varsa cevaplayabilirim. Hizmetimizle ilgili bilgi almak ister misiniz?",
+            intent="info",
+            booking_intent=False,
+            missing_fields=[],
+        ),
+    )
+
+    decision = main.build_ai_first_decision("eee?", conversation, history, {})
+
+    reply = decision["reply_text"].lower()
+    assert decision["booking_intent"] is True
+    assert "name" in decision["missing_fields"] or "full_name" in decision["missing_fields"]
+    assert "ön görüşme" in reply or "on gorusme" in reply
+    assert "ad" in reply and "soyad" in reply
+    assert "bilgi almak ister misiniz" not in reply
+
+
 def test_ai_first_yes_after_automation_price_reply_does_not_use_empty_next_step(monkeypatch):
     conversation = {
         "service": "Otomasyon & Yapay Zeka Cozumleri",
