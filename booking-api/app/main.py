@@ -8091,7 +8091,7 @@ def build_short_service_interest_reply(service_meta: dict[str, Any]) -> str:
     price = str(service_meta.get("price") or "").strip()
     delivery = str(service_meta.get("delivery_time") or "").strip()
     if slug == "otomasyon-ai":
-        suffix = f" Standart kurulum {delivery}; fiyat {price}." if price and delivery else ""
+        suffix = f" Teslim süresi {delivery}; fiyat {price}." if price and delivery else ""
         return f"Otomasyon tarafında DM yanıtları, randevu toplama ve müşteri takibini CRM'e bağlayan sistem kuruyoruz.{suffix}"
     if slug == "web-tasarim":
         suffix = f" Teslim süresi {delivery}; fiyat {price}." if price and delivery else ""
