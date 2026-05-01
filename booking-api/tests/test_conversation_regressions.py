@@ -2441,6 +2441,14 @@ def test_time_extraction_handles_bare_hour_with_date_cue():
     assert main.extract_time_for_state("01.05.2026 12", "collect_time") == "12:00"
 
 
+def test_noon_three_phrases_are_interpreted_as_afternoon_three():
+    assert main.extract_date("Pazar günü öğlen 3") == "2026-05-03"
+    assert main.extract_time_for_state("Pazar günü öğlen 3", "collect_date") == "15:00"
+    assert main.extract_time_for_state("Pazar günü öğlen 3", "collect_period") == "15:00"
+    assert main.extract_time_for_state("Tamam öğlen 3", "collect_time") == "15:00"
+    assert main.extract_preferred_period("Pazar günü öğlen 3") == "afternoon"
+
+
 def test_ai_first_booking_progress_override_handles_date_and_time_when_ai_says_false():
     message = "Yarın 12.00?"
     conversation = {

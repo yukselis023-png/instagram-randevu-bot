@@ -5903,7 +5903,24 @@ def is_invalid_phone_attempt(text: str, state: str | None = None) -> bool:
     return len(digits) >= 7
 
 
+def extract_noon_hour_time(text: str) -> str | None:
+    lowered = sanitize_text(text).lower()
+    match = re.search(
+        r"\b(?:öğlen|oglen|öğleden sonra|ogleden sonra|öğleden|ogleden)\s*(?:saat\s*)?([1-9]|1[0-2])\b",
+        lowered,
+    )
+    if not match:
+        return None
+    hour = int(match.group(1))
+    if 1 <= hour <= 7:
+        hour += 12
+    return f"{hour:02d}:00"
+
+
 def extract_time(text: str) -> str | None:
+    noon_time = extract_noon_hour_time(text)
+    if noon_time:
+        return noon_time
     for match in TIME_PATTERN.finditer(text):
         raw = match.group(0)
         context_before = text[max(0, match.start() - 12):match.start()].lower()
@@ -8015,6 +8032,17 @@ def is_business_fit_question(message_text: str) -> bool:
     lowered = sanitize_text(message_text).lower()
     if "?" not in lowered:
         return False
+    direct_fit_phrases = [
+        "işime yarar",
+        "isime yarar",
+        "bana yarar",
+        "fayda sağlar",
+        "fayda saglar",
+        "yarar mı",
+        "yarar mi",
+    ]
+    if any(phrase in lowered for phrase in direct_fit_phrases):
+        return not bool(extract_date(lowered) or extract_time_for_state(lowered, "collect_service"))
     fit_words = ["uygun", "uyar", "olur mu", "mantıklı", "mantikli"]
     business_words = ["ajans", "firma", "şirket", "sirket", "işletme", "isletme", "marka", "sektör", "sektor", "bizim", "bize"]
     if not any(word in lowered for word in fit_words):
@@ -8022,6 +8050,54 @@ def is_business_fit_question(message_text: str) -> bool:
     if not any(word in lowered for word in business_words):
         return False
     return not bool(extract_date(lowered) or extract_time_for_state(lowered, "collect_service"))
+
+
+def is_real_estate_off_topic_question(message_text: str) -> bool:
+    lowered = sanitize_text(message_text).lower()
+    if "?" not in lowered:
+        return False
+    real_estate_terms = ["ev", "emlak", "daire", "konut", "arsa"]
+    sale_terms = ["satıyor", "satiyor", "satıyor musunuz", "satiyor musunuz", "satış", "satis"]
+    return any(term in lowered for term in real_estate_terms) and any(term in lowered for term in sale_terms)
+
+
+def build_real_estate_off_topic_reply() -> str:
+    return "Hayır, ev veya emlak satmıyoruz. DOEL Digital olarak dijital hizmetler tarafında destek veriyoruz."
+
+
+def build_business_fit_reply(conversation: dict[str, Any]) -> str:
+    service = display_service_name(conversation.get("service"))
+    service_meta = match_service_catalog(service, service) if service else None
+    slug = str((service_meta or {}).get("slug") or "")
+    if slug == "otomasyon-ai":
+        return "Evet, özellikle DM, randevu veya müşteri takibi tekrara düşüyorsa yarar sağlar. En çok hangi kısmı otomatikleştirmek istiyorsunuz?"
+    if slug == "web-tasarim":
+        return "Evet, dijitalde güven vermek ve görünür olmak istiyorsanız web sitesi yarar sağlar. Sektörünüzü yazarsanız size uygun yapıyı net söyleyeyim."
+    return "Yarar sağlayıp sağlamayacağını net söylemek için işinizi ve hedefinizi bilmem gerekir. En çok hangi süreci geliştirmek istiyorsunuz?"
+
+
+def is_completed_booking_closeout_message(message_text: str, conversation: dict[str, Any]) -> bool:
+    if sanitize_text(conversation.get("state") or "") != "completed":
+        return False
+    if sanitize_text(conversation.get("appointment_status") or "") != "confirmed":
+        return False
+    if confirmed_booking_should_take_over_message(message_text, conversation):
+        return False
+    lowered = sanitize_text(message_text).lower()
+    closeout_terms = [
+        "teşekkür",
+        "tesekkur",
+        "sağ ol",
+        "sag ol",
+        "sağol",
+        "sagol",
+        "eyvallah",
+        "tamam",
+        "tamamdır",
+        "tamamdir",
+        "peki",
+    ]
+    return any(term in lowered for term in closeout_terms)
 
 
 def build_generic_ai_draft_reply(message_text: str, conversation: dict[str, Any], history: list[dict[str, Any]] | None = None) -> str:
@@ -9604,6 +9680,9 @@ def reply_answers_assistant_identity(reply_text: str | None) -> bool:
     lowered = sanitize_text(reply_text or "").lower()
     if not lowered or reply_is_confirmed_booking_takeover(lowered):
         return False
+    denial_cues = ["hayır", "hayir", "değilim", "degilim", "değil", "degil", "otomatik yanıt sistemi", "otomatik yanit sistemi"]
+    if any(cue in lowered for cue in denial_cues):
+        return False
     return any(cue in lowered for cue in ["yapay zeka", "asistan", "bot"])
 
 
@@ -9789,6 +9868,13 @@ def apply_ai_first_quality_overrides(
     direct_service_meta = match_service_catalog(direct_service, direct_service) if direct_service else None
     known_service_name = conversation.get("service") or decision.get("extracted_service") or direct_service
     known_service_meta = match_service_catalog(known_service_name, known_service_name) if known_service_name else None
+    if is_completed_booking_closeout_message(message_text, conversation):
+        decision["reply_text"] = "Rica ederiz, görüşme saatinde bekliyoruz."
+        decision["intent"] = "closing"
+        decision["booking_intent"] = False
+        decision["missing_fields"] = []
+        decision["should_reply"] = True
+        return decision
     if ("aleykum" in lowered or "aleyküm" in lowered) and len(sanitize_text(message_text).split()) <= 4:
         decision["reply_text"] = "Aleyküm selam, hoş geldiniz. Size nasıl yardımcı olabilirim?"
         decision["intent"] = "greeting"
@@ -9816,6 +9902,29 @@ def apply_ai_first_quality_overrides(
     if is_smalltalk_message(message_text):
         decision["reply_text"] = build_natural_smalltalk_reply()
         decision["intent"] = "smalltalk"
+        decision["booking_intent"] = False
+        decision["missing_fields"] = []
+        decision["should_reply"] = True
+        return decision
+    if is_real_estate_off_topic_question(message_text):
+        decision["reply_text"] = build_real_estate_off_topic_reply()
+        decision["intent"] = "off_topic"
+        decision["booking_intent"] = False
+        decision["missing_fields"] = []
+        decision["should_reply"] = True
+        return decision
+    if is_business_fit_question(message_text):
+        quality_reply = sanitize_text(decision.get("reply_text")).lower()
+        if (
+            is_low_quality_ai_first_reply(decision.get("reply_text"))
+            or "detaylı bir şekilde görüşmek isteriz" in quality_reply
+            or "detayli bir sekilde gorusmek isteriz" in quality_reply
+            or "size özel bir teklif hazırlarız" in quality_reply
+            or "size ozel bir teklif hazirlariz" in quality_reply
+            or len(sanitize_text(decision.get("reply_text")).split()) > 55
+        ):
+            decision["reply_text"] = build_business_fit_reply(conversation)
+        decision["intent"] = "business_fit"
         decision["booking_intent"] = False
         decision["missing_fields"] = []
         decision["should_reply"] = True

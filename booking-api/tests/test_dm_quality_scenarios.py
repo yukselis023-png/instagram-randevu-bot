@@ -429,3 +429,150 @@ def test_soft_cta_not_used_for_question(monkeypatch):
 
     assert decision["intent"] != "soft_cta"
     assert "10 dakikalik" not in main.sanitize_text(decision["reply_text"]).lower()
+
+
+def test_service_overview_question_is_not_locked_to_previous_service(monkeypatch):
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text=(
+                "Otomasyon & Yapay Zeka Çözümleri müşteri mesajlarına 7/24 yanıt, "
+                "randevu ve CRM takibi içerir. Hizmet hakkında daha fazla bilgi almak ister misiniz?"
+            ),
+            intent="service_info",
+            extracted_service="Otomasyon & Yapay Zeka Çözümleri",
+            booking_intent=False,
+        ),
+    )
+    conversation = {
+        "service": "Otomasyon & Yapay Zeka Çözümleri",
+        "state": "collect_service",
+        "memory_state": {},
+    }
+
+    decision = main.build_ai_first_decision("Hangi hizmetleriniz var", conversation, [], {})
+
+    reply = main.sanitize_text(decision["reply_text"]).lower()
+    assert "web" in reply
+    assert "otomasyon" in reply
+    assert "reklam" in reply
+    assert "sosyal medya" in reply
+    assert "daha fazla bilgi almak ister misiniz" not in reply
+
+
+def test_unrelated_question_gets_direct_answer_without_previous_service_pitch(monkeypatch):
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text=(
+                "Hayır, emlak hizmeti sunmuyoruz. Daha önce Otomasyon & Yapay Zeka "
+                "Çözümleri hakkında konuştuğumuz vardı. İlgileniyorsanız detayları görüşebiliriz."
+            ),
+            intent="off_topic",
+            booking_intent=False,
+        ),
+    )
+    conversation = {
+        "service": "Otomasyon & Yapay Zeka Çözümleri",
+        "state": "collect_service",
+        "memory_state": {},
+    }
+
+    decision = main.build_ai_first_decision("Ev satıyor musunuz?", conversation, [], {})
+
+    reply = main.sanitize_text(decision["reply_text"]).lower()
+    assert "hayir" in reply or "hayır" in reply
+    assert "emlak" in reply or "ev" in reply
+    assert "sunmuyoruz" in reply or "satmiyoruz" in reply or "satmıyoruz" in reply
+    assert "otomasyon" not in reply
+    assert "detaylari gorusebiliriz" not in reply
+
+
+def test_assistant_identity_answer_is_truthful_not_denial(monkeypatch):
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text="Hayır, ben bir yapay zeka değilim; DOEL Digital'in otomatik yanıt sistemiyim.",
+            intent="assistant_identity",
+            booking_intent=False,
+        ),
+    )
+    conversation = {
+        "service": "Otomasyon & Yapay Zeka Çözümleri",
+        "state": "collect_service",
+        "memory_state": {},
+    }
+
+    decision = main.build_ai_first_decision("Sen yapay zeka mısın", conversation, [], {})
+
+    reply = main.sanitize_text(decision["reply_text"]).lower()
+    assert "yapay zeka" in reply
+    assert "asistan" in reply
+    assert "ekibe" in reply or "doel" in reply
+    assert "hayir" not in reply and "hayır" not in reply
+    assert "degilim" not in reply and "değilim" not in reply
+
+
+def test_business_fit_question_does_not_become_brochure_dump(monkeypatch):
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text=(
+                "Otomasyon & Yapay Zeka Çözümleri'mizin sizin için yararlı olacağını düşünüyoruz çünkü "
+                "müşteri mesajlarına 7/24 yanıt, randevuları otomatik ayarlama, teklif ve fatura otomasyonu "
+                "gibi özellikler içerir. Avantajlarını sizinle detaylı bir şekilde görüşmek isteriz. "
+                "İlgileniyorsanız, size özel bir teklif hazırlarız."
+            ),
+            intent="service_info",
+            extracted_service="Otomasyon & Yapay Zeka Çözümleri",
+            booking_intent=False,
+        ),
+    )
+    conversation = {
+        "service": "Otomasyon & Yapay Zeka Çözümleri",
+        "state": "collect_service",
+        "memory_state": {},
+    }
+
+    decision = main.build_ai_first_decision("İşime yarar mı?", conversation, [], {})
+
+    reply = main.sanitize_text(decision["reply_text"]).lower()
+    assert "yarar" in reply or "uygun" in reply or "isletme" in reply or "işletme" in reply
+    assert "detayli bir sekilde gorusmek isteriz" not in reply
+    assert "size ozel bir teklif hazirlariz" not in reply
+    assert len(decision["reply_text"].split()) <= 45
+
+
+def test_completed_booking_thanks_does_not_repeat_appointment_summary(monkeypatch):
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text=(
+                "Sistemimizde onaylı ön görüşme kaydınız 03.05.2026 saat 15:00 olarak görünüyor. "
+                "Değişiklik veya iptal ihtiyacınız olursa sizi yetkili ekibimize yönlendirebilirim."
+            ),
+            intent="confirmed_followup",
+            booking_intent=False,
+        ),
+    )
+    conversation = {
+        "service": "Otomasyon & Yapay Zeka Çözümleri",
+        "state": "completed",
+        "appointment_status": "confirmed",
+        "requested_date": "2026-05-03",
+        "requested_time": "15:00",
+        "memory_state": {},
+    }
+
+    decision = main.build_ai_first_decision("Teşekkür ederim", conversation, [], {})
+
+    reply = main.sanitize_text(decision["reply_text"]).lower()
+    assert "rica" in reply or "gorusmede" in reply or "görüşmede" in reply
+    assert "sistemimizde" not in reply
+    assert "03.05.2026" not in reply
+    assert "15:00" not in reply
