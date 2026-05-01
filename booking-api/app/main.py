@@ -4081,6 +4081,14 @@ def build_service_consultation_acceptance_reply(conversation: dict[str, Any]) ->
     )
 
 
+def build_natural_greeting_reply() -> str:
+    return "Merhaba, hoş geldiniz. Size nasıl yardımcı olabiliriz?"
+
+
+def build_natural_smalltalk_reply() -> str:
+    return "İyiyim, teşekkür ederim. Size nasıl yardımcı olabiliriz?"
+
+
 ACTIVE_BOOKING_STATES = {"collect_name", "collect_phone", "collect_date", "collect_period", "collect_time", "human_handoff"}
 SOFT_CTA_SOURCE_TYPES = {"service_info", "pricing_info", "delivery_info", "question_answer"}
 
@@ -9781,6 +9789,37 @@ def apply_ai_first_quality_overrides(
     direct_service_meta = match_service_catalog(direct_service, direct_service) if direct_service else None
     known_service_name = conversation.get("service") or decision.get("extracted_service") or direct_service
     known_service_meta = match_service_catalog(known_service_name, known_service_name) if known_service_name else None
+    if ("aleykum" in lowered or "aleyküm" in lowered) and len(sanitize_text(message_text).split()) <= 4:
+        decision["reply_text"] = "Aleyküm selam, hoş geldiniz. Size nasıl yardımcı olabilirim?"
+        decision["intent"] = "greeting"
+        decision["booking_intent"] = False
+        decision["missing_fields"] = []
+        decision["should_reply"] = True
+        return decision
+    if is_good_wishes_message(message_text) and len(sanitize_text(message_text).split()) <= 4:
+        if is_simple_greeting(message_text) and "kolay" not in lowered:
+            decision["reply_text"] = build_natural_greeting_reply()
+        else:
+            decision["reply_text"] = build_good_wishes_reply()
+        decision["intent"] = "greeting"
+        decision["booking_intent"] = False
+        decision["missing_fields"] = []
+        decision["should_reply"] = True
+        return decision
+    if is_simple_greeting(message_text):
+        decision["reply_text"] = build_natural_greeting_reply()
+        decision["intent"] = "greeting"
+        decision["booking_intent"] = False
+        decision["missing_fields"] = []
+        decision["should_reply"] = True
+        return decision
+    if is_smalltalk_message(message_text):
+        decision["reply_text"] = build_natural_smalltalk_reply()
+        decision["intent"] = "smalltalk"
+        decision["booking_intent"] = False
+        decision["missing_fields"] = []
+        decision["should_reply"] = True
+        return decision
     if (
         known_service_meta
         and message_shows_booking_intent(message_text, {})

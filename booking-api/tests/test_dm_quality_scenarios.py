@@ -170,6 +170,28 @@ def test_dm_quality_detects_repeated_replies():
     )
 
 
+def test_greeting_and_smalltalk_are_natural_even_if_ai_is_bad(monkeypatch):
+    responses = iter(
+        [
+            _ai_json(reply_text="Merahaba! DOEL Digital olarak size yardımcı olmanın mutluluğunu duyuyoruz.", intent="greeting"),
+            _ai_json(reply_text="İyi misiniz?", intent="smalltalk"),
+        ]
+    )
+    monkeypatch.setattr(main, "call_llm_content", lambda *args, **kwargs: next(responses))
+
+    greeting = main.build_ai_first_decision("Merhaba", {"state": "new", "memory_state": {}}, [], {})
+    smalltalk = main.build_ai_first_decision("Nasılsınız", {"state": "new", "memory_state": {}}, [], {})
+
+    assert "merahaba" not in main.sanitize_text(greeting["reply_text"]).lower()
+    assert "memnuniyet" not in main.sanitize_text(greeting["reply_text"]).lower()
+    assert "nasıl yardımcı" in greeting["reply_text"].lower()
+    assert "iyi misiniz" not in smalltalk["reply_text"].lower()
+    assert any(
+        cue in smalltalk["reply_text"].lower()
+        for cue in ["iyiyim", "teşekkür", "yardımcı"]
+    )
+
+
 def test_soft_cta_after_service_info_closeout(monkeypatch):
     monkeypatch.setattr(
         main,
