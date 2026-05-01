@@ -2513,6 +2513,30 @@ def test_ai_first_nonbooking_question_keeps_resumeable_booking_state():
     assert conversation["memory_state"]["open_loop"] == "collect_phone"
 
 
+def test_active_booking_states_preserve_state_when_user_asks_question():
+    for state in ["collect_name", "collect_phone", "collect_date", "collect_period", "collect_time"]:
+        conversation = {
+            "service": "Otomasyon & Yapay Zeka Cozumleri",
+            "full_name": "Berkay Elbir" if state != "collect_name" else None,
+            "phone": "+905539088633" if state not in {"collect_name", "collect_phone"} else None,
+            "state": state,
+            "booking_kind": "preconsultation",
+            "memory_state": {},
+        }
+        decision = {
+            "reply_text": "Önce sorunuza cevap vereyim; görüşmeyi Instagram DM üzerinden de sürdürebiliriz.",
+            "intent": "clarification",
+            "should_reply": True,
+            "booking_intent": False,
+            "missing_fields": [],
+        }
+
+        main.apply_ai_first_decision_to_conversation(conversation, decision, "Telefonla mı görüşeceğiz?")
+
+        assert conversation["state"] == state
+        assert conversation["memory_state"]["open_loop"] == state
+
+
 def test_collect_phone_hesitation_overrides_weak_ai_reply():
     assert main.is_phone_collection_hesitation("sart mi?")
     assert main.is_phone_collection_hesitation(chr(351) + "art m" + chr(305) + "?")
@@ -2543,6 +2567,40 @@ def test_collect_phone_hesitation_overrides_weak_ai_reply():
     assert decision["intent"] == "phone_reason"
     assert decision["booking_intent"] is False
     assert "Telefonu sadece" in decision["reply_text"]
+
+
+def test_collect_phone_invalid_number_does_not_fall_back_to_service_pitch():
+    conversation = {
+        "service": "Otomasyon & Yapay Zeka Cozumleri",
+        "full_name": "Berkay Fidan",
+        "state": "collect_phone",
+        "booking_kind": "preconsultation",
+        "memory_state": {"open_loop": "collect_phone"},
+    }
+    decision = {
+        "reply_text": "Otomasyon & Yapay Zeka Çözümleri tarafında DM, randevu ve müşteri takibini tek akışta toparlayabiliriz.",
+        "intent": "service_info",
+        "should_reply": True,
+        "booking_intent": False,
+        "missing_fields": [],
+    }
+
+    changed = main.override_ai_first_collect_phone_question(
+        decision,
+        conversation,
+        "055555555",
+        state_before_update="collect_phone",
+        detected_phone=None,
+    )
+
+    assert changed is True
+    assert decision["intent"] == "invalid_phone"
+    assert decision["should_reply"] is True
+    assert decision["booking_intent"] is True
+    reply = decision["reply_text"].lower()
+    assert "numara" in reply or "telefon" in reply
+    assert "eksik" in reply or "tam" in reply
+    assert "tek akışta toparlayabiliriz" not in reply
 
 
 def test_reply_guarantee_returns_emergency_text_for_empty_ai_reply():

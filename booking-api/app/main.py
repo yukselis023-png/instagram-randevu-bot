@@ -74,6 +74,7 @@ FULL_AI_CONVERSATIONAL_MODE = True
 REPLY_ENGINE = "ai_first_v5"
 AI_FIRST_ENABLED = True
 REPLY_GUARANTEE_ENABLED = True
+SAFE_USER_FALLBACK_REPLY = "Mesajınızı aldık, kontrol edip size en kısa sürede dönüş yapacağız."
 CRM_SYNC_ENABLED = os.getenv("CRM_SYNC_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
 CRM_SUPABASE_URL = os.getenv("CRM_SUPABASE_URL", "").rstrip("/")
 CRM_SUPABASE_ANON_KEY = os.getenv("CRM_SUPABASE_ANON_KEY", "")
@@ -261,6 +262,32 @@ CREATE TABLE IF NOT EXISTS message_logs (
 CREATE INDEX IF NOT EXISTS idx_message_logs_inbound_message_id
     ON message_logs (instagram_user_id, (raw_payload->>'message_id'))
     WHERE direction = 'in' AND raw_payload ? 'message_id';
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_message_logs_inbound_dedupe_key
+    ON message_logs ((raw_payload->>'dedupe_key'))
+    WHERE direction = 'in' AND raw_payload ? 'dedupe_key';
+
+CREATE TABLE IF NOT EXISTS crm_sync_outbox (
+    id BIGSERIAL PRIMARY KEY,
+    dedupe_key TEXT UNIQUE,
+    entity_type TEXT NOT NULL,
+    entity_id TEXT,
+    instagram_user_id TEXT,
+    appointment_id BIGINT,
+    payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+    status TEXT NOT NULL DEFAULT 'pending',
+    attempt_count INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_crm_sync_outbox_status_due
+    ON crm_sync_outbox(status, next_attempt_at);
+
+CREATE INDEX IF NOT EXISTS idx_crm_sync_outbox_instagram_user_id
+    ON crm_sync_outbox(instagram_user_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS appointment_reminders (
     id BIGSERIAL PRIMARY KEY,
@@ -1172,8 +1199,13 @@ def record_voice_fallback(payload: VoiceFallbackEvent, background_tasks: Backgro
     fallback_reply = sanitize_text(payload.fallback_reply or "")
     raw_event_for_log = dict(payload.raw_event or {})
     inbound_message_id = extract_inbound_message_id(raw_event_for_log)
+    inbound_platform = extract_inbound_platform(raw_event_for_log)
+    inbound_dedupe_key = build_inbound_dedupe_key(inbound_platform, payload.sender_id, inbound_message_id)
     if inbound_message_id and not raw_event_for_log.get("message_id"):
         raw_event_for_log["message_id"] = inbound_message_id
+    raw_event_for_log["platform"] = inbound_platform
+    if inbound_dedupe_key:
+        raw_event_for_log["dedupe_key"] = inbound_dedupe_key
     raw_event_for_log["type"] = "voice_fallback_inbound"
     if payload.transcription_error:
         raw_event_for_log["transcription_error"] = sanitize_text(payload.transcription_error)[:500]
@@ -1187,8 +1219,8 @@ def record_voice_fallback(payload: VoiceFallbackEvent, background_tasks: Backgro
         ensure_conversation_memory(conversation)
         sync_conversation_memory_summary(conversation)
 
-        duplicate_inbound = has_processed_inbound_message(conn, payload.sender_id, inbound_message_id)
-        duplicate_outbound = has_outbound_after_inbound(conn, payload.sender_id, inbound_message_id)
+        duplicate_inbound = has_processed_inbound_message(conn, inbound_platform, payload.sender_id, inbound_message_id)
+        duplicate_outbound = has_outbound_after_inbound(conn, inbound_platform, payload.sender_id, inbound_message_id)
         if duplicate_inbound and duplicate_outbound:
             return VoiceFallbackResponse(
                 ok=True,
@@ -2250,12 +2282,19 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
         )
 
     inbound_message_id = extract_inbound_message_id(payload.raw_event)
+    inbound_platform = extract_inbound_platform(payload.raw_event)
+    inbound_dedupe_key = build_inbound_dedupe_key(inbound_platform, payload.sender_id, inbound_message_id)
+    metrics["inbound_platform"] = inbound_platform
+    metrics["inbound_dedupe_key"] = inbound_dedupe_key
     raw_event_for_log = dict(payload.raw_event or {})
     if trace_id and not raw_event_for_log.get("trace_id"):
         raw_event_for_log["trace_id"] = trace_id
-    logger.info("api_inbound_dm trace_id=%s sender_id=%s message_id=%s text=%s", trace_id, payload.sender_id, inbound_message_id, message_text[:160])
+    logger.info("api_inbound_dm trace_id=%s sender_id=%s platform=%s message_id=%s text=%s", trace_id, payload.sender_id, inbound_platform, inbound_message_id, message_text[:160])
     if inbound_message_id and not raw_event_for_log.get("message_id"):
         raw_event_for_log["message_id"] = inbound_message_id
+    raw_event_for_log["platform"] = inbound_platform
+    if inbound_dedupe_key:
+        raw_event_for_log["dedupe_key"] = inbound_dedupe_key
 
     with get_conn() as conn:
         conversation = get_or_create_conversation(conn, payload.sender_id, payload.instagram_username)
@@ -2265,10 +2304,10 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
         sync_conversation_memory_summary(conversation)
         if should_trace_decline_memory(message_text, conversation):
             log_decline_memory_trace("next_inbound_load", payload.sender_id, trace_id, conversation)
-        processing_lock_acquired = try_acquire_inbound_processing_lock(conn, payload.sender_id, inbound_message_id)
+        processing_lock_acquired = try_acquire_inbound_processing_lock(conn, inbound_platform, payload.sender_id, inbound_message_id)
         if not processing_lock_acquired:
             duplicate_path = ["duplicate_inflight_ignored"]
-            logger.info("instagram_message_duplicate_inflight sender_id=%s message_id=%s", payload.sender_id, inbound_message_id)
+            logger.info("instagram_message_duplicate_inflight sender_id=%s platform=%s message_id=%s", payload.sender_id, inbound_platform, inbound_message_id)
             return ProcessResult(
                 sender_id=payload.sender_id,
                 should_reply=False,
@@ -2285,10 +2324,10 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
                 },
                 decision_path=duplicate_path,
             )
-        duplicate_inbound = has_processed_inbound_message(conn, payload.sender_id, inbound_message_id)
+        duplicate_inbound = has_processed_inbound_message(conn, inbound_platform, payload.sender_id, inbound_message_id)
         if duplicate_inbound:
             duplicate_path = ["duplicate_ignored"]
-            logger.info("instagram_message_duplicate_ignored sender_id=%s message_id=%s", payload.sender_id, inbound_message_id)
+            logger.info("instagram_message_duplicate_ignored sender_id=%s platform=%s message_id=%s", payload.sender_id, inbound_platform, inbound_message_id)
             return ProcessResult(
                 sender_id=payload.sender_id,
                 should_reply=False,
@@ -4684,7 +4723,107 @@ def extract_inbound_message_id(raw_event: dict[str, Any] | None) -> str | None:
     return None
 
 
-def has_processed_inbound_message(conn: psycopg.Connection, sender_id: str, message_id: str | None) -> bool:
+def normalize_inbound_platform(value: str | None) -> str:
+    cleaned = sanitize_text(value or "").lower()
+    if not cleaned:
+        return "instagram"
+    if "private" in cleaned or "instagrapi" in cleaned or cleaned in {"poller", "poller_private_api"}:
+        return "instagram_private_api"
+    if "graph" in cleaned or cleaned in {"meta", "webhook", "n8n"}:
+        return "instagram_graph"
+    safe = re.sub(r"[^a-z0-9_]+", "_", cleaned).strip("_")
+    return safe or "instagram"
+
+
+def extract_inbound_platform(raw_event: dict[str, Any] | None) -> str:
+    if not isinstance(raw_event, dict):
+        return "instagram"
+
+    direct_candidates = [
+        raw_event.get("platform"),
+        raw_event.get("source"),
+        raw_event.get("message_source"),
+        raw_event.get("transport"),
+        raw_event.get("channel"),
+    ]
+    for value in direct_candidates:
+        normalized = normalize_inbound_platform(str(value or ""))
+        if normalized != "instagram":
+            return normalized
+
+    if raw_event.get("object") == "instagram" or raw_event.get("entry") or raw_event.get("messaging"):
+        return "instagram_graph"
+    if isinstance(raw_event.get("raw_event"), dict):
+        nested = extract_inbound_platform(raw_event.get("raw_event"))
+        if nested != "instagram":
+            return nested
+    return "instagram"
+
+
+def build_inbound_dedupe_key(platform: str | None, sender_id: str | None, message_id: str | None) -> str | None:
+    clean_message_id = sanitize_text(str(message_id or ""))
+    clean_sender_id = sanitize_text(str(sender_id or ""))
+    if not clean_message_id or not clean_sender_id:
+        return None
+    return f"{normalize_inbound_platform(platform)}:{clean_sender_id}:{clean_message_id}"
+
+
+def has_processed_inbound_message(conn: psycopg.Connection, platform: str, sender_id: str, message_id: str | None) -> bool:
+    dedupe_key = build_inbound_dedupe_key(platform, sender_id, message_id)
+    if not dedupe_key:
+        return False
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT 1
+            FROM message_logs
+            WHERE direction = 'in'
+              AND raw_payload->>'dedupe_key' = %s
+            LIMIT 1
+            """,
+            (dedupe_key,),
+        )
+        return cur.fetchone() is not None
+
+
+def has_outbound_after_inbound(conn: psycopg.Connection, platform: str, sender_id: str, message_id: str | None) -> bool:
+    dedupe_key = build_inbound_dedupe_key(platform, sender_id, message_id)
+    if not dedupe_key:
+        return False
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            WITH inbound AS (
+                SELECT max(created_at) AS inbound_created_at
+                FROM message_logs
+                WHERE direction = 'in'
+                  AND raw_payload->>'dedupe_key' = %s
+            )
+            SELECT 1
+            FROM message_logs, inbound
+            WHERE message_logs.instagram_user_id = %s
+              AND message_logs.direction = 'out'
+              AND inbound.inbound_created_at IS NOT NULL
+              AND message_logs.created_at >= inbound.inbound_created_at
+            LIMIT 1
+            """,
+            (dedupe_key, sender_id),
+        )
+        return cur.fetchone() is not None
+
+
+def try_acquire_inbound_processing_lock(conn: psycopg.Connection, platform: str, sender_id: str, message_id: str | None) -> bool:
+    dedupe_key = build_inbound_dedupe_key(platform, sender_id, message_id)
+    if not dedupe_key:
+        return True
+    lock_key = f"ig_inbound:{dedupe_key}"
+    with conn.cursor() as cur:
+        cur.execute("SELECT pg_try_advisory_xact_lock(hashtext(%s)) AS locked", (lock_key,))
+        row = cur.fetchone()
+    return bool(row and row.get("locked"))
+
+
+def has_processed_inbound_message_legacy(conn: psycopg.Connection, sender_id: str, message_id: str | None) -> bool:
     if not message_id:
         return False
     with conn.cursor() as cur:
@@ -4702,7 +4841,7 @@ def has_processed_inbound_message(conn: psycopg.Connection, sender_id: str, mess
         return cur.fetchone() is not None
 
 
-def has_outbound_after_inbound(conn: psycopg.Connection, sender_id: str, message_id: str | None) -> bool:
+def has_outbound_after_inbound_legacy(conn: psycopg.Connection, sender_id: str, message_id: str | None) -> bool:
     if not message_id:
         return False
     with conn.cursor() as cur:
@@ -4726,16 +4865,6 @@ def has_outbound_after_inbound(conn: psycopg.Connection, sender_id: str, message
             (sender_id, message_id, sender_id),
         )
         return cur.fetchone() is not None
-
-
-def try_acquire_inbound_processing_lock(conn: psycopg.Connection, sender_id: str, message_id: str | None) -> bool:
-    if not message_id:
-        return True
-    lock_key = f"ig_inbound:{sender_id}:{message_id}"
-    with conn.cursor() as cur:
-        cur.execute("SELECT pg_try_advisory_xact_lock(hashtext(%s)) AS locked", (lock_key,))
-        row = cur.fetchone()
-    return bool(row and row.get("locked"))
 
 
 def get_confirmed_appointment_summary(conversation: dict[str, Any]) -> str:
@@ -5498,6 +5627,31 @@ def extract_phone(text: str) -> str | None:
     if len(digits) == 10:
         return f"+90{digits}"
     return None
+
+
+def is_invalid_phone_attempt(text: str, state: str | None = None) -> bool:
+    if sanitize_text(state or "") != "collect_phone":
+        return False
+    if extract_phone(text):
+        return False
+    cleaned = sanitize_text(text or "")
+    if not cleaned:
+        return False
+    if extract_date(cleaned) or extract_time_for_state(cleaned, state):
+        return False
+    digits = re.sub(r"\D", "", cleaned)
+    if not digits:
+        return False
+    phone_like_chars = re.sub(r"[\d\s+()\-]", "", cleaned)
+    if phone_like_chars:
+        return False
+    if digits.startswith("90"):
+        return len(digits) != 12
+    if digits.startswith("0"):
+        return len(digits) != 11
+    if digits.startswith("5"):
+        return len(digits) != 10
+    return len(digits) >= 7
 
 
 def extract_time(text: str) -> str | None:
@@ -6522,13 +6676,22 @@ def override_ai_first_collect_phone_question(
     state = sanitize_text(state_before_update or conversation.get("state") or "")
     if state != "collect_phone" or detected_phone:
         return False
-    if is_phone_share_refusal(message_text):
+    if is_invalid_phone_attempt(message_text, state):
+        reply_text = "Numara eksik görünüyor. Tam telefon numaranızı yazabilir ya da telefon paylaşmak istemiyorsanız Instagram DM üzerinden devam edebiliriz."
+        intent = "invalid_phone"
+        booking_intent = True
+        missing_fields = ["phone"]
+    elif is_phone_share_refusal(message_text):
         mark_instagram_dm_contact(conversation)
         reply_text = build_phone_refusal_reply(conversation)
         intent = "phone_refusal"
+        booking_intent = True
+        missing_fields = []
     elif is_phone_reason_question(message_text) or is_phone_collection_hesitation(message_text):
         reply_text = build_contextual_clarification_reply(conversation, message_text)
         intent = "phone_reason"
+        booking_intent = False
+        missing_fields = []
     else:
         return False
 
@@ -6537,9 +6700,9 @@ def override_ai_first_collect_phone_question(
             "reply_text": reply_text,
             "intent": intent,
             "should_reply": True,
-            "booking_intent": intent == "phone_refusal",
+            "booking_intent": booking_intent,
             "handoff_needed": False,
-            "missing_fields": [],
+            "missing_fields": missing_fields,
             "phone_collection_question_override": True,
         }
     )
@@ -9854,13 +10017,24 @@ def upsert_conversation(conn: psycopg.Connection, conversation: dict[str, Any]) 
     conn.commit()
 
 
-def save_message_log(conn: psycopg.Connection, sender_id: str, direction: str, message_text: str | None, raw_payload: dict[str, Any] | None) -> None:
-    with conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO message_logs (instagram_user_id, direction, message_text, raw_payload) VALUES (%s, %s, %s, %s::jsonb)",
-            (sender_id, direction, message_text, json.dumps(raw_payload or {}, ensure_ascii=False)),
+def save_message_log(conn: psycopg.Connection, sender_id: str, direction: str, message_text: str | None, raw_payload: dict[str, Any] | None) -> bool:
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO message_logs (instagram_user_id, direction, message_text, raw_payload) VALUES (%s, %s, %s, %s::jsonb)",
+                (sender_id, direction, message_text, json.dumps(raw_payload or {}, ensure_ascii=False)),
+            )
+        conn.commit()
+        return True
+    except psycopg.errors.UniqueViolation:
+        conn.rollback()
+        logger.info(
+            "message_log_duplicate_ignored sender_id=%s direction=%s dedupe_key=%s",
+            sender_id,
+            direction,
+            (raw_payload or {}).get("dedupe_key"),
         )
-    conn.commit()
+        return False
 
 
 def get_recent_message_history(conn: psycopg.Connection, sender_id: str, limit: int = HISTORY_MESSAGE_LIMIT) -> list[dict[str, Any]]:
@@ -10495,12 +10669,25 @@ def create_appointment(conn: psycopg.Connection, conversation: dict[str, Any], u
                 else:
                     live_crm_upsert_preconsultation(conversation)
                     live_crm_ensure_task_for_conversation(dict(conversation))
-            except HTTPException:
-                conn.rollback()
-                raise
+            except HTTPException as exc:
+                logger.exception(
+                    "live_crm_sync_deferred_after_local_booking sender_id=%s detail=%s",
+                    conversation.get("instagram_user_id"),
+                    exc.detail,
+                )
+                memory = ensure_conversation_memory(conversation)
+                memory["live_crm_sync_status"] = "pending_review"
+                memory["live_crm_sync_last_error"] = sanitize_text(str(exc.detail or ""))[:300]
+                conversation["memory_state"] = memory
             except Exception as exc:  # noqa: BLE001
-                conn.rollback()
-                raise HTTPException(status_code=503, detail="Canlı CRM eşitlemesi tamamlanamadı.") from exc
+                logger.exception(
+                    "live_crm_sync_deferred_after_local_booking sender_id=%s",
+                    conversation.get("instagram_user_id"),
+                )
+                memory = ensure_conversation_memory(conversation)
+                memory["live_crm_sync_status"] = "pending_review"
+                memory["live_crm_sync_last_error"] = sanitize_text(str(exc))[:300]
+                conversation["memory_state"] = memory
             live_crm_ms = elapsed_ms(live_crm_started_at)
 
         appointment_id = int(row["id"])
@@ -11316,6 +11503,202 @@ def should_sync_crm_conversation(conversation: dict[str, Any]) -> bool:
     ) or conversation.get("appointment_status") == "confirmed"
 
 
+def make_json_safe(value: Any) -> Any:
+    if isinstance(value, (datetime, date, time)):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {str(key): make_json_safe(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [make_json_safe(item) for item in value]
+    return value
+
+
+def build_crm_sync_outbox_payload(
+    conversation: dict[str, Any],
+    appointment_id: int | None,
+    request_metrics: dict[str, Any] | None,
+) -> dict[str, Any]:
+    observed_at = str(conversation.get("_crm_observed_at") or datetime.now(TZ).isoformat())
+    sync_conversation = dict(conversation)
+    sync_conversation["_crm_observed_at"] = observed_at
+    return make_json_safe(
+        {
+            "conversation": sync_conversation,
+            "appointment_id": appointment_id,
+            "request_metrics": request_metrics or {},
+            "observed_at": observed_at,
+        }
+    )
+
+
+def build_crm_sync_outbox_dedupe_key(
+    conversation: dict[str, Any],
+    appointment_id: int | None,
+    request_metrics: dict[str, Any] | None,
+) -> str:
+    request_metrics = request_metrics or {}
+    inbound_key = sanitize_text(str(request_metrics.get("inbound_dedupe_key") or ""))
+    sender_id = sanitize_text(str(conversation.get("instagram_user_id") or "unknown"))
+    entity = f"appointment:{appointment_id}" if appointment_id is not None else "conversation"
+    if inbound_key:
+        return f"crm:{inbound_key}:{entity}"
+    observed_at = sanitize_text(str(conversation.get("_crm_observed_at") or datetime.now(TZ).isoformat()))
+    return f"crm:{sender_id}:{entity}:{observed_at}"
+
+
+def enqueue_crm_sync_outbox(
+    conversation: dict[str, Any],
+    appointment_id: int | None = None,
+    request_metrics: dict[str, Any] | None = None,
+) -> int | None:
+    payload = build_crm_sync_outbox_payload(conversation, appointment_id, request_metrics)
+    dedupe_key = build_crm_sync_outbox_dedupe_key(conversation, appointment_id, request_metrics)
+    entity_type = "appointment" if appointment_id is not None else "conversation"
+    entity_id = str(appointment_id) if appointment_id is not None else str(conversation.get("instagram_user_id") or "")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO crm_sync_outbox (
+                    dedupe_key,
+                    entity_type,
+                    entity_id,
+                    instagram_user_id,
+                    appointment_id,
+                    payload,
+                    status,
+                    next_attempt_at
+                )
+                VALUES (%s, %s, %s, %s, %s, %s::jsonb, 'pending', NOW())
+                ON CONFLICT (dedupe_key) DO UPDATE
+                SET payload = EXCLUDED.payload,
+                    status = CASE
+                        WHEN crm_sync_outbox.status = 'sent' THEN crm_sync_outbox.status
+                        ELSE 'pending'
+                    END,
+                    last_error = CASE
+                        WHEN crm_sync_outbox.status = 'sent' THEN crm_sync_outbox.last_error
+                        ELSE NULL
+                    END,
+                    next_attempt_at = NOW(),
+                    updated_at = NOW()
+                RETURNING id
+                """,
+                (
+                    dedupe_key,
+                    entity_type,
+                    entity_id,
+                    conversation.get("instagram_user_id"),
+                    appointment_id,
+                    json.dumps(payload, ensure_ascii=False),
+                ),
+            )
+            row = cur.fetchone()
+        conn.commit()
+    return int(row["id"]) if row and row.get("id") is not None else None
+
+
+def fetch_crm_sync_outbox_event(event_id: int) -> dict[str, Any] | None:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT *
+                FROM crm_sync_outbox
+                WHERE id = %s
+                LIMIT 1
+                """,
+                (event_id,),
+            )
+            row = cur.fetchone()
+    return serialize_row(row) if row else None
+
+
+def mark_crm_sync_outbox_result(event_id: int, success: bool, error: str | None = None) -> None:
+    status = "sent" if success else "pending_retry"
+    sanitized_error = sanitize_text(error or "")[:1000] or None
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE crm_sync_outbox
+                SET status = CASE
+                        WHEN %s THEN 'sent'
+                        WHEN attempt_count + 1 >= 5 THEN 'failed'
+                        ELSE %s
+                    END,
+                    attempt_count = attempt_count + 1,
+                    last_error = CASE WHEN %s THEN NULL ELSE %s END,
+                    next_attempt_at = CASE
+                        WHEN %s THEN NOW()
+                        ELSE NOW() + ((attempt_count + 1) * INTERVAL '5 minutes')
+                    END,
+                    updated_at = NOW()
+                WHERE id = %s
+                """,
+                (success, status, success, sanitized_error, success, event_id),
+            )
+        conn.commit()
+
+
+def process_crm_sync_outbox_event(event_id: int) -> bool:
+    event = fetch_crm_sync_outbox_event(event_id)
+    if not event:
+        return False
+    payload = event.get("payload") or {}
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except json.JSONDecodeError:
+            payload = {}
+    conversation = payload.get("conversation") or {}
+    appointment_id = payload.get("appointment_id")
+    request_metrics = payload.get("request_metrics") or {}
+    try:
+        success = sync_conversation_to_crm(conversation, appointment_id, request_metrics)
+        mark_crm_sync_outbox_result(event_id, success, None if success else "crm_sync_returned_false")
+        return bool(success)
+    except Exception as exc:  # noqa: BLE001
+        mark_crm_sync_outbox_result(event_id, False, str(exc))
+        raise
+
+
+def sync_crm_outbox_event_safe(event_id: int) -> None:
+    try:
+        process_crm_sync_outbox_event(event_id)
+    except Exception:  # noqa: BLE001
+        logger.exception("crm_sync_outbox_background_exception event_id=%s", event_id)
+
+
+def process_due_crm_sync_outbox(limit: int = 10) -> dict[str, int]:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id
+                FROM crm_sync_outbox
+                WHERE status IN ('pending', 'pending_retry')
+                  AND next_attempt_at <= NOW()
+                ORDER BY next_attempt_at ASC, id ASC
+                LIMIT %s
+                """,
+                (limit,),
+            )
+            rows = cur.fetchall()
+    sent = 0
+    failed = 0
+    for row in rows:
+        try:
+            if process_crm_sync_outbox_event(int(row["id"])):
+                sent += 1
+            else:
+                failed += 1
+        except Exception:  # noqa: BLE001
+            logger.exception("crm_sync_outbox_retry_exception event_id=%s", row.get("id"))
+            failed += 1
+    return {"processed": len(rows), "sent": sent, "failed": failed}
+
+
 def queue_crm_sync(
     background_tasks: BackgroundTasks,
     conversation: dict[str, Any],
@@ -11332,7 +11715,22 @@ def queue_crm_sync(
     if sender_id:
         with CRM_SYNC_GUARD_LOCK:
             CRM_SYNC_LATEST_OBSERVED[sender_id] = observed_at
-    background_tasks.add_task(sync_conversation_to_crm_safe, sync_payload, appointment_id, dict(request_metrics or {}))
+    metrics_ref = request_metrics if isinstance(request_metrics, dict) else {}
+    try:
+        outbox_id = enqueue_crm_sync_outbox(sync_payload, appointment_id, metrics_ref)
+    except Exception:  # noqa: BLE001
+        logger.exception("crm_sync_outbox_enqueue_failed sender_id=%s appointment_id=%s", sender_id, appointment_id)
+        if isinstance(request_metrics, dict):
+            request_metrics["crm_sync_status"] = "outbox_enqueue_failed"
+        return False
+    if not outbox_id:
+        if isinstance(request_metrics, dict):
+            request_metrics["crm_sync_status"] = "outbox_not_created"
+        return False
+    if isinstance(request_metrics, dict):
+        request_metrics["crm_sync_outbox_id"] = outbox_id
+        request_metrics["crm_sync_status"] = "pending"
+    background_tasks.add_task(sync_crm_outbox_event_safe, outbox_id)
     return True
 
 

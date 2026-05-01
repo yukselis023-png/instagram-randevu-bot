@@ -43,6 +43,7 @@ HEARTBEAT_FILE = DATA_DIR / "heartbeat.json"
 MAX_TRACKED_MESSAGE_IDS = int(os.getenv("MAX_TRACKED_MESSAGE_IDS", "5000"))
 REQUEST_TIMEOUT_SECONDS = int(os.getenv("REQUEST_TIMEOUT_SECONDS", "90"))
 VOICE_TMP_DIR = DATA_DIR / "voice-tmp"
+SAFE_PROCESSING_FALLBACK_REPLY = "Mesajınızı aldık, kontrol edip size en kısa sürede dönüş yapacağız."
 
 RUNNING = True
 
@@ -404,13 +405,21 @@ def get_thread_messages(thread: dict[str, Any]) -> list[dict[str, Any]]:
 
 def normalize_processing_response(data: Any) -> dict[str, Any]:
     if isinstance(data, dict):
-        return data
+        result = dict(data)
+        reply_text = str(result.get("reply_text") or "").strip()
+        if result.get("should_reply") is True and not reply_text:
+            result["reply_text"] = SAFE_PROCESSING_FALLBACK_REPLY
+            result["handoff"] = True
+            result["conversation_state"] = result.get("conversation_state") or "processing_failed"
+            decision_path = result.get("decision_path") if isinstance(result.get("decision_path"), list) else []
+            result["decision_path"] = [*decision_path, "poller:empty_reply_fallback"]
+        return result
     if isinstance(data, list) and data:
         first = data[0]
         if isinstance(first, dict):
             if "json" in first and isinstance(first["json"], dict):
-                return first["json"]
-            return first
+                return normalize_processing_response(first["json"])
+            return normalize_processing_response(first)
     return {}
 
 
@@ -621,12 +630,12 @@ def post_to_processing_backend(sender_id: str, username: str | None, message_tex
         logger.error("booking-api processing failed trace_id=%s sender_id=%s: %s", trace_id, sender_id, exc)
 
     return {
-        "should_reply": False,
-        "reply_text": None,
-        "handoff": False,
-        "conversation_state": "ai_unavailable",
+        "should_reply": True,
+        "reply_text": SAFE_PROCESSING_FALLBACK_REPLY,
+        "handoff": True,
+        "conversation_state": "processing_failed",
         "normalized": {},
-        "decision_path": ["ai_unavailable"],
+        "decision_path": ["poller_processing_failed", "poller:processing_failed_fallback"],
     }
 
 

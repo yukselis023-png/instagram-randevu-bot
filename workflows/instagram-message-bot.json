@@ -113,7 +113,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const error = $json;\nconst inputData = $('Has Valid Message').item.json || {};\nconsole.error('Booking API error for sender_id=' + (inputData.sender_id || 'unknown'), JSON.stringify(error));\nreturn [{\n  json: {\n    should_reply: false,\n    error: true,\n    error_message: 'Backend processing failed',\n    sender_id: inputData.sender_id || null,\n    reply_text: null,\n    handoff: false,\n    decision_path: ['n8n:error_no_reply']\n  }\n}];"
+        "jsCode": "const error = $json;\nconst inputData = $('Has Valid Message').item.json || {};\nconst fallbackReply = 'Mesajınızı aldık, kontrol edip size en kısa sürede dönüş yapacağız.';\nconsole.error('Booking API error for sender_id=' + (inputData.sender_id || 'unknown'), JSON.stringify(error));\nreturn [{\n  json: {\n    should_reply: true,\n    error: true,\n    error_message: 'backend_processing_failed',\n    sender_id: inputData.sender_id || null,\n    reply_text: fallbackReply,\n    handoff: true,\n    decision_path: ['n8n:error_fallback']\n  }\n}];"
       },
       "id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
       "name": "Handle Error",
