@@ -9914,16 +9914,7 @@ def apply_ai_first_quality_overrides(
         decision["should_reply"] = True
         return decision
     if is_business_fit_question(message_text):
-        quality_reply = sanitize_text(decision.get("reply_text")).lower()
-        if (
-            is_low_quality_ai_first_reply(decision.get("reply_text"))
-            or "detaylı bir şekilde görüşmek isteriz" in quality_reply
-            or "detayli bir sekilde gorusmek isteriz" in quality_reply
-            or "size özel bir teklif hazırlarız" in quality_reply
-            or "size ozel bir teklif hazirlariz" in quality_reply
-            or len(sanitize_text(decision.get("reply_text")).split()) > 55
-        ):
-            decision["reply_text"] = build_business_fit_reply(conversation)
+        decision["reply_text"] = build_business_fit_reply(conversation)
         decision["intent"] = "business_fit"
         decision["booking_intent"] = False
         decision["missing_fields"] = []
@@ -12551,18 +12542,14 @@ def sync_conversation_to_crm(
 def build_confirmation_message(conversation: dict[str, Any]) -> str:
     requested_date = date.fromisoformat(conversation["requested_date"]).strftime("%d.%m.%Y")
     requested_time = conversation["requested_time"][:5]
-    contact_text = build_contact_text()
     booking_label = get_booking_label(conversation)
-    contact_suffix = f" İhtiyacınız olursa {contact_text} üzerinden bize ulaşabilirsiniz." if contact_text else ""
+    phone = conversation.get("phone") or "Instagram DM"
     return (
-        f"{booking_label.capitalize()} kaydınız oluşturuldu.\n\n"
+        f"{booking_label.capitalize()} kaydınız oluşturuldu: {requested_date} saat {requested_time}.\n"
         f"Ad Soyad: {conversation['full_name']}\n"
         f"Hizmet: {conversation['service']}\n"
-        f"Tarih: {requested_date}\n"
-        f"Saat: {requested_time}\n"
-        f"Telefon: {conversation['phone']}\n\n"
-        f"Lütfen görüşme günü ve saati için müsaitliğinizi ayarlayın."
-        f" Ekibimiz görüşme öncesinde gerekli olursa sizinle iletişime geçecektir.{contact_suffix}"
+        f"Telefon: {phone}\n"
+        "Görüşme öncesinde gerekirse ekibimiz sizinle iletişime geçer."
     )
 
 
