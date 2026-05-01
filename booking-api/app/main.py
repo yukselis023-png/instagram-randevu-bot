@@ -8065,6 +8065,42 @@ def build_real_estate_off_topic_reply() -> str:
     return "Hayır, ev veya emlak satmıyoruz. DOEL Digital olarak dijital hizmetler tarafında destek veriyoruz."
 
 
+def is_bare_service_interest_message(message_text: str, service_meta: dict[str, Any] | None) -> bool:
+    if not service_meta:
+        return False
+    cleaned = sanitize_text(message_text).lower()
+    if not cleaned or "?" in cleaned:
+        return False
+    words = cleaned.split()
+    if len(words) > 4:
+        return False
+    slug = str(service_meta.get("slug") or "")
+    if slug == "otomasyon-ai":
+        return any(token in cleaned for token in ["otomasyon", "yapay zeka", "ai"])
+    if slug == "web-tasarim":
+        return any(token in cleaned for token in ["web", "website", "site"])
+    if slug == "performans-reklamlari":
+        return any(token in cleaned for token in ["reklam", "ads", "performans"])
+    if slug == "sosyal-medya":
+        return "sosyal medya" in cleaned
+    return False
+
+
+def build_short_service_interest_reply(service_meta: dict[str, Any]) -> str:
+    slug = str(service_meta.get("slug") or "")
+    price = str(service_meta.get("price") or "").strip()
+    delivery = str(service_meta.get("delivery_time") or "").strip()
+    if slug == "otomasyon-ai":
+        suffix = f" Standart kurulum {delivery}; fiyat {price}." if price and delivery else ""
+        return f"Otomasyon tarafında DM yanıtları, randevu toplama ve müşteri takibini CRM'e bağlayan sistem kuruyoruz.{suffix}"
+    if slug == "web-tasarim":
+        suffix = f" Teslim süresi {delivery}; fiyat {price}." if price and delivery else ""
+        return f"Web tasarım tarafında mobil uyumlu, güven veren ve dönüşüm odaklı kurumsal site hazırlıyoruz.{suffix}"
+    display = str(service_meta.get("display") or "Bu hizmet")
+    suffix = f" Fiyat {price}; teslim süresi {delivery}." if price and delivery else ""
+    return f"{display} tarafında ihtiyaca göre net bir yapı kuruyoruz.{suffix}"
+
+
 def build_business_fit_reply(conversation: dict[str, Any]) -> str:
     service = display_service_name(conversation.get("service"))
     service_meta = match_service_catalog(service, service) if service else None
@@ -9910,6 +9946,14 @@ def apply_ai_first_quality_overrides(
         decision["reply_text"] = build_real_estate_off_topic_reply()
         decision["intent"] = "off_topic"
         decision["booking_intent"] = False
+        decision["missing_fields"] = []
+        decision["should_reply"] = True
+        return decision
+    if direct_service_meta and is_bare_service_interest_message(message_text, direct_service_meta) and not is_assistant_identity_question(message_text):
+        decision["reply_text"] = build_short_service_interest_reply(direct_service_meta)
+        decision["intent"] = "service_info"
+        decision["booking_intent"] = False
+        decision["extracted_service"] = str(direct_service_meta.get("display") or direct_service)
         decision["missing_fields"] = []
         decision["should_reply"] = True
         return decision

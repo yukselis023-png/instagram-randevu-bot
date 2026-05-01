@@ -461,6 +461,29 @@ def test_service_overview_question_is_not_locked_to_previous_service(monkeypatch
     assert "daha fazla bilgi almak ister misiniz" not in reply
 
 
+def test_bare_automation_interest_gets_short_useful_service_intro(monkeypatch):
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text="Otomasyon hakkında daha fazla bilgi istiyorsanız, lütfen detaylı bilgi için bana ulaşın.",
+            intent="info",
+            extracted_service="Otomasyon & Yapay Zeka Çözümleri",
+            booking_intent=False,
+        ),
+    )
+    conversation = {"service": None, "state": "new", "memory_state": {}}
+
+    decision = main.build_ai_first_decision("Otomasyon", conversation, [], {})
+
+    reply = main.sanitize_text(decision["reply_text"]).lower()
+    assert "dm" in reply
+    assert "randevu" in reply
+    assert "crm" in reply
+    assert "bana ulasin" not in reply
+    assert len(decision["reply_text"].split()) <= 35
+
+
 def test_unrelated_question_gets_direct_answer_without_previous_service_pitch(monkeypatch):
     monkeypatch.setattr(
         main,
