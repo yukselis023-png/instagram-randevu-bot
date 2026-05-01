@@ -6302,6 +6302,28 @@ def build_ai_first_service_information_reply(service: dict[str, Any], conversati
     price = str(service.get("price") or "").strip()
     price_note = str(service.get("price_note") or "").strip()
     delivery_time = str(service.get("delivery_time") or "").strip()
+    slug = str(service.get("slug") or "").strip()
+
+    if slug == "web-tasarim":
+        fact_parts = ["Google uyumlu", "mobil uyumlu", "WhatsApp bağlantılı"]
+        if price:
+            fact_parts.append(f"{price}")
+        if delivery_time:
+            fact_parts.append(f"{delivery_time} teslim")
+        return (
+            f"Web sitesi tarafında şık ve güven veren bir yapı kurabiliriz; "
+            f"{', '.join(fact_parts)}. İşletmenizi yazarsanız size uygun kapsamı netleştireyim."
+        )
+    if slug == "otomasyon-ai":
+        fact_parts = ["DM yanıtları", "randevu toplama", "müşteri/CRM takibi"]
+        if price:
+            fact_parts.append(f"{price}")
+        if delivery_time:
+            fact_parts.append("3-7 iş günü kurulum")
+        return (
+            f"Otomasyon tarafında {', '.join(fact_parts)} tek akışta çalışır. "
+            "Günlük DM yoğunluğunuzu ve en çok zorlayan kısmı yazarsanız net öneri yapayım."
+        )
 
     parts = [f"{display}: {summary}" if summary else build_service_context_intro(service)]
     if price:
@@ -9457,7 +9479,7 @@ def repair_ai_first_decision_with_ai(
                 "If the user is positive after a service explanation, continue naturally with one useful next step. "
                 "If the user says they do not know which service they need, act like a consultant: ask about their business goal or biggest bottleneck instead of telling them to pick a service. "
                 "Only start collecting name/phone/date when the user clearly wants a meeting or accepts a consultation. "
-                "Use natural Turkish, no markdown, no emoji."
+                "Use natural Turkish, no markdown, no emoji. Keep replies short: usually 1-3 concise sentences."
             ),
         },
         {"role": "user", "content": json.dumps(repair_payload, ensure_ascii=False)},
@@ -9782,7 +9804,7 @@ def build_ai_first_decision(
                 "If the user changes service, extracted_service must use the new service. "
                 "If the user is angry or insults the bot, apologize briefly, avoid repeating old collection prompts, and explain the next useful step. "
                 "Use only the provided service catalog for prices, delivery times, and services. If unsure, say that the team should confirm instead of inventing. "
-                "If booking_intent is true, include one clear next missing field in the reply, not several at once. Do not include markdown."
+                "If booking_intent is true, include one clear next missing field in the reply, not several at once. Keep replies short: usually 1-3 concise sentences. Do not include markdown."
             ),
         },
         {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
