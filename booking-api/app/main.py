@@ -9177,6 +9177,8 @@ def should_suppress_ai_booking_collection(
         return False
     if sanitize_text(str(decision.get("intent") or "")).lower() == "collect_name_invalid":
         return False
+    if sanitize_text(str(decision.get("intent") or "")).lower() == "service_consultation_acceptance":
+        return False
     direct_service = pick_service(message_text, decision.get("extracted_service"))
     direct_service_meta = match_service_catalog(direct_service, direct_service) if direct_service else None
     if (
@@ -9186,8 +9188,6 @@ def should_suppress_ai_booking_collection(
         and not any([extract_phone(message_text), extract_date(message_text), extract_time_for_state(message_text, conversation.get("state"))])
     ):
         return True
-    if sanitize_text(str(decision.get("intent") or "")).lower() == "service_consultation_acceptance":
-        return False
     if message_shows_booking_intent(message_text, llm_data or {}):
         return False
     state = sanitize_text(conversation.get("state") or "")
@@ -9538,6 +9538,22 @@ def apply_ai_first_quality_overrides(
     decision_intent = sanitize_text(str(decision.get("intent") or "")).lower()
     direct_service = pick_service(message_text, decision.get("extracted_service") or conversation.get("service"))
     direct_service_meta = match_service_catalog(direct_service, direct_service) if direct_service else None
+    known_service_name = conversation.get("service") or decision.get("extracted_service") or direct_service
+    known_service_meta = match_service_catalog(known_service_name, known_service_name) if known_service_name else None
+    if (
+        known_service_meta
+        and message_shows_booking_intent(message_text, {})
+        and sanitize_text(conversation.get("state") or "") in {"new", "collect_service", "collect_name"}
+        and not is_explicit_detail_request(message_text)
+    ):
+        service_display = str(known_service_meta.get("display") or known_service_name)
+        decision["reply_text"] = build_service_consultation_acceptance_reply({"service": service_display})
+        decision["intent"] = "service_consultation_acceptance"
+        decision["booking_intent"] = True
+        decision["extracted_service"] = service_display
+        decision["missing_fields"] = ["name"]
+        decision["should_reply"] = True
+        return decision
     if direct_service_meta and reply_asks_service_after_service_known(decision.get("reply_text")):
         service_display = str(direct_service_meta.get("display") or direct_service)
         decision["reply_text"] = build_ai_first_service_information_reply(direct_service_meta, conversation)
@@ -9664,6 +9680,22 @@ def apply_ai_first_quality_overrides(
         bool(direct_service_meta)
         and any(cue in lowered for cue in ["yapalim", "yapalım", "alalim", "alalım", "goruselim", "görüşelim", "planlayalim", "planlayalım"])
     )
+    context_service_name = conversation.get("service") or decision.get("extracted_service")
+    context_service_meta = match_service_catalog(context_service_name, context_service_name) if context_service_name else None
+    if (
+        context_service_meta
+        and direct_booking_intent
+        and sanitize_text(conversation.get("state") or "") in {"new", "collect_service", "collect_name"}
+        and not is_explicit_detail_request(message_text)
+    ):
+        service_display = str(context_service_meta.get("display") or context_service_name)
+        decision["reply_text"] = build_service_consultation_acceptance_reply({"service": service_display})
+        decision["intent"] = "service_consultation_acceptance"
+        decision["booking_intent"] = True
+        decision["extracted_service"] = service_display
+        decision["missing_fields"] = ["name"]
+        decision["should_reply"] = True
+        return decision
     if direct_service_meta and direct_booking_intent and sanitize_text(conversation.get("state") or "") in {"new", "collect_service", "collect_name"}:
         service_display = str(direct_service_meta.get("display") or direct_service)
         decision["reply_text"] = build_service_consultation_acceptance_reply({"service": service_display})

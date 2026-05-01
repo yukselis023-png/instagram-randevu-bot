@@ -127,6 +127,40 @@ def test_dm_quality_booking_flow_with_instagram_fallback():
     )
 
 
+def test_known_service_booking_intent_starts_consultation(monkeypatch):
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text=(
+                "Otomasyon tarafinda DM yanitlari, randevu toplama ve CRM takibi tek akista calisir. "
+                "Gunluk DM yogunlugunuzu yazarsaniz net oneri yapayim."
+            ),
+            intent="service_info",
+            extracted_service="Otomasyon & Yapay Zeka Çözümleri",
+            booking_intent=False,
+        ),
+    )
+
+    decision = main.build_ai_first_decision(
+        "Tamam on gorusme yapalim",
+        {
+            "service": "Otomasyon & Yapay Zeka Çözümleri",
+            "state": "new",
+            "booking_kind": None,
+            "memory_state": {},
+        },
+        [],
+        {},
+    )
+
+    assert decision["should_reply"] is True
+    assert decision["booking_intent"] is True
+    assert decision["intent"] == "service_consultation_acceptance"
+    assert decision["missing_fields"][0] in {"name", "full_name"}
+    assert "ad" in main.sanitize_text(decision["reply_text"]).lower()
+
+
 def test_dm_quality_detects_repeated_replies():
     assert_no_repeated_replies(
         [
