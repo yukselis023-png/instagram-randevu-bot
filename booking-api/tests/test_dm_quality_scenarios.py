@@ -168,3 +168,242 @@ def test_dm_quality_detects_repeated_replies():
             {"reply_text": "Kisa bir on gorusme ile netlestirebiliriz."},
         ]
     )
+
+
+def test_soft_cta_after_service_info_closeout(monkeypatch):
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text="Gorusmek uzere, iyi gunler dilerim.",
+            intent="closing",
+            booking_intent=False,
+        ),
+    )
+    conversation = {
+        "service": "Otomasyon & Yapay Zeka Çözümleri",
+        "state": "new",
+        "memory_state": {"last_bot_reply_type": "service_info"},
+    }
+
+    decision = main.build_ai_first_decision("Tamam anladim sorum yok eyvallah", conversation, [], {})
+
+    assert decision["should_reply"] is True
+    assert decision["booking_intent"] is False
+    assert decision["intent"] == "soft_cta"
+    normalized_reply = main.sanitize_text(decision["reply_text"]).lower()
+    assert "10 dakikalik" in normalized_reply
+    assert "on gorusme" in normalized_reply
+    assert "otomasyon" in normalized_reply
+    assert decision["extracted_name"] is None
+    memory = conversation["memory_state"]
+    assert memory["soft_cta_offered"] is True
+    assert memory["soft_cta_service"] == "Otomasyon & Yapay Zeka Çözümleri"
+    assert memory["pending_offer"] == "preconsultation_offer"
+    assert memory["last_bot_reply_type"] == "soft_cta"
+
+
+def test_soft_cta_only_once_per_service(monkeypatch):
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text="Gorusmek uzere, iyi gunler dilerim.",
+            intent="closing",
+            booking_intent=False,
+        ),
+    )
+    conversation = {
+        "service": "Otomasyon & Yapay Zeka Çözümleri",
+        "state": "new",
+        "memory_state": {
+            "last_bot_reply_type": "service_info",
+            "soft_cta_offered": True,
+            "soft_cta_service": "Otomasyon & Yapay Zeka Çözümleri",
+        },
+    }
+
+    decision = main.build_ai_first_decision("Tamam anladim", conversation, [], {})
+
+    assert decision["intent"] != "soft_cta"
+    assert "10 dakikalik" not in main.sanitize_text(decision["reply_text"]).lower()
+
+
+def test_soft_cta_does_not_trigger_in_active_booking(monkeypatch):
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text="Adinizi ve soyadinizi tam olarak yazar misiniz?",
+            intent="collect_name",
+            booking_intent=True,
+            missing_fields=["name"],
+        ),
+    )
+    conversation = {
+        "service": "Otomasyon & Yapay Zeka Çözümleri",
+        "state": "collect_name",
+        "booking_kind": "preconsultation",
+        "memory_state": {"last_bot_reply_type": "service_info"},
+    }
+
+    decision = main.build_ai_first_decision("tamam anladim", conversation, [], {})
+
+    assert decision["intent"] != "soft_cta"
+    assert "10 dakikalik" not in main.sanitize_text(decision["reply_text"]).lower()
+
+
+def test_soft_cta_decline_marks_memory(monkeypatch):
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text="Tabii, ne zaman isterseniz buradan yazabilirsiniz.",
+            intent="closing",
+            booking_intent=False,
+        ),
+    )
+    conversation = {
+        "service": "Otomasyon & Yapay Zeka Çözümleri",
+        "state": "new",
+        "memory_state": {
+            "pending_offer": "preconsultation_offer",
+            "last_bot_reply_type": "soft_cta",
+        },
+    }
+
+    decision = main.build_ai_first_decision("sonra yazarim gerek yok", conversation, [], {})
+
+    assert decision["intent"] == "soft_cta_declined"
+    assert decision["booking_intent"] is False
+    assert "sonra yazar" in main.sanitize_text(decision["reply_text"]).lower()
+    memory = conversation["memory_state"]
+    assert memory["soft_cta_declined"] is True
+    assert memory["pending_offer"] is None
+    assert memory["last_bot_reply_type"] == "closing"
+
+
+def test_soft_cta_acceptance_starts_booking(monkeypatch):
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text="Teşekkürler. Ön görüşme kaydını tamamlamak için telefon numaranızı paylaşır mısınız?",
+            intent="service_consultation_acceptance",
+            booking_intent=True,
+            extracted_service="Otomasyon & Yapay Zeka Çözümleri",
+            missing_fields=["phone"],
+        ),
+    )
+    conversation = {
+        "service": "Otomasyon & Yapay Zeka Çözümleri",
+        "state": "new",
+        "memory_state": {
+            "pending_offer": "preconsultation_offer",
+            "last_bot_reply_type": "soft_cta",
+        },
+    }
+
+    decision = main.build_ai_first_decision("olur", conversation, [], {})
+
+    assert decision["intent"] == "service_consultation_acceptance"
+    assert decision["booking_intent"] is True
+    assert set(decision["missing_fields"]) & {"name", "full_name"}
+    assert "ad" in main.sanitize_text(decision["reply_text"]).lower()
+    assert "telefon" not in main.sanitize_text(decision["reply_text"]).lower()
+
+
+def test_soft_cta_direct_name_continues_booking(monkeypatch):
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text="Memnun oldum Berkay. Web tarafında yardımcı olabiliriz.",
+            intent="info",
+            booking_intent=False,
+            extracted_name="Berkay Elbir",
+        ),
+    )
+    conversation = {
+        "service": "Web Tasarım - KOBİ Paketi",
+        "state": "new",
+        "memory_state": {
+            "pending_offer": "preconsultation_offer",
+            "last_bot_reply_type": "soft_cta",
+        },
+    }
+
+    decision = main.build_ai_first_decision("Berkay Elbir", conversation, [], {})
+
+    assert decision["booking_intent"] is True
+    assert decision["intent"] == "soft_cta_name_received"
+    assert decision["extracted_name"] == "Berkay Elbir"
+    assert "telefon" in main.sanitize_text(decision["reply_text"]).lower()
+
+
+def test_completed_state_closeout_does_not_soft_cta(monkeypatch):
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text="Rica ederiz, iyi gunler dileriz.",
+            intent="closing",
+            booking_intent=False,
+        ),
+    )
+    conversation = {
+        "service": "Otomasyon & Yapay Zeka Çözümleri",
+        "state": "completed",
+        "memory_state": {"last_bot_reply_type": "service_info"},
+    }
+
+    decision = main.build_ai_first_decision("tamam anladim tesekkurler", conversation, [], {})
+
+    assert decision["intent"] != "soft_cta"
+    assert "10 dakikalik" not in main.sanitize_text(decision["reply_text"]).lower()
+
+
+def test_completed_state_new_service_request_is_not_blocked(monkeypatch):
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text="Web tasarım tarafında yardımcı olabiliriz.",
+            intent="service_info",
+            booking_intent=False,
+            extracted_service="Web Tasarım - KOBİ Paketi",
+        ),
+    )
+    conversation = {
+        "service": "Otomasyon & Yapay Zeka Çözümleri",
+        "state": "completed",
+        "memory_state": {"last_bot_reply_type": "closing"},
+    }
+
+    decision = main.build_ai_first_decision("yeni web sitesi görüşelim", conversation, [], {})
+
+    assert decision["intent"] in {"service_consultation_acceptance", "service_info"}
+    assert "web" in main.sanitize_text(decision.get("reply_text") or "").lower()
+    assert decision["intent"] != "soft_cta"
+
+
+def test_soft_cta_not_used_for_question(monkeypatch):
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text="Otomasyon hizmeti ilk 3 ay aylik 5.000 TL'dir.",
+            intent="pricing_info",
+            booking_intent=False,
+        ),
+    )
+    conversation = {
+        "service": "Otomasyon & Yapay Zeka Çözümleri",
+        "state": "new",
+        "memory_state": {"last_bot_reply_type": "service_info"},
+    }
+
+    decision = main.build_ai_first_decision("tamam ama fiyat neydi?", conversation, [], {})
+
+    assert decision["intent"] != "soft_cta"
+    assert "10 dakikalik" not in main.sanitize_text(decision["reply_text"]).lower()

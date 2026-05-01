@@ -573,6 +573,12 @@ CONVERSATION_MEMORY_DEFAULTS = {
     "phone_refused": False,
     "name_source": None,
     "instagram_identity": None,
+    "last_bot_reply_type": None,
+    "soft_cta_offered": False,
+    "soft_cta_service": None,
+    "soft_cta_offered_at": None,
+    "soft_cta_declined": False,
+    "soft_cta_declined_at": None,
 }
 OWNER_CHECK_KEYWORDS = [
     "sahibiyle mi görüşüyorum", "sahibi misiniz", "işletme sahibi", "firma sahibi", "kurucu ile mi görüşüyorum",
@@ -2583,6 +2589,8 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
         if detect_business_sector(message_text, recent_history) or is_business_context_intro_message(message_text, recent_history):
             llm_name_candidate = None
         extracted_name = extract_name(message_text, conversation.get("state", "new")) or llm_name_candidate
+        if is_soft_cta_closeout_message(message_text) or is_closeout_message(message_text):
+            extracted_name = None
         detected_name = extracted_name or conversation.get("full_name")
         picked_service = pick_service(message_text, llm_service_hint)
         detected_service = picked_service or conversation.get("service")
@@ -4073,6 +4081,196 @@ def build_service_consultation_acceptance_reply(conversation: dict[str, Any]) ->
     )
 
 
+ACTIVE_BOOKING_STATES = {"collect_name", "collect_phone", "collect_date", "collect_period", "collect_time", "human_handoff"}
+SOFT_CTA_SOURCE_TYPES = {"service_info", "pricing_info", "delivery_info", "question_answer"}
+
+
+def is_soft_cta_closeout_message(text: str) -> bool:
+    lowered = sanitize_text(text).lower()
+    if not lowered or "?" in lowered:
+        return False
+    closeout_cues = [
+        "tamam",
+        "tamamdir",
+        "tamamdır",
+        "anladim",
+        "anladım",
+        "sorum yok",
+        "tesekkur",
+        "teşekkür",
+        "eyvallah",
+        "sag ol",
+        "sağ ol",
+        "sagol",
+    ]
+    return any(cue in lowered for cue in closeout_cues) and len(lowered.split()) <= 8
+
+
+def is_soft_cta_decline_message(text: str) -> bool:
+    lowered = sanitize_text(text).lower()
+    decline_cues = [
+        "sonra yazarim",
+        "sonra yazarım",
+        "daha sonra",
+        "gerek yok",
+        "simdilik yok",
+        "şimdilik yok",
+        "istemiyorum",
+        "su an degil",
+        "şu an değil",
+        "sonra bakariz",
+        "sonra bakarız",
+    ]
+    return any(cue in lowered for cue in decline_cues)
+
+
+def is_soft_cta_blocked_message(text: str) -> bool:
+    lowered = sanitize_text(text).lower()
+    if "?" in sanitize_text(text):
+        return True
+    if any(
+        [
+            is_price_question(text),
+            is_delivery_time_question(text),
+            is_angry_complaint_message(text),
+            is_request_reason_question(text),
+            is_clarification_request(text),
+            is_assistant_identity_question(text),
+            is_trust_or_scam_question(text),
+            is_service_information_request(text, None),
+        ]
+    ):
+        return True
+    support_cues = ["destek", "yardim", "yardım", "sikayet", "şikayet", "sorun", "problem", "hata"]
+    return any(cue in lowered for cue in support_cues)
+
+
+def normalize_soft_cta_service(conversation: dict[str, Any], decision: dict[str, Any] | None = None) -> str:
+    service = display_service_name(
+        (decision or {}).get("extracted_service")
+        or conversation.get("service")
+        or ""
+    )
+    service_meta = match_service_catalog(service, service) if service else None
+    if service_meta:
+        return str(service_meta.get("display") or service)
+    return service
+
+
+def soft_cta_already_offered_for_service(memory: dict[str, Any], service: str) -> bool:
+    if not memory.get("soft_cta_offered"):
+        return False
+    offered_service = display_service_name(memory.get("soft_cta_service") or "")
+    if not offered_service:
+        return True
+    return offered_service == service
+
+
+def last_bot_reply_type_allows_soft_cta(memory: dict[str, Any], history: list[dict[str, Any]] | None = None) -> bool:
+    reply_type = sanitize_text(str(memory.get("last_bot_reply_type") or "")).lower()
+    if reply_type in SOFT_CTA_SOURCE_TYPES:
+        return True
+    outbound_act = sanitize_text(str(memory.get("last_outbound_act") or infer_recent_outbound_act(history) or "")).lower()
+    if outbound_act in {"answered_price"}:
+        return True
+    last_outbound = get_last_outbound_text(history).lower()
+    if not last_outbound:
+        return False
+    info_cues = ["fiyat", "teslim", "3-7", "12.900", "5.000", "hizmet", "otomasyon", "web tasar"]
+    return any(cue in last_outbound for cue in info_cues)
+
+
+def build_soft_cta_reply(service: str) -> str:
+    service_meta = match_service_catalog(service, service) if service else None
+    if service_meta and service_meta.get("slug") == "web-tasarim":
+        return "Anladım. İsterseniz 10 dakikalık kısa bir ön görüşmeyle işletmeniz için uygun web sitesi yapısını netleştirebiliriz."
+    return "Anladım. İsterseniz 10 dakikalık kısa bir ön görüşmeyle işletmeniz için uygun otomasyonları netleştirebiliriz."
+
+
+def apply_soft_cta_strategy(
+    message_text: str,
+    decision: dict[str, Any],
+    conversation: dict[str, Any],
+    history: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    memory = ensure_conversation_memory(conversation)
+    state = sanitize_text(str(conversation.get("state") or "")).lower()
+    service = normalize_soft_cta_service(conversation, decision)
+    has_pending_soft_cta = (
+        memory.get("pending_offer") == "preconsultation_offer"
+        or sanitize_text(str(memory.get("last_bot_reply_type") or "")).lower() == "soft_cta"
+    )
+
+    if has_pending_soft_cta and is_soft_cta_decline_message(message_text):
+        memory["soft_cta_declined"] = True
+        memory["soft_cta_declined_at"] = datetime.now(TZ).isoformat()
+        memory["pending_offer"] = None
+        memory["offer_status"] = "declined"
+        memory["open_loop"] = "decline_cooldown"
+        memory["last_bot_reply_type"] = "closing"
+        decision["reply_text"] = "Tabii, sorun değil. Sonra yazarsanız buradan kaldığımız yerden devam ederiz."
+        decision["intent"] = "soft_cta_declined"
+        decision["booking_intent"] = False
+        decision["missing_fields"] = []
+        decision["should_reply"] = True
+        return decision
+
+    direct_name = titlecase_name(decision.get("extracted_name")) or titlecase_name(message_text)
+    if (
+        has_pending_soft_cta
+        and direct_name
+        and not is_invalid_name_attempt(direct_name, "collect_name")
+        and not is_soft_cta_blocked_message(message_text)
+        and state not in ACTIVE_BOOKING_STATES
+        and state != "completed"
+    ):
+        memory["pending_offer"] = "preconsultation_offer"
+        memory["offer_status"] = "accepted"
+        memory["open_loop"] = "collect_phone"
+        memory["last_bot_reply_type"] = "booking_prompt"
+        decision["reply_text"] = (
+            "TeÅŸekkÃ¼rler. Ã–n gÃ¶rÃ¼ÅŸme kaydÄ±nÄ± tamamlamak iÃ§in telefon numaranÄ±zÄ± paylaÅŸÄ±r mÄ±sÄ±nÄ±z? "
+            "PaylaÅŸmak istemezseniz Instagram DM Ã¼zerinden de devam edebiliriz."
+        )
+        decision["intent"] = "soft_cta_name_received"
+        decision["booking_intent"] = True
+        decision["extracted_name"] = direct_name
+        decision["missing_fields"] = ["phone", "requested_date", "requested_time"]
+        decision["should_reply"] = True
+        return decision
+
+    if not service:
+        return decision
+    if state in ACTIVE_BOOKING_STATES or state == "completed":
+        return decision
+    if memory.get("soft_cta_declined") and display_service_name(memory.get("soft_cta_service") or service) == service:
+        return decision
+    if soft_cta_already_offered_for_service(memory, service):
+        return decision
+    if not is_soft_cta_closeout_message(message_text):
+        return decision
+    if is_soft_cta_blocked_message(message_text):
+        return decision
+    if not last_bot_reply_type_allows_soft_cta(memory, history):
+        return decision
+
+    memory["soft_cta_offered"] = True
+    memory["soft_cta_service"] = service
+    memory["soft_cta_offered_at"] = datetime.now(TZ).isoformat()
+    memory["pending_offer"] = "preconsultation_offer"
+    memory["offer_status"] = "offered"
+    memory["open_loop"] = "offer_response"
+    memory["last_bot_reply_type"] = "soft_cta"
+    decision["reply_text"] = build_soft_cta_reply(service)
+    decision["intent"] = "soft_cta"
+    decision["booking_intent"] = False
+    decision["extracted_service"] = service
+    decision["extracted_name"] = None
+    decision["missing_fields"] = []
+    decision["should_reply"] = True
+    return decision
+
+
 def recent_outbound_requested_priority(history: list[dict[str, Any]] | None) -> bool:
     last_outbound = get_last_outbound_text(history).lower()
     if not last_outbound:
@@ -4413,6 +4611,11 @@ def ensure_conversation_memory(conversation: dict[str, Any]) -> dict[str, Any]:
         else:
             if value is None:
                 memory[key] = default
+            elif isinstance(default, bool):
+                if isinstance(value, bool):
+                    memory[key] = value
+                else:
+                    memory[key] = sanitize_text(str(value)).lower() in {"true", "1", "yes", "evet"}
             elif isinstance(default, str):
                 clean = sanitize_text(str(value))
                 memory[key] = clean or default
@@ -4624,6 +4827,9 @@ def update_conversation_memory_from_user_message(
 def update_conversation_memory_after_bot_reply(conversation: dict[str, Any], reply_text: str | None, decision_label: str | None = None) -> None:
     memory = ensure_conversation_memory(conversation)
     lowered_label = sanitize_text(decision_label or "").lower()
+    reply_type = infer_last_bot_reply_type_from_label(reply_text, decision_label)
+    if reply_type:
+        memory["last_bot_reply_type"] = reply_type
     question_type = infer_reply_question_type(reply_text, decision_label, conversation)
     last_customer_message = sanitize_text(conversation.get("last_customer_message") or "")
     last_objection_type = match_objection_type(last_customer_message)
@@ -4704,6 +4910,41 @@ def build_working_hours_text() -> str:
 
 def build_collect_date_reply(ack_prefix: str) -> str:
     return f"{ack_prefix}Size uygun gün nedir? Çalışma saatlerimiz {build_working_hours_text()} arası.".strip()
+
+
+def infer_last_bot_reply_type_from_label(reply_text: str | None, decision_label: str | None) -> str | None:
+    label = sanitize_text(decision_label or "").lower()
+    if "soft_cta_declined" in label:
+        return "closing"
+    if "soft_cta" in label:
+        return "soft_cta"
+    if any(token in label for token in ["appointment_created", "existing_customer_appointment", "completed"]):
+        return "closing"
+    if any(token in label for token in ["service_consultation_acceptance", "collect_name", "collect_phone", "collect_date", "collect_time", "booking"]):
+        return "booking_prompt"
+    if any(token in label for token in ["price", "pricing"]):
+        return "pricing_info"
+    if any(token in label for token in ["delivery", "teslim"]):
+        return "delivery_info"
+    if any(token in label for token in ["service_info", "service_overview", "more_details", "message_volume"]):
+        return "service_info"
+    if any(token in label for token in ["clarification", "assistant_identity", "reassurance", "complaint"]):
+        return "question_answer"
+    if any(token in label for token in ["greeting", "smalltalk", "closing", "decline_cooldown"]):
+        return "closing"
+
+    text = sanitize_text(reply_text or "").lower()
+    if reply_offers_consultation(reply_text):
+        return "soft_cta"
+    if reply_requests_booking_details(reply_text or ""):
+        return "booking_prompt"
+    if any(cue in text for cue in ["fiyat", "ucret", "ücret", "tl", "₺"]):
+        return "pricing_info"
+    if any(cue in text for cue in ["teslim", "is gunu", "iş günü", "hafta"]):
+        return "delivery_info"
+    if any(cue in text for cue in ["otomasyon", "web tasar", "reklam", "sosyal medya", "hizmet"]):
+        return "service_info"
+    return None
 
 
 def extract_inbound_message_id(raw_event: dict[str, Any] | None) -> str | None:
@@ -9899,6 +10140,7 @@ def build_ai_first_decision(
         )
     decision = repair_ai_first_decision_with_ai(message_text, decision, conversation, history, llm_data, selected_models)
     decision = apply_ai_first_quality_overrides(message_text, decision, conversation, history)
+    decision = apply_soft_cta_strategy(message_text, decision, conversation, history)
     if is_low_quality_ai_first_reply(decision.get("reply_text")):
         decision["reply_text"] = build_ai_first_emergency_reply(message_text, conversation)
         decision["intent"] = "recovered_low_quality_reply"
