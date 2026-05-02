@@ -565,6 +565,10 @@ EVASIVE_RECOMMENDATION_REPLY_BLOCKLIST = [
     "net soylemek icin isinizi bilmem gerekir",
     "hangisini merak ettiğinizi yazarsanız",
     "hangisini merak ettiginizi yazarsaniz",
+    "hangi hizmetlerimizden yararlanmak istiyorsunuz",
+    "hangi hizmetlerden yararlanmak istiyorsunuz",
+    "hangi hizmetimizden yararlanmak istiyorsunuz",
+    "hangi hizmeti istiyorsunuz",
     "daha fazla bilgi ister misiniz",
     "size nasıl yardımcı olabilirim",
     "size nasil yardimci olabilirim",
@@ -4293,6 +4297,8 @@ def is_soft_cta_closeout_message(text: str) -> bool:
         "sag ol",
         "sağ ol",
         "sagol",
+        "mantikli",
+        "mantıklı",
     ]
     return any(cue in lowered for cue in closeout_cues) and len(lowered.split()) <= 8
 
@@ -4346,6 +4352,9 @@ def normalize_soft_cta_service(conversation: dict[str, Any], decision: dict[str,
         if service_meta and service_meta.get("slug") == "otomasyon-ai":
             return "Otomasyon & Yapay Zeka Çözümleri"
         return str(raw_service)
+    memory = ensure_conversation_memory(conversation)
+    if memory.get("customer_sector") or memory.get("customer_subsector") or memory.get("customer_goal"):
+        return "Genel Ön Görüşme"
     service = display_service_name(
         raw_service
     )
@@ -4382,6 +4391,10 @@ def build_soft_cta_reply(service: str) -> str:
     service_meta = match_service_catalog(service, service) if service else None
     if service_meta and service_meta.get("slug") == "web-tasarim":
         return "Anladım. İsterseniz 10 dakikalık kısa bir ön görüşmeyle işletmeniz için uygun web sitesi yapısını netleştirebiliriz."
+    if service_meta and service_meta.get("slug") == "otomasyon-ai":
+        return "Anladım. İsterseniz 10 dakikalık kısa bir ön görüşmeyle işletmeniz için uygun otomasyonları netleştirebiliriz."
+    if service:
+        return "Anladım. İsterseniz 10 dakikalık kısa bir ön görüşmeyle işletmeniz için en doğru başlangıcı netleştirebiliriz."
     return "Anladım. İsterseniz 10 dakikalık kısa bir ön görüşmeyle işletmeniz için uygun otomasyonları netleştirebiliriz."
 
 

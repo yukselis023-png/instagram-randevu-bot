@@ -940,3 +940,36 @@ def test_booking_created_confirmation_is_not_replaced_by_generic_service_reply()
     assert guarded["repaired"] is False
     assert "on gorusme kaydiniz olusturuldu" in main.sanitize_text(guarded["reply_text"]).lower()
     assert "03.05.2026" in guarded["reply_text"]
+
+
+def test_soft_cta_after_sector_price_context_without_locked_service(monkeypatch):
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text=(
+                "Pekala, size en uygun hizmeti belirlemek için işletmenizin hedeflerini daha iyi anlamamız gerekiyor. "
+                "Hangi hizmetlerimizden yararlanmak istiyorsunuz?"
+            ),
+            intent="closing",
+            booking_intent=False,
+            missing_fields=[],
+        ),
+    )
+    conversation = {
+        "service": None,
+        "state": "new",
+        "memory_state": {
+            "customer_sector": "beauty",
+            "customer_subsector": "hairdresser",
+            "last_bot_reply_type": "pricing_info",
+        },
+    }
+
+    decision = main.build_ai_first_decision("Mantikli", conversation, [], {})
+
+    reply = main.sanitize_text(decision["reply_text"]).lower()
+    assert decision["intent"] == "soft_cta"
+    assert "10 dakikalik" in reply
+    assert "on gorusme" in reply
+    assert "hangi hizmet" not in reply
