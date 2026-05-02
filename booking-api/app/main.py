@@ -8504,6 +8504,32 @@ def has_price_or_scope_answer(reply_text: str | None) -> bool:
     return bool(re.search(r"(?<![0-9a-z_])(tl|try)(?![0-9a-z_])", lowered))
 
 
+def reply_matches_explicit_business_context(reply_text: str | None, analyzer: dict[str, Any]) -> bool:
+    lowered = sanitize_text(reply_text or "").lower()
+    subsector = sanitize_text(str(analyzer.get("current_subsector") or analyzer.get("subsector") or "")).lower()
+    sector = sanitize_text(str(analyzer.get("current_sector") or analyzer.get("sector") or "")).lower()
+    if not lowered or not (subsector or sector):
+        return True
+    token_map = {
+        "tattoo": ["dovme", "dövm", "tattoo", "portfolyo", "instagram", "sosyal medya", "reklam"],
+        "hairdresser": ["kuafor", "kuaför", "berber", "guzellik", "güzellik", "model", "randevu", "sosyal medya", "reklam"],
+        "plumbing": ["musluk", "tesisat", "usta", "lokal", "google", "arama", "landing", "reklam"],
+        "real_estate": ["emlak", "gayrimenkul", "ilan", "lead", "web", "landing", "crm", "reklam"],
+        "clinic": ["klinik", "dis", "diş", "estetik", "hasta", "randevu", "guven", "güven"],
+        "restaurant": ["restoran", "kafe", "menu", "menü", "lokasyon", "rezervasyon", "sosyal medya"],
+        "ecommerce": ["e-ticaret", "eticaret", "magaza", "mağaza", "satis", "satış", "sepet", "reklam"],
+        "gym": ["spor", "salon", "uyelik", "üyelik", "lokal", "lead", "reklam"],
+        "cleaning": ["temizlik", "yikama", "yıkama", "koltuk", "oto", "lokal", "google"],
+    }
+    context_key = subsector or sector
+    tokens = token_map.get(context_key)
+    if not tokens and sector == "local_service":
+        tokens = ["lokal", "google", "arama", "web", "landing", "reklam", "takip"]
+    if not tokens:
+        return True
+    return any(token in lowered for token in tokens)
+
+
 def final_answer_quality_guard(
     message_text: str,
     reply_text: str | None,
@@ -8531,6 +8557,12 @@ def final_answer_quality_guard(
         return {"passed": False, "reason": "wrong_old_sector_context", "analyzer": analyzer}
     if analyzer.get("current_subsector") == "tattoo" and any(token in lowered_reply for token in ["musluk", "tesisat"]):
         return {"passed": False, "reason": "wrong_old_sector_context", "analyzer": analyzer}
+    if (
+        (analyzer.get("current_sector") or analyzer.get("current_subsector"))
+        and (is_service_overview_question(message_text) or is_general_information_request(message_text) or analyzer.get("is_business_fit_question"))
+        and not reply_matches_explicit_business_context(reply, analyzer)
+    ):
+        return {"passed": False, "reason": "missing_explicit_business_context", "analyzer": analyzer}
     if analyzer.get("is_price_question") and not has_price_or_scope_answer(reply):
         return {"passed": False, "reason": "price_not_answered", "analyzer": analyzer}
     if analyzer.get("is_business_fit_question"):
@@ -10468,6 +10500,17 @@ def apply_ai_first_quality_overrides(
         decision["should_reply"] = True
         return decision
     explicit_business_context = bool(detect_customer_subsector(message_text) or detect_business_sector(message_text))
+    if (
+        explicit_business_context
+        and (is_service_overview_question(message_text) or is_general_information_request(message_text))
+        and not is_simple_greeting(message_text)
+    ):
+        decision["reply_text"] = recommendation_engine(conversation, message_text, history)
+        decision["intent"] = "business_context_overview"
+        decision["booking_intent"] = False
+        decision["missing_fields"] = []
+        decision["should_reply"] = True
+        return decision
     if (
         (explicit_business_context or is_business_context_intro_message(message_text, history))
         and not is_service_overview_question(message_text)

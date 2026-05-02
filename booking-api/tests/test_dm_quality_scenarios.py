@@ -614,6 +614,50 @@ def test_tattoo_business_fit_recommends_social_and_ads_before_asking(monkeypatch
     assert "yarar saglayip saglamayacagini net soylemek" not in reply
 
 
+def test_service_overview_with_tattoo_context_does_not_fall_back_to_generic_list(monkeypatch):
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text="Web tasarim, otomasyon, reklam ve sosyal medya yonetimi yapiyoruz. Hangisini merak ettiginizi yazarsaniz anlatayim.",
+            intent="service_overview",
+            booking_intent=False,
+            missing_fields=[],
+        ),
+    )
+    conversation = {"service": None, "state": "new", "memory_state": {}}
+
+    decision = main.build_ai_first_decision("Hizmetleriniz neler? Ben dovmeciyim", conversation, [], {})
+
+    reply = main.sanitize_text(decision["reply_text"]).lower()
+    assert conversation["memory_state"]["customer_subsector"] == "tattoo"
+    assert "sosyal medya" in reply or "performans reklam" in reply
+    assert any(token in reply for token in ["dovme", "portfolyo", "lokasyon", "instagram", "gorsel"])
+    assert "hangisini merak ettiginizi" not in reply
+
+
+def test_final_guard_repairs_generic_overview_when_latest_message_has_sector(monkeypatch):
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text="Hangi hizmeti merak ettiginizi yazarsaniz fiyat, kapsam ve teslim suresini anlatayim.",
+            intent="service_overview",
+            booking_intent=False,
+            missing_fields=[],
+        ),
+    )
+    conversation = {"service": None, "state": "new", "memory_state": {}}
+
+    decision = main.build_ai_first_decision("Hizmetleriniz neler? Ben musluk tamircisiyim", conversation, [], {})
+
+    reply = main.sanitize_text(decision["reply_text"]).lower()
+    assert conversation["memory_state"]["customer_subsector"] == "plumbing"
+    assert "musluk" in reply or "tesisat" in reply or "lokal" in reply
+    assert "google" in reply or "landing" in reply or "reklam" in reply
+    assert "hangi hizmeti merak" not in reply
+
+
 def test_tattoo_visibility_ads_goal_gets_direct_recommendation_without_cta(monkeypatch):
     monkeypatch.setattr(
         main,
