@@ -8500,7 +8500,11 @@ def final_answer_quality_guard(
     lowered_reply = reply.lower()
     analyzer = current_turn_analyzer(message_text, conversation, history)
     label = sanitize_text(decision_label or "").lower()
-    booking_or_system = label in {"appointment_created", "collect_time", "collect_date", "collect_phone", "collect_name"} or conversation_stage_manager(message_text, conversation) == "booking"
+    booking_or_system = (
+        label in {"appointment_created", "collect_time", "collect_date", "collect_phone", "collect_name"}
+        or any(token in label for token in ["appointment_created", "collect_time", "collect_date", "collect_phone", "collect_name", "booking_"])
+        or conversation_stage_manager(message_text, conversation) == "booking"
+    )
     allow_four_sentence_info = label in {"more_details_acceptance", "detailed_service_overview"}
     if not reply:
         return {"passed": False, "reason": "empty_reply", "analyzer": analyzer}

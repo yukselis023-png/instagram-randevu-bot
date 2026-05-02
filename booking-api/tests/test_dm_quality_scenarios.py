@@ -908,3 +908,35 @@ def test_completed_booking_thanks_does_not_repeat_appointment_summary(monkeypatc
     assert "sistemimizde" not in reply
     assert "03.05.2026" not in reply
     assert "15:00" not in reply
+
+
+def test_booking_created_confirmation_is_not_replaced_by_generic_service_reply():
+    conversation = {
+        "service": "Web Tasarim - KOBI Paketi",
+        "state": "completed",
+        "appointment_status": "confirmed",
+        "requested_date": "2026-05-03",
+        "requested_time": "11:00",
+        "memory_state": {},
+    }
+    confirmation = (
+        "Ön görüşme kaydınız oluşturuldu.\n\n"
+        "Ad Soyad: Berkay Elbir\n"
+        "Hizmet: Web Tasarım - KOBİ Paketi\n"
+        "Tarih: 03.05.2026\n"
+        "Saat: 11:00\n"
+        "Telefon: +905555555555\n\n"
+        "Görüşme günü bu saat için müsaitliğinizi ayarlamanız yeterli."
+    )
+
+    guarded = main.guard_and_repair_final_answer(
+        "03.05.2026 11:00",
+        confirmation,
+        conversation,
+        [],
+        decision_label="ai_first_v5:booking_date_collected",
+    )
+
+    assert guarded["repaired"] is False
+    assert "on gorusme kaydiniz olusturuldu" in main.sanitize_text(guarded["reply_text"]).lower()
+    assert "03.05.2026" in guarded["reply_text"]
