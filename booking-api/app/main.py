@@ -8429,14 +8429,21 @@ def recommendation_engine(
     subsector = sanitize_text(str(memory.get("customer_subsector") or "")).lower()
     sector = sanitize_text(str(memory.get("customer_sector") or "")).lower()
     goal = sanitize_text(str(memory.get("customer_goal") or "")).lower()
+    last_outbound = sanitize_text(get_last_outbound_text(history)).lower()
 
     if subsector == "tattoo":
+        if "dovme isi icin" in last_outbound or "dövm" in last_outbound:
+            return "Bu durumda sosyal medya yönetimi + performans reklamlarıyla başlamak en doğru tercih olur; portfolyonuzu ve tarzınızı Instagram’da doğru kitleye göstermeliyiz. Web sitesi güven desteği, otomasyon ise DM/randevu yoğunluğu artarsa ikinci aşama olur."
         return build_tattoo_recommendation_reply(conversation, message_text, history)
     if subsector == "plumbing":
+        if "musluk tamiri gibi" in last_outbound or "tesisat" in last_outbound:
+            return "Bu durumda web/landing page + Google odaklı reklamla başlamak daha doğru olur; acil arayan müşterinin hızlıca güvenip ulaşmasını sağlar. Talep yoğunlaşırsa WhatsApp/arama takip otomasyonu ekleriz."
         if goal == "dm_automation":
             return "Musluk ve tesisat işinde talep kaçırmamak için WhatsApp/arama takip otomasyonu mantıklı olur; gelen aramaları, mesajları ve randevu taleplerini tek yerde toplar. Yeni müşteri kazanımı için bunu Google odaklı reklamla desteklemek gerekir."
         return "Musluk tamiri gibi lokal hizmetlerde en mantıklı başlangıç web/landing page + Google odaklı reklam olur; müşteri acil ihtiyaçta hızlıca güvenilir usta arar. Talep artınca WhatsApp/arama takip otomasyonu kaçan müşterileri azaltır. Şu an sorun müşteri bulmak mı, yoksa gelen talepleri kaçırmak mı?"
     if subsector == "hairdresser":
+        if "kuafor/berber tarafinda" in last_outbound or "kuaför/berber tarafında" in last_outbound:
+            return "Bu durumda sosyal medya yönetimi + lokal reklam en doğru başlangıç olur; model/sonuç içeriklerini düzenli gösterip yakın çevreden randevu talebi toplarız. Web sitesi ikinci aşamada güven ve portfolyo desteği olur."
         return "Kuaför/berber tarafında sosyal medya yönetimi + lokal reklam en mantıklı başlangıç olur; müşteri model, lokasyon ve güvene bakarak karar verir. Randevu yoğunluğu artarsa DM/randevu otomasyonu ikinci aşamada eklenir. Şu an hedefiniz daha çok randevu mu, daha güçlü görünürlük mü?"
     if subsector == "clinic":
         return "Klinik/estetik tarafında güven veren web sitesi + lokal reklam + randevu takibi birlikte düşünülmeli. Hasta önce güven, uzmanlık ve yorumlara bakar; randevu yoğunluğu varsa CRM/otomasyon ciddi rahatlatır. Öncelik hasta kazanımı mı, randevu düzeni mi?"

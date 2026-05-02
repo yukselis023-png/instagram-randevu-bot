@@ -826,6 +826,37 @@ def test_hairdresser_business_fit_uses_beauty_context(monkeypatch):
     assert "hedefinizi bilmem gerekir" not in reply
 
 
+def test_hairdresser_followup_recommendation_does_not_repeat_previous_reply(monkeypatch):
+    previous_reply = (
+        "Kuafor/berber tarafinda sosyal medya yonetimi + lokal reklam en mantikli baslangic olur; "
+        "musteri model, lokasyon ve guvene bakarak karar verir."
+    )
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text=previous_reply,
+            intent="service_advice",
+            booking_intent=False,
+            missing_fields=[],
+        ),
+    )
+    conversation = {
+        "service": None,
+        "state": "new",
+        "memory_state": {"customer_sector": "beauty", "customer_subsector": "hairdresser"},
+    }
+    history = [{"direction": "out", "message_text": previous_reply}]
+
+    decision = main.build_ai_first_decision("Hangisi isime yarar?", conversation, history, {})
+
+    reply = main.sanitize_text(decision["reply_text"]).lower()
+    assert reply != main.sanitize_text(previous_reply).lower()
+    assert "sosyal medya" in reply
+    assert "lokal reklam" in reply or "randevu" in reply
+    assert "web sitesi" in reply or "portfolyo" in reply or "model" in reply
+
+
 def test_real_estate_goal_recommends_web_lead_ads_and_crm(monkeypatch):
     monkeypatch.setattr(
         main,
