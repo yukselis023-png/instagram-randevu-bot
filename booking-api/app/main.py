@@ -542,10 +542,18 @@ BUSINESS_CONTEXT_INTRO_KEYWORDS = ["işletiyorum", "isletiyorum", "salonum var",
 BEAUTY_BUSINESS_KEYWORDS = ["güzellik salonu", "guzellik salonu", "güzellik merkezi", "guzellik merkezi", "kuaför", "kuafor", "cilt bakım", "cilt bakımı", "cilt bakimi", "protez tırnak", "protez tirnak", "epilasyon", "lazer", "bakım merkezi", "bakim merkezi", "dövme", "dovme", "dövmeci", "dovmeci", "dövmeciyim", "dovmeciyim", "tattoo", "tattoo studio", "tattoo stüdyo", "tattoo studyo"]
 REAL_ESTATE_BUSINESS_KEYWORDS = ["emlak", "gayrimenkul", "ilan", "portföy", "portfoy", "arsa", "daire", "konut", "kiralık", "kiralik", "satılık", "satilik", "yer gösterme", "yer gosterme"]
 TATTOO_SUBSECTOR_KEYWORDS = ["dövme", "dovme", "dövmeci", "dovmeci", "dövmeciyim", "dovmeciyim", "tattoo", "tattoo artist", "tattoo studio", "tattoo stüdyo", "tattoo studyo"]
+HAIRDRESSER_SUBSECTOR_KEYWORDS = ["kuaför", "kuafor", "kuaförüm", "kuaforum", "berber", "berberim", "saç", "sac", "saç salonu", "sac salonu", "hairdresser"]
+CLINIC_SUBSECTOR_KEYWORDS = ["klinik", "diş", "dis", "dişçi", "disci", "estetik", "doktor", "muayenehane", "poliklinik"]
+RESTAURANT_SUBSECTOR_KEYWORDS = ["restoran", "restaurant", "kafe", "cafe", "lokanta", "kahveci", "burger", "yemek"]
+PLUMBING_SUBSECTOR_KEYWORDS = ["musluk", "muslukçu", "muslukcu", "muslukçuyum", "muslukcuyum", "tesisat", "tesisatçı", "tesisatci", "tesisatçıyım", "tesisatciyim", "su kaçağı", "su kacagi", "tamirci", "tamirciyim", "lokal tamir", "usta"]
+REAL_ESTATE_SUBSECTOR_KEYWORDS = ["emlak", "emlakçı", "emlakci", "gayrimenkul", "ilan", "portföy", "portfoy"]
+ECOMMERCE_SUBSECTOR_KEYWORDS = ["e-ticaret", "eticaret", "e ticaret", "mağaza", "magaza", "shop", "ürün satıyorum", "urun satiyorum"]
+GYM_SUBSECTOR_KEYWORDS = ["spor salonu", "fitness", "gym", "pilates", "antrenör", "antrenor"]
+CLEANING_SUBSECTOR_KEYWORDS = ["temizlik", "koltuk yıkama", "koltuk yikama", "oto yıkama", "oto yikama", "halı yıkama", "hali yikama", "yıkama", "yikama"]
 VISIBILITY_ADS_GOAL_KEYWORDS = ["sosyal medya", "instagram", "görünür", "gorunur", "görünürlük", "gorunurluk", "reklam", "ads", "performans reklam", "kitle", "takipçi", "takipci", "keşfet", "kesfet"]
 DM_AUTOMATION_GOAL_KEYWORDS = ["dm", "mesaj", "randevu", "randevular", "karışıyor", "karisiyor", "çok geliyor", "cok geliyor", "yoğun", "yogun", "yetişemiyorum", "yetisemiyorum", "otomatik", "otomasyon"]
 PORTFOLIO_TRUST_GOAL_KEYWORDS = ["portfolyo", "portfolio", "güven", "guven", "web", "website", "site", "kurumsal"]
-MORE_BOOKINGS_GOAL_KEYWORDS = ["daha çok müşteri", "daha cok musteri", "müşteri gelsin", "musteri gelsin", "randevu almak", "randevu sayısı", "randevu sayisi", "satış", "satis"]
+MORE_BOOKINGS_GOAL_KEYWORDS = ["daha çok müşteri", "daha cok musteri", "müşteri gelsin", "musteri gelsin", "müşteri bulmak", "musteri bulmak", "randevu almak", "randevu sayısı", "randevu sayisi", "satış", "satis", "talep art"]
 NORMALIZED_CUSTOMER_GOALS = {"visibility/ads", "more_bookings", "dm_automation", "portfolio_trust"}
 EVASIVE_RECOMMENDATION_REPLY_BLOCKLIST = [
     "işinizi ve hedefinizi bilmem gerekir",
@@ -555,6 +563,11 @@ EVASIVE_RECOMMENDATION_REPLY_BLOCKLIST = [
     "hedefinizi bilmem gerekir",
     "net söylemek için işinizi bilmem gerekir",
     "net soylemek icin isinizi bilmem gerekir",
+    "hangisini merak ettiğinizi yazarsanız",
+    "hangisini merak ettiginizi yazarsaniz",
+    "daha fazla bilgi ister misiniz",
+    "size nasıl yardımcı olabilirim",
+    "size nasil yardimci olabilirim",
 ]
 DM_DELAY_KEYWORDS = ["gecikme", "geç dönüş", "gec donus", "geç cevap", "gec cevap", "geç yanıt", "gec yanit", "yanıt zor", "yanit zor", "yavaş dönüş", "yavas donus"]
 REPEATED_MESSAGE_ISSUE_KEYWORDS = ["tekrar eden mesaj", "tekrar eden mesajlar", "aynı sorular", "ayni sorular", "aynı şeyler", "ayni seyler", "aynı mesajlar", "ayni mesajlar", "sürekli aynı", "surekli ayni"]
@@ -2419,6 +2432,19 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
                     compose_enabled,
                 )
             if final_reply:
+                guarded_final = guard_and_repair_final_answer(
+                    message_text,
+                    final_reply,
+                    conversation,
+                    recent_history,
+                    decision_label=decision_label,
+                )
+                if guarded_final.get("repaired"):
+                    metrics["final_answer_guard_repaired"] = True
+                    metrics["final_answer_guard_reason"] = guarded_final.get("reason")
+                    final_path.append(f"final_guard:{guarded_final.get('reason')}")
+                    final_reply = guarded_final["reply_text"]
+            if final_reply:
                 metrics["reply_guaranteed"] = True
                 update_conversation_memory_after_bot_reply(conversation, final_reply, decision_label)
             if should_trace_decline_memory(message_text, conversation):
@@ -3844,6 +3870,9 @@ def contains_business_keyword(text: str, keywords: list[str]) -> bool:
 def detect_business_sector(text: str, history: list[dict[str, Any]] | None = None) -> str | None:
     current = sanitize_text(text)
     current_lower = current.lower()
+    current_subsector = detect_customer_subsector(current, None)
+    if current_subsector:
+        return customer_sector_for_subsector(current_subsector)
     if contains_business_keyword(current_lower, BEAUTY_BUSINESS_KEYWORDS):
         return "beauty"
     if contains_business_keyword(current_lower, REAL_ESTATE_BUSINESS_KEYWORDS):
@@ -3860,17 +3889,67 @@ def detect_business_sector(text: str, history: list[dict[str, Any]] | None = Non
     return None
 
 
+def customer_sector_for_subsector(subsector: str | None) -> str | None:
+    normalized = sanitize_text(str(subsector or "")).lower()
+    if normalized in {"tattoo", "hairdresser", "clinic"}:
+        return "beauty"
+    if normalized in {"plumbing", "cleaning"}:
+        return "local_service"
+    if normalized == "restaurant":
+        return "restaurant"
+    if normalized == "real_estate":
+        return "real_estate"
+    if normalized == "ecommerce":
+        return "ecommerce"
+    if normalized == "gym":
+        return "gym"
+    return None
+
+
 def detect_customer_subsector(text: str, history: list[dict[str, Any]] | None = None) -> str | None:
     current = sanitize_text(text)
     current_lower = current.lower()
     if contains_business_keyword(current_lower, TATTOO_SUBSECTOR_KEYWORDS):
         return "tattoo"
+    if contains_business_keyword(current_lower, HAIRDRESSER_SUBSECTOR_KEYWORDS):
+        return "hairdresser"
+    if contains_business_keyword(current_lower, CLINIC_SUBSECTOR_KEYWORDS):
+        return "clinic"
+    if contains_business_keyword(current_lower, RESTAURANT_SUBSECTOR_KEYWORDS):
+        return "restaurant"
+    if contains_business_keyword(current_lower, PLUMBING_SUBSECTOR_KEYWORDS):
+        return "plumbing"
+    if contains_business_keyword(current_lower, REAL_ESTATE_SUBSECTOR_KEYWORDS):
+        return "real_estate"
+    if contains_business_keyword(current_lower, ECOMMERCE_SUBSECTOR_KEYWORDS):
+        return "ecommerce"
+    if contains_business_keyword(current_lower, GYM_SUBSECTOR_KEYWORDS):
+        return "gym"
+    if contains_business_keyword(current_lower, CLEANING_SUBSECTOR_KEYWORDS):
+        return "cleaning"
     combined = current
     for item in history or []:
         if item.get("direction") == "in":
             combined = f"{combined} {sanitize_text(item.get('message_text') or '')}".strip()
-    if contains_business_keyword(combined.lower(), TATTOO_SUBSECTOR_KEYWORDS):
+    combined_lower = combined.lower()
+    if contains_business_keyword(combined_lower, TATTOO_SUBSECTOR_KEYWORDS):
         return "tattoo"
+    if contains_business_keyword(combined_lower, HAIRDRESSER_SUBSECTOR_KEYWORDS):
+        return "hairdresser"
+    if contains_business_keyword(combined_lower, CLINIC_SUBSECTOR_KEYWORDS):
+        return "clinic"
+    if contains_business_keyword(combined_lower, RESTAURANT_SUBSECTOR_KEYWORDS):
+        return "restaurant"
+    if contains_business_keyword(combined_lower, PLUMBING_SUBSECTOR_KEYWORDS):
+        return "plumbing"
+    if contains_business_keyword(combined_lower, REAL_ESTATE_SUBSECTOR_KEYWORDS):
+        return "real_estate"
+    if contains_business_keyword(combined_lower, ECOMMERCE_SUBSECTOR_KEYWORDS):
+        return "ecommerce"
+    if contains_business_keyword(combined_lower, GYM_SUBSECTOR_KEYWORDS):
+        return "gym"
+    if contains_business_keyword(combined_lower, CLEANING_SUBSECTOR_KEYWORDS):
+        return "cleaning"
     return None
 
 
@@ -3900,12 +3979,12 @@ def merge_customer_context_memory(
     history: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     memory = ensure_conversation_memory(conversation)
-    sector = detect_business_sector(message_text, history)
-    subsector = detect_customer_subsector(message_text, history)
+    sector = detect_business_sector(message_text, None)
+    subsector = detect_customer_subsector(message_text, None)
     goal = detect_customer_goal(message_text, history)
 
-    if subsector == "tattoo":
-        sector = "beauty"
+    if subsector:
+        sector = customer_sector_for_subsector(subsector) or sector
     if sector:
         memory["customer_sector"] = sector
     if subsector:
@@ -3987,6 +4066,32 @@ def recent_outbound_offered_more_details(history: list[dict[str, Any]] | None) -
         "konusmaya devam edelim",
     ]
     return any(cue in last_outbound for cue in cues)
+
+
+def recent_outbound_asked_for_detail_continuation(history: list[dict[str, Any]] | None) -> bool:
+    last_outbound = get_last_outbound_text(history).lower()
+    if not last_outbound:
+        return False
+    cues = [
+        "detay",
+        "bilgi almak",
+        "hangi hizmet",
+        "ilgi duyuyor",
+        "ilgi duyuyor musunuz",
+        "sektor",
+        "sektör",
+        "fiyat bilgisi",
+    ]
+    return any(cue in last_outbound for cue in cues)
+
+
+def is_detail_continuation_acceptance_message(text: str) -> bool:
+    lowered = sanitize_text(text).lower()
+    compact = re.sub(r"[^\w\s]", " ", lowered)
+    compact = re.sub(r"\s+", " ", compact).strip()
+    if compact in {"evet", "evet olur", "evet peki", "olur", "olur peki", "tamam", "tamam olur", "tamamdır", "tamamdir"}:
+        return True
+    return any(cue in compact for cue in ["evet olur", "evet anlat", "olur anlat", "tamam anlat"])
 
 
 def recent_outbound_can_accept_automation_details(
@@ -4232,10 +4337,17 @@ def is_soft_cta_blocked_message(text: str) -> bool:
 
 
 def normalize_soft_cta_service(conversation: dict[str, Any], decision: dict[str, Any] | None = None) -> str:
+    raw_service = conversation.get("service") or (decision or {}).get("extracted_service") or ""
+    if raw_service:
+        normalized_raw = sanitize_text(str(raw_service)).lower()
+        if "otomasyon" in normalized_raw and "yapay zeka" in normalized_raw:
+            return "Otomasyon & Yapay Zeka Çözümleri"
+        service_meta = match_service_catalog(str(raw_service), str(raw_service))
+        if service_meta and service_meta.get("slug") == "otomasyon-ai":
+            return "Otomasyon & Yapay Zeka Çözümleri"
+        return str(raw_service)
     service = display_service_name(
-        (decision or {}).get("extracted_service")
-        or conversation.get("service")
-        or ""
+        raw_service
     )
     service_meta = match_service_catalog(service, service) if service else None
     if service_meta:
@@ -4694,6 +4806,9 @@ def ensure_conversation_memory(conversation: dict[str, Any]) -> dict[str, Any]:
                 if clean and clean not in cleaned_items:
                     cleaned_items.append(clean)
             memory[key] = cleaned_items
+        elif key == "soft_cta_service":
+            clean = re.sub(r"\s+", " ", str(value or "")).strip()
+            memory[key] = clean or default
         else:
             if value is None:
                 memory[key] = default
@@ -6555,7 +6670,7 @@ def is_invalid_service_candidate(text: str | None) -> bool:
 def build_services_overview_reply() -> str:
     return (
         "Web tasarım, otomasyon & yapay zeka, performans reklamları ve sosyal medya yönetimi tarafında destek veriyoruz. "
-        "Hangisini merak ettiğinizi yazarsanız fiyat, kapsam ve teslim süresini net anlatayım."
+        "İşletmenizin sektörünü ve hedefini yazarsanız en mantıklı başlangıcı net önerebilirim."
     )
 
 
@@ -8196,6 +8311,72 @@ def is_evasive_recommendation_reply(reply_text: str | None) -> bool:
     return any(phrase in lowered for phrase in EVASIVE_RECOMMENDATION_REPLY_BLOCKLIST)
 
 
+def current_turn_analyzer(
+    message_text: str,
+    conversation: dict[str, Any],
+    history: list[dict[str, Any]] | None = None,
+    llm_data: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    llm_data = llm_data or {}
+    current_subsector = detect_customer_subsector(message_text, None)
+    current_sector = detect_business_sector(message_text, None)
+    current_goal = detect_customer_goal(message_text, history)
+    previous_memory = ensure_conversation_memory(conversation)
+    previous_sector = sanitize_text(str(previous_memory.get("customer_sector") or ""))
+    previous_subsector = sanitize_text(str(previous_memory.get("customer_subsector") or ""))
+    return {
+        "sector": current_sector or previous_sector or None,
+        "subsector": current_subsector or previous_subsector or None,
+        "goal": current_goal or sanitize_text(str(previous_memory.get("customer_goal") or "")) or None,
+        "current_sector": current_sector,
+        "current_subsector": current_subsector,
+        "current_goal": current_goal,
+        "has_problem": is_fatigue_painpoint_message(message_text) or current_goal == "dm_automation",
+        "is_price_question": is_price_question(message_text),
+        "is_scope_question": is_service_information_request(message_text, match_service_catalog(conversation.get("service"), conversation.get("service")) if conversation.get("service") else None) or is_service_overview_question(message_text),
+        "is_business_fit_question": is_business_fit_question(message_text) or is_service_choice_help_request(message_text) or is_business_need_analysis_message(message_text),
+        "is_objection": bool(match_objection_type(message_text) or is_price_negotiation_message(message_text, llm_data)),
+        "is_positive_signal": is_confirmation_acceptance_message(message_text) or is_soft_cta_closeout_message(message_text),
+        "is_booking_request": message_shows_booking_intent(message_text, llm_data),
+        "has_correction_signal": bool(current_sector or current_subsector) and bool(previous_sector or previous_subsector),
+    }
+
+
+def memory_manager(
+    message_text: str,
+    conversation: dict[str, Any],
+    history: list[dict[str, Any]] | None = None,
+    llm_data: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    # Son kullanıcı mesajındaki açık bilgi eski memory'den üstündür; açık bilgi yoksa eski memory korunur.
+    return merge_customer_context_memory(message_text, conversation, history)
+
+
+def conversation_stage_manager(
+    message_text: str,
+    conversation: dict[str, Any],
+    decision: dict[str, Any] | None = None,
+) -> str:
+    state = sanitize_text(str(conversation.get("state") or "new"))
+    if state == "completed":
+        return "completed"
+    if state == "human_handoff" or llm_bool((decision or {}).get("handoff_needed")):
+        return "human_handoff"
+    if state in {"collect_name", "collect_phone", "collect_date", "collect_period", "collect_time"}:
+        return "booking"
+    if is_price_question(message_text):
+        return "pricing"
+    if match_objection_type(message_text) or is_angry_complaint_message(message_text):
+        return "objection"
+    if is_simple_greeting(message_text):
+        return "greeting"
+    if is_business_fit_question(message_text) or is_service_choice_help_request(message_text) or is_business_need_analysis_message(message_text):
+        return "recommendation"
+    if is_soft_cta_closeout_message(message_text):
+        return "soft_cta_ready"
+    return "discovery"
+
+
 def build_tattoo_recommendation_reply(
     conversation: dict[str, Any],
     message_text: str | None = None,
@@ -8217,6 +8398,149 @@ def build_tattoo_recommendation_reply(
     return "Dövme işi için ilk önerim sosyal medya yönetimi + performans reklamları; portfolyo, lokasyon ve görsel iş Instagram’da güçlü görünmeli. Web sitesi güven ve portfolyo desteği olur, otomasyon ise DM/randevu yoğunluğu varsa ikinci aşamada mantıklı. Şu an hedefiniz görünürlük mü, randevu yoğunluğu mu?"
 
 
+def recommendation_engine(
+    conversation: dict[str, Any],
+    message_text: str | None = None,
+    history: list[dict[str, Any]] | None = None,
+) -> str:
+    memory = ensure_conversation_memory(conversation)
+    current_subsector = detect_customer_subsector(message_text or "", None)
+    if current_subsector:
+        memory["customer_subsector"] = current_subsector
+        memory["customer_sector"] = customer_sector_for_subsector(current_subsector) or memory.get("customer_sector")
+    current_goal = detect_customer_goal(message_text or "", history)
+    if current_goal:
+        memory["customer_goal"] = current_goal
+    subsector = sanitize_text(str(memory.get("customer_subsector") or "")).lower()
+    sector = sanitize_text(str(memory.get("customer_sector") or "")).lower()
+    goal = sanitize_text(str(memory.get("customer_goal") or "")).lower()
+
+    if subsector == "tattoo":
+        return build_tattoo_recommendation_reply(conversation, message_text, history)
+    if subsector == "plumbing":
+        if goal == "dm_automation":
+            return "Musluk ve tesisat işinde talep kaçırmamak için WhatsApp/arama takip otomasyonu mantıklı olur; gelen aramaları, mesajları ve randevu taleplerini tek yerde toplar. Yeni müşteri kazanımı için bunu Google odaklı reklamla desteklemek gerekir."
+        return "Musluk tamiri gibi lokal hizmetlerde en mantıklı başlangıç web/landing page + Google odaklı reklam olur; müşteri acil ihtiyaçta hızlıca güvenilir usta arar. Talep artınca WhatsApp/arama takip otomasyonu kaçan müşterileri azaltır. Şu an sorun müşteri bulmak mı, yoksa gelen talepleri kaçırmak mı?"
+    if subsector == "hairdresser":
+        return "Kuaför/berber tarafında sosyal medya yönetimi + lokal reklam en mantıklı başlangıç olur; müşteri model, lokasyon ve güvene bakarak karar verir. Randevu yoğunluğu artarsa DM/randevu otomasyonu ikinci aşamada eklenir. Şu an hedefiniz daha çok randevu mu, daha güçlü görünürlük mü?"
+    if subsector == "clinic":
+        return "Klinik/estetik tarafında güven veren web sitesi + lokal reklam + randevu takibi birlikte düşünülmeli. Hasta önce güven, uzmanlık ve yorumlara bakar; randevu yoğunluğu varsa CRM/otomasyon ciddi rahatlatır. Öncelik hasta kazanımı mı, randevu düzeni mi?"
+    if subsector == "restaurant":
+        return "Restoran/kafe için sosyal medya içerikleri + lokal reklam iyi başlangıç olur; menü, lokasyon ve kampanyalar görünür olmalı. Paket servis veya rezervasyon yoğunluğu varsa WhatsApp/DM otomasyonu ikinci aşamada mantıklı."
+    if subsector == "real_estate" or sector == "real_estate":
+        return "Emlak tarafında web/landing page + lead reklam en doğru başlangıç olur; ilanları güven veren bir sayfada toplayıp doğru bölgeden talep çekmek gerekir. CRM/otomasyon da gelen leadleri ve dönüşleri kaçırmamak için destek olur."
+    if subsector == "ecommerce" or sector == "ecommerce":
+        return "E-ticarette performans reklamları + site dönüşüm optimizasyonu en mantıklı başlangıç olur; trafik kadar sepet ve satın alma akışı da önemli. Sipariş/mesaj yoğunluğu artarsa otomasyonla takip güçlendirilir."
+    if subsector == "gym" or sector == "gym":
+        return "Spor salonu için sosyal medya içerikleri + lokal lead reklam iyi başlangıç olur; lokasyon, dönüşüm hikayeleri ve üyelik teklifleri net görünmeli. Gelen başvuruları kaçırmamak için CRM takibi eklenebilir."
+    if subsector == "cleaning":
+        return "Temizlik/yıkama gibi lokal hizmetlerde Google odaklı reklam + güven veren landing page mantıklı başlangıç olur; müşteri hızlı fiyat ve randevu ister. WhatsApp takip otomasyonu da kaçan talepleri azaltır."
+    return "Lokal işletmelerde genelde web/landing page + Google veya sosyal medya reklamı en mantıklı başlangıç olur; talep arttıkça CRM ve mesaj otomasyonu eklenir. Şu an öncelik yeni müşteri bulmak mı, gelen talepleri daha iyi takip etmek mi?"
+
+
+def build_contextual_price_reply(conversation: dict[str, Any]) -> str:
+    service = conversation.get("service")
+    service_meta = match_service_catalog(service, service) if service else None
+    if service_meta:
+        return build_price_question_reply(service_meta, conversation)
+    memory = ensure_conversation_memory(conversation)
+    if memory.get("customer_sector") or memory.get("customer_subsector") or memory.get("customer_goal"):
+        return "Fiyat seçilecek sisteme göre değişir; web/landing page, reklam ve otomasyon ayrı kapsamlarla hazırlanıyor. İşletmenize en uygun başlangıcı netleştirirsek gereksiz maliyet çıkarmadan fiyat verebiliriz."
+    return "Fiyat seçilecek hizmete göre değişir; web, reklam ve otomasyon ayrı kapsamlarla hazırlanıyor. İhtiyacınıza uygun başlangıcı netleştirirsek doğru fiyatı çıkarabiliriz."
+
+
+def build_safe_reply_builder(
+    message_text: str,
+    conversation: dict[str, Any],
+    history: list[dict[str, Any]] | None = None,
+    decision_label: str | None = None,
+) -> str:
+    if is_real_estate_off_topic_question(message_text):
+        return build_real_estate_off_topic_reply()
+    if is_price_question(message_text):
+        return build_contextual_price_reply(conversation)
+    if (
+        is_business_fit_question(message_text)
+        or is_service_choice_help_request(message_text)
+        or is_business_need_analysis_message(message_text)
+        or detect_customer_goal(message_text, history)
+        or ensure_conversation_memory(conversation).get("customer_subsector")
+    ):
+        return recommendation_engine(conversation, message_text, history)
+    if is_service_overview_question(message_text) or is_general_information_request(message_text):
+        return build_services_overview_reply()
+    return build_ai_first_emergency_reply(message_text, conversation)
+
+
+def count_reply_sentences(reply_text: str | None) -> int:
+    cleaned = re.sub(r"\s+", " ", str(reply_text or "")).strip()
+    if not cleaned:
+        return 0
+    parts = [part.strip() for part in re.split(r"[.!]+", cleaned) if part.strip()]
+    return len(parts) or 1
+
+
+def has_price_or_scope_answer(reply_text: str | None) -> bool:
+    lowered = sanitize_text(reply_text or "").lower()
+    if not lowered:
+        return False
+    if any(token in lowered for token in ["fiyat", "ücret", "ucret", "₺", "kapsam", "paket", "bedel"]):
+        return True
+    return bool(re.search(r"(?<![0-9a-z_])(tl|try)(?![0-9a-z_])", lowered))
+
+
+def final_answer_quality_guard(
+    message_text: str,
+    reply_text: str | None,
+    conversation: dict[str, Any],
+    history: list[dict[str, Any]] | None = None,
+    decision_label: str | None = None,
+) -> dict[str, Any]:
+    reply = sanitize_text(reply_text or "")
+    lowered_reply = reply.lower()
+    analyzer = current_turn_analyzer(message_text, conversation, history)
+    label = sanitize_text(decision_label or "").lower()
+    booking_or_system = label in {"appointment_created", "collect_time", "collect_date", "collect_phone", "collect_name"} or conversation_stage_manager(message_text, conversation) == "booking"
+    allow_four_sentence_info = label in {"more_details_acceptance", "detailed_service_overview"}
+    if not reply:
+        return {"passed": False, "reason": "empty_reply", "analyzer": analyzer}
+    if any(phrase in lowered_reply for phrase in EVASIVE_RECOMMENDATION_REPLY_BLOCKLIST) and not is_simple_greeting(message_text):
+        return {"passed": False, "reason": "blocked_evasive_phrase", "analyzer": analyzer}
+    if not booking_or_system and count_reply_sentences(reply) > (4 if allow_four_sentence_info else 3):
+        return {"passed": False, "reason": "too_long", "analyzer": analyzer}
+    if analyzer.get("current_subsector") == "plumbing" and any(token in lowered_reply for token in ["dövme", "dovme", "tattoo", "portfolyo"]):
+        return {"passed": False, "reason": "wrong_old_sector_context", "analyzer": analyzer}
+    if analyzer.get("current_subsector") == "tattoo" and any(token in lowered_reply for token in ["musluk", "tesisat"]):
+        return {"passed": False, "reason": "wrong_old_sector_context", "analyzer": analyzer}
+    if analyzer.get("is_price_question") and not has_price_or_scope_answer(reply):
+        return {"passed": False, "reason": "price_not_answered", "analyzer": analyzer}
+    if analyzer.get("is_business_fit_question"):
+        recommendation_tokens = ["mantıklı", "mantikli", "başlangıç", "baslangic", "öner", "oner", "uygun"]
+        if not any(token in lowered_reply for token in recommendation_tokens):
+            return {"passed": False, "reason": "missing_recommendation", "analyzer": analyzer}
+    if is_real_estate_off_topic_question(message_text) and any(token in lowered_reply for token in ["otomasyon", "sosyal medya", "reklam"]):
+        return {"passed": False, "reason": "off_topic_sales_pitch", "analyzer": analyzer}
+    return {"passed": True, "reason": "passed", "analyzer": analyzer}
+
+
+def guard_and_repair_final_answer(
+    message_text: str,
+    reply_text: str | None,
+    conversation: dict[str, Any],
+    history: list[dict[str, Any]] | None = None,
+    decision_label: str | None = None,
+) -> dict[str, Any]:
+    first = final_answer_quality_guard(message_text, reply_text, conversation, history, decision_label)
+    if first["passed"]:
+        return {"reply_text": sanitize_text(reply_text or ""), "passed": True, "repaired": False, "reason": first["reason"]}
+    repaired = build_safe_reply_builder(message_text, conversation, history, decision_label)
+    second = final_answer_quality_guard(message_text, repaired, conversation, history, decision_label)
+    if second["passed"]:
+        return {"reply_text": repaired, "passed": True, "repaired": True, "reason": first["reason"]}
+    fallback = "Mesajınızı aldık, kontrol edip size en kısa sürede dönüş yapacağız."
+    return {"reply_text": fallback, "passed": True, "repaired": True, "reason": second["reason"]}
+
+
 def should_use_customer_recommendation_override(
     message_text: str,
     decision: dict[str, Any],
@@ -8228,10 +8552,12 @@ def should_use_customer_recommendation_override(
         or is_smalltalk_message(message_text)
         or is_assistant_identity_question(message_text)
         or is_real_estate_off_topic_question(message_text)
+        or is_price_question(message_text)
         or is_angry_complaint_message(message_text)
         or is_meeting_clarification_question(message_text)
         or is_meeting_method_question(message_text)
         or is_phone_reason_question(message_text)
+        or message_shows_booking_intent(message_text, decision)
     ):
         return False
     memory = ensure_conversation_memory(conversation)
@@ -8239,7 +8565,13 @@ def should_use_customer_recommendation_override(
     has_goal_in_message = bool(detect_customer_goal(message_text, history))
     return bool(
         has_customer_context
-        and (is_business_fit_question(message_text) or is_service_choice_help_request(message_text) or has_goal_in_message or is_evasive_recommendation_reply(decision.get("reply_text")))
+        and (
+            is_business_fit_question(message_text)
+            or is_service_choice_help_request(message_text)
+            or is_business_need_analysis_message(message_text)
+            or has_goal_in_message
+            or is_evasive_recommendation_reply(decision.get("reply_text"))
+        )
     )
 
 
@@ -8248,8 +8580,9 @@ def build_business_fit_reply(
     message_text: str | None = None,
     history: list[dict[str, Any]] | None = None,
 ) -> str:
-    if has_tattoo_customer_context(conversation, message_text, history):
-        return build_tattoo_recommendation_reply(conversation, message_text, history)
+    memory = ensure_conversation_memory(conversation)
+    if memory.get("customer_sector") or memory.get("customer_subsector") or detect_customer_subsector(message_text or "", history):
+        return recommendation_engine(conversation, message_text, history)
     service = display_service_name(conversation.get("service"))
     service_meta = match_service_catalog(service, service) if service else None
     slug = str((service_meta or {}).get("slug") or "")
@@ -10054,8 +10387,8 @@ def apply_ai_first_quality_overrides(
     known_service_name = conversation.get("service") or decision.get("extracted_service") or direct_service
     known_service_meta = match_service_catalog(known_service_name, known_service_name) if known_service_name else None
     merge_customer_context_memory(message_text, conversation, history)
-    if has_tattoo_customer_context(conversation, message_text, history) and should_use_customer_recommendation_override(message_text, decision, conversation, history):
-        decision["reply_text"] = build_tattoo_recommendation_reply(conversation, message_text, history)
+    if should_use_customer_recommendation_override(message_text, decision, conversation, history):
+        decision["reply_text"] = recommendation_engine(conversation, message_text, history)
         decision["intent"] = "business_recommendation"
         decision["booking_intent"] = False
         decision["missing_fields"] = []
@@ -10117,6 +10450,22 @@ def apply_ai_first_quality_overrides(
     if is_business_fit_question(message_text):
         decision["reply_text"] = build_business_fit_reply(conversation, message_text, history)
         decision["intent"] = "business_fit"
+        decision["booking_intent"] = False
+        decision["missing_fields"] = []
+        decision["should_reply"] = True
+        return decision
+    if (
+        (is_confirmation_acceptance_message(message_text) or is_detail_continuation_acceptance_message(message_text) or message_shows_booking_intent(message_text, {}))
+        and ensure_conversation_memory(conversation).get("pending_offer") != "preconsultation_offer"
+        and not recent_outbound_can_start_service_consultation(history, conversation)
+        and (
+            recent_outbound_offered_more_details(history)
+            or recent_outbound_asked_for_detail_continuation(history)
+            or recent_outbound_can_accept_automation_details(history, conversation)
+        )
+    ):
+        decision["reply_text"] = build_more_details_acceptance_reply(conversation)
+        decision["intent"] = "more_details_acceptance"
         decision["booking_intent"] = False
         decision["missing_fields"] = []
         decision["should_reply"] = True
@@ -10244,9 +10593,26 @@ def apply_ai_first_quality_overrides(
         decision["extracted_service"] = service
         decision["missing_fields"] = []
         return decision
+    if (
+        (is_confirmation_acceptance_message(message_text) or is_detail_continuation_acceptance_message(message_text) or message_shows_booking_intent(message_text, {}))
+        and ensure_conversation_memory(conversation).get("pending_offer") != "preconsultation_offer"
+        and not recent_outbound_can_start_service_consultation(history, conversation)
+        and (
+            recent_outbound_offered_more_details(history)
+            or recent_outbound_asked_for_detail_continuation(history)
+            or recent_outbound_can_accept_automation_details(history, conversation)
+        )
+    ):
+        decision["reply_text"] = build_more_details_acceptance_reply(conversation)
+        decision["intent"] = "more_details_acceptance"
+        decision["booking_intent"] = False
+        decision["missing_fields"] = []
+        decision["should_reply"] = True
+        return decision
     if is_explicit_detail_request(message_text) and (
         recent_outbound_offered_consultation(history)
         or recent_outbound_offered_more_details(history)
+        or recent_outbound_asked_for_detail_continuation(history)
         or recent_outbound_can_accept_automation_details(history, conversation)
     ):
         decision["reply_text"] = build_more_details_acceptance_reply(conversation)
@@ -10401,6 +10767,7 @@ def build_ai_first_decision(
     history: list[dict[str, Any]] | None = None,
     llm_data: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    memory_manager(message_text, conversation, history, llm_data)
     selected_models = select_ai_first_models(message_text, conversation)
     payload = build_ai_first_prompt_payload(message_text, conversation, history, llm_data)
     messages = [
@@ -10481,6 +10848,19 @@ def build_ai_first_decision(
     decision = repair_ai_first_decision_with_ai(message_text, decision, conversation, history, llm_data, selected_models)
     decision = apply_ai_first_quality_overrides(message_text, decision, conversation, history)
     decision = apply_soft_cta_strategy(message_text, decision, conversation, history)
+    guarded = guard_and_repair_final_answer(
+        message_text,
+        decision.get("reply_text"),
+        conversation,
+        history,
+        decision_label=decision.get("intent"),
+    )
+    if guarded.get("repaired"):
+        decision["reply_text"] = guarded["reply_text"]
+        decision["booking_intent"] = False
+        decision["missing_fields"] = []
+        decision["final_guard_repaired"] = True
+        decision["final_guard_reason"] = guarded.get("reason")
     if is_low_quality_ai_first_reply(decision.get("reply_text")):
         decision["reply_text"] = build_ai_first_emergency_reply(message_text, conversation)
         decision["intent"] = "recovered_low_quality_reply"

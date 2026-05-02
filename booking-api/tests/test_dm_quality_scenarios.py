@@ -676,6 +676,209 @@ def test_tattoo_dm_and_appointment_goal_allows_automation_recommendation(monkeyp
     assert conversation["memory_state"]["customer_goal"] == "dm_automation"
 
 
+def test_latest_sector_overrides_old_tattoo_memory_for_plumbing(monkeypatch):
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text="Dovme isi icin sosyal medya ve portfolyo onceliklidir.",
+            intent="service_advice",
+            booking_intent=False,
+            missing_fields=[],
+        ),
+    )
+    conversation = {
+        "service": None,
+        "state": "new",
+        "memory_state": {"customer_sector": "beauty", "customer_subsector": "tattoo"},
+    }
+
+    decision = main.build_ai_first_decision("Musluk tamircisiyim ben hangisi isime yarar?", conversation, [], {})
+
+    reply = main.sanitize_text(decision["reply_text"]).lower()
+    memory = conversation["memory_state"]
+    assert memory["customer_sector"] == "local_service"
+    assert memory["customer_subsector"] == "plumbing"
+    assert "musluk" in reply or "tesisat" in reply
+    assert "web" in reply or "landing" in reply
+    assert "google" in reply or "reklam" in reply
+    assert "dovme" not in reply and "tattoo" not in reply
+
+
+def test_latest_sector_overrides_old_plumbing_memory_for_tattoo(monkeypatch):
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text="Musluk tamiri icin Google reklam ve landing page uygundur.",
+            intent="service_advice",
+            booking_intent=False,
+            missing_fields=[],
+        ),
+    )
+    conversation = {
+        "service": None,
+        "state": "new",
+        "memory_state": {"customer_sector": "local_service", "customer_subsector": "plumbing"},
+    }
+
+    decision = main.build_ai_first_decision("Ben dovmeciyim hangisi isime yarar?", conversation, [], {})
+
+    reply = main.sanitize_text(decision["reply_text"]).lower()
+    memory = conversation["memory_state"]
+    assert memory["customer_sector"] == "beauty"
+    assert memory["customer_subsector"] == "tattoo"
+    assert "sosyal medya" in reply or "performans reklam" in reply
+    assert "portfolyo" in reply or "instagram" in reply
+    assert "musluk" not in reply and "tesisat" not in reply
+
+
+def test_plumbing_visibility_recommendation_does_not_use_old_tattoo_context(monkeypatch):
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text="Instagram portfolyonuzu daha gorunur hale getirebiliriz.",
+            intent="service_advice",
+            booking_intent=False,
+            missing_fields=[],
+        ),
+    )
+    conversation = {
+        "service": None,
+        "state": "new",
+        "memory_state": {"customer_sector": "beauty", "customer_subsector": "tattoo"},
+    }
+
+    decision = main.build_ai_first_decision("Yok ben muslukcuyum, musteri bulmak istiyorum", conversation, [], {})
+
+    reply = main.sanitize_text(decision["reply_text"]).lower()
+    assert conversation["memory_state"]["customer_subsector"] == "plumbing"
+    assert "google" in reply or "web" in reply or "landing" in reply
+    assert "acil" in reply or "lokal" in reply or "usta" in reply
+    assert "portfolyo" not in reply and "dovme" not in reply
+
+
+def test_hairdresser_business_fit_uses_beauty_context(monkeypatch):
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text="Hedefinizi bilmem gerekir.",
+            intent="service_advice",
+            booking_intent=False,
+            missing_fields=[],
+        ),
+    )
+    conversation = {"service": None, "state": "new", "memory_state": {}}
+
+    decision = main.build_ai_first_decision("Ben kuaforum hangisi isime yarar?", conversation, [], {})
+
+    reply = main.sanitize_text(decision["reply_text"]).lower()
+    assert conversation["memory_state"]["customer_subsector"] == "hairdresser"
+    assert "sosyal medya" in reply
+    assert "reklam" in reply
+    assert "randevu" in reply or "lokasyon" in reply or "model" in reply
+    assert "hedefinizi bilmem gerekir" not in reply
+
+
+def test_real_estate_goal_recommends_web_lead_ads_and_crm(monkeypatch):
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text="Daha fazla bilgi ister misiniz?",
+            intent="service_advice",
+            booking_intent=False,
+            missing_fields=[],
+        ),
+    )
+    conversation = {"service": None, "state": "new", "memory_state": {}}
+
+    main.update_conversation_memory_from_user_message("Ben emlakciyim", conversation, [], {})
+    decision = main.build_ai_first_decision("Musteri bulmak istiyorum", conversation, [], {})
+
+    reply = main.sanitize_text(decision["reply_text"]).lower()
+    assert "web" in reply or "landing" in reply
+    assert "lead" in reply or "reklam" in reply
+    assert "crm" in reply or "otomasyon" in reply
+    assert "daha fazla bilgi ister misiniz" not in reply
+
+
+def test_price_question_with_business_context_gets_scope_answer_not_evasive(monkeypatch):
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text="Net soylemek icin isinizi bilmem gerekir.",
+            intent="pricing_info",
+            booking_intent=False,
+            missing_fields=[],
+        ),
+    )
+    conversation = {
+        "service": None,
+        "state": "new",
+        "memory_state": {"customer_sector": "local_service", "customer_subsector": "plumbing"},
+    }
+
+    decision = main.build_ai_first_decision("Fiyat ne kadar?", conversation, [], {})
+
+    reply = main.sanitize_text(decision["reply_text"]).lower()
+    assert "fiyat" in reply
+    assert "kapsam" in reply or "web" in reply or "reklam" in reply or "otomasyon" in reply
+    assert "net soylemek icin" not in reply
+    assert "isinizi bilmem gerekir" not in reply
+    assert len([part for part in decision["reply_text"].replace("?", ".").split(".") if part.strip()]) <= 3
+
+
+def test_quality_guard_rejects_wrong_sector_ai_candidate():
+    conversation = {
+        "service": None,
+        "state": "new",
+        "memory_state": {"customer_sector": "local_service", "customer_subsector": "plumbing"},
+    }
+    bad_reply = "Dövme işi için sosyal medya portfolyonuzu büyütmek en mantıklı başlangıç olur."
+
+    guarded = main.guard_and_repair_final_answer(
+        "Musluk tamircisiyim ben hangisi isime yarar?",
+        bad_reply,
+        conversation,
+        [],
+        decision_label="service_advice",
+    )
+
+    reply = main.sanitize_text(guarded["reply_text"]).lower()
+    assert guarded["passed"] is True
+    assert guarded["repaired"] is True
+    assert "musluk" in reply or "tesisat" in reply
+    assert "dovme" not in reply and "tattoo" not in reply
+
+
+def test_unrelated_question_does_not_get_sales_pitch_even_with_business_memory(monkeypatch):
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text="Dövme işi için sosyal medya reklamlarıyla ilerleyebiliriz.",
+            intent="off_topic",
+            booking_intent=False,
+            missing_fields=[],
+        ),
+    )
+    conversation = {
+        "service": None,
+        "state": "new",
+        "memory_state": {"customer_sector": "beauty", "customer_subsector": "tattoo"},
+    }
+
+    decision = main.build_ai_first_decision("Ev satiyor musunuz?", conversation, [], {})
+
+    reply = main.sanitize_text(decision["reply_text"]).lower()
+    assert "hayir" in reply or "satmiyoruz" in reply or "sunmuyoruz" in reply
+    assert "dovme" not in reply and "sosyal medya reklam" not in reply
+
+
 def test_completed_booking_thanks_does_not_repeat_appointment_summary(monkeypatch):
     monkeypatch.setattr(
         main,
