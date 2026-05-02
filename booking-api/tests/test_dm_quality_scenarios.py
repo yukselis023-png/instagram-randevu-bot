@@ -995,3 +995,25 @@ def test_sector_intro_gets_contextual_recommendation_not_generic_fallback(monkey
     assert "kuafor" in reply or "berber" in reply
     assert "sosyal medya" in reply or "reklam" in reply
     assert "neyi merak" not in reply
+
+
+def test_real_estate_intro_sets_memory_and_uses_real_estate_context(monkeypatch):
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text="Buradayım. Web, otomasyon, reklam veya sosyal medya tarafında neyi merak ettiğinizi yazarsanız net şekilde cevaplayayım.",
+            intent="fallback_reply",
+            booking_intent=False,
+            missing_fields=[],
+        ),
+    )
+    conversation = {"service": None, "state": "new", "memory_state": {}}
+
+    decision = main.build_ai_first_decision("Ben emlakciyim", conversation, [], {})
+
+    reply = main.sanitize_text(decision["reply_text"]).lower()
+    assert conversation["memory_state"]["customer_subsector"] == "real_estate"
+    assert "emlak" in reply
+    assert "lead" in reply or "reklam" in reply or "crm" in reply
+    assert "neyi merak" not in reply
