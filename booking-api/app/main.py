@@ -10467,10 +10467,13 @@ def apply_ai_first_quality_overrides(
         decision["missing_fields"] = []
         decision["should_reply"] = True
         return decision
+    explicit_business_context = bool(detect_customer_subsector(message_text) or detect_business_sector(message_text))
     if (
-        is_business_context_intro_message(message_text, history)
+        (explicit_business_context or is_business_context_intro_message(message_text, history))
         and not is_service_overview_question(message_text)
         and not is_general_information_request(message_text)
+        and not is_simple_greeting(message_text)
+        and not (known_service_meta and known_service_meta.get("slug") == "web-tasarim")
     ):
         decision["reply_text"] = recommendation_engine(conversation, message_text, history)
         decision["intent"] = "business_context_intro"

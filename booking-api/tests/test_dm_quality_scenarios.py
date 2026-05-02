@@ -973,3 +973,25 @@ def test_soft_cta_after_sector_price_context_without_locked_service(monkeypatch)
     assert "10 dakikalik" in reply
     assert "on gorusme" in reply
     assert "hangi hizmet" not in reply
+
+
+def test_sector_intro_gets_contextual_recommendation_not_generic_fallback(monkeypatch):
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text="Buradayım. Web, otomasyon, reklam veya sosyal medya tarafında neyi merak ettiğinizi yazarsanız net şekilde cevaplayayım.",
+            intent="fallback_reply",
+            booking_intent=False,
+            missing_fields=[],
+        ),
+    )
+    conversation = {"service": None, "state": "new", "memory_state": {}}
+
+    decision = main.build_ai_first_decision("Ben kuaforum", conversation, [], {})
+
+    reply = main.sanitize_text(decision["reply_text"]).lower()
+    assert decision["intent"] == "business_context_intro"
+    assert "kuafor" in reply or "berber" in reply
+    assert "sosyal medya" in reply or "reklam" in reply
+    assert "neyi merak" not in reply
