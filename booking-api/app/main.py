@@ -8450,6 +8450,8 @@ def recommendation_engine(
     if subsector == "restaurant":
         return "Restoran/kafe için sosyal medya içerikleri + lokal reklam iyi başlangıç olur; menü, lokasyon ve kampanyalar görünür olmalı. Paket servis veya rezervasyon yoğunluğu varsa WhatsApp/DM otomasyonu ikinci aşamada mantıklı."
     if subsector == "real_estate" or sector == "real_estate":
+        if "emlak tarafinda" in last_outbound or "emlak tarafında" in last_outbound:
+            return "Müşteri bulmak için lead reklam + güven veren ilan/landing sayfasıyla ilerlemek en doğru başlangıç olur. Gelen talepleri kaçırmamak için CRM takibi ekleyip hangi ilan ve bölgeden dönüş geldiğini net ölçebiliriz."
         return "Emlak tarafında web/landing page + lead reklam en doğru başlangıç olur; ilanları güven veren bir sayfada toplayıp doğru bölgeden talep çekmek gerekir. CRM/otomasyon da gelen leadleri ve dönüşleri kaçırmamak için destek olur."
     if subsector == "ecommerce" or sector == "ecommerce":
         return "E-ticarette performans reklamları + site dönüşüm optimizasyonu en mantıklı başlangıç olur; trafik kadar sepet ve satın alma akışı da önemli. Sipariş/mesaj yoğunluğu artarsa otomasyonla takip güçlendirilir."

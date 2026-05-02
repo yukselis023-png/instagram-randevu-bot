@@ -880,6 +880,37 @@ def test_real_estate_goal_recommends_web_lead_ads_and_crm(monkeypatch):
     assert "daha fazla bilgi ister misiniz" not in reply
 
 
+def test_real_estate_goal_followup_does_not_repeat_previous_reply(monkeypatch):
+    previous_reply = (
+        "Emlak tarafinda web/landing page + lead reklam en dogru baslangic olur; "
+        "ilanlari guven veren bir sayfada toplayip dogru bolgeden talep cekmek gerekir."
+    )
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text=previous_reply,
+            intent="service_advice",
+            booking_intent=False,
+            missing_fields=[],
+        ),
+    )
+    conversation = {
+        "service": None,
+        "state": "new",
+        "memory_state": {"customer_sector": "real_estate", "customer_subsector": "real_estate"},
+    }
+    history = [{"direction": "out", "message_text": previous_reply}]
+
+    decision = main.build_ai_first_decision("Musteri bulmak istiyorum", conversation, history, {})
+
+    reply = main.sanitize_text(decision["reply_text"]).lower()
+    assert reply != main.sanitize_text(previous_reply).lower()
+    assert "lead" in reply or "reklam" in reply
+    assert "crm" in reply
+    assert "ilan" in reply or "landing" in reply
+
+
 def test_price_question_with_business_context_gets_scope_answer_not_evasive(monkeypatch):
     monkeypatch.setattr(
         main,
