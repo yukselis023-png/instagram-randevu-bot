@@ -541,6 +541,21 @@ BUSINESS_NEED_ANALYSIS_KEYWORDS = [
 BUSINESS_CONTEXT_INTRO_KEYWORDS = ["işletiyorum", "isletiyorum", "salonum var", "merkezim var", "işletmem var", "isletmem var", "kliniğim var", "klinigim var"]
 BEAUTY_BUSINESS_KEYWORDS = ["güzellik salonu", "guzellik salonu", "güzellik merkezi", "guzellik merkezi", "kuaför", "kuafor", "cilt bakım", "cilt bakımı", "cilt bakimi", "protez tırnak", "protez tirnak", "epilasyon", "lazer", "bakım merkezi", "bakim merkezi", "dövme", "dovme", "dövmeci", "dovmeci", "dövmeciyim", "dovmeciyim", "tattoo", "tattoo studio", "tattoo stüdyo", "tattoo studyo"]
 REAL_ESTATE_BUSINESS_KEYWORDS = ["emlak", "gayrimenkul", "ilan", "portföy", "portfoy", "arsa", "daire", "konut", "kiralık", "kiralik", "satılık", "satilik", "yer gösterme", "yer gosterme"]
+TATTOO_SUBSECTOR_KEYWORDS = ["dövme", "dovme", "dövmeci", "dovmeci", "dövmeciyim", "dovmeciyim", "tattoo", "tattoo artist", "tattoo studio", "tattoo stüdyo", "tattoo studyo"]
+VISIBILITY_ADS_GOAL_KEYWORDS = ["sosyal medya", "instagram", "görünür", "gorunur", "görünürlük", "gorunurluk", "reklam", "ads", "performans reklam", "kitle", "takipçi", "takipci", "keşfet", "kesfet"]
+DM_AUTOMATION_GOAL_KEYWORDS = ["dm", "mesaj", "randevu", "randevular", "karışıyor", "karisiyor", "çok geliyor", "cok geliyor", "yoğun", "yogun", "yetişemiyorum", "yetisemiyorum", "otomatik", "otomasyon"]
+PORTFOLIO_TRUST_GOAL_KEYWORDS = ["portfolyo", "portfolio", "güven", "guven", "web", "website", "site", "kurumsal"]
+MORE_BOOKINGS_GOAL_KEYWORDS = ["daha çok müşteri", "daha cok musteri", "müşteri gelsin", "musteri gelsin", "randevu almak", "randevu sayısı", "randevu sayisi", "satış", "satis"]
+NORMALIZED_CUSTOMER_GOALS = {"visibility/ads", "more_bookings", "dm_automation", "portfolio_trust"}
+EVASIVE_RECOMMENDATION_REPLY_BLOCKLIST = [
+    "işinizi ve hedefinizi bilmem gerekir",
+    "isinizi ve hedefinizi bilmem gerekir",
+    "yarar sağlayıp sağlamayacağını net söylemek için",
+    "yarar saglayip saglamayacagini net soylemek icin",
+    "hedefinizi bilmem gerekir",
+    "net söylemek için işinizi bilmem gerekir",
+    "net soylemek icin isinizi bilmem gerekir",
+]
 DM_DELAY_KEYWORDS = ["gecikme", "geç dönüş", "gec donus", "geç cevap", "gec cevap", "geç yanıt", "gec yanit", "yanıt zor", "yanit zor", "yavaş dönüş", "yavas donus"]
 REPEATED_MESSAGE_ISSUE_KEYWORDS = ["tekrar eden mesaj", "tekrar eden mesajlar", "aynı sorular", "ayni sorular", "aynı şeyler", "ayni seyler", "aynı mesajlar", "ayni mesajlar", "sürekli aynı", "surekli ayni"]
 MESSAGE_VOLUME_KEYWORDS = ["çok kişi yazıyor", "cok kisi yaziyor", "çok mesaj geliyor", "cok mesaj geliyor", "çok mesaj", "cok mesaj", "çok dm geliyor", "cok dm geliyor", "çok dm", "cok dm", "günde", "gunde", "günlük", "gunluk", "mesaj trafiği", "mesaj trafigi", "dm trafiği", "dm trafigi", "çok talep geliyor", "cok talep geliyor", "çok yoğun", "cok yogun"]
@@ -553,6 +568,7 @@ CONFIRMATION_ACCEPTANCE_MESSAGES = {
 CONVERSATION_MEMORY_DEFAULTS = {
     "customer_goal": None,
     "customer_sector": None,
+    "customer_subsector": None,
     "pain_points": [],
     "last_bot_question_type": None,
     "answered_question_types": [],
@@ -3826,7 +3842,13 @@ def contains_business_keyword(text: str, keywords: list[str]) -> bool:
 
 
 def detect_business_sector(text: str, history: list[dict[str, Any]] | None = None) -> str | None:
-    combined = sanitize_text(text)
+    current = sanitize_text(text)
+    current_lower = current.lower()
+    if contains_business_keyword(current_lower, BEAUTY_BUSINESS_KEYWORDS):
+        return "beauty"
+    if contains_business_keyword(current_lower, REAL_ESTATE_BUSINESS_KEYWORDS):
+        return "real_estate"
+    combined = current
     for item in history or []:
         if item.get("direction") == "in":
             combined = f"{combined} {sanitize_text(item.get('message_text') or '')}".strip()
@@ -3836,6 +3858,62 @@ def detect_business_sector(text: str, history: list[dict[str, Any]] | None = Non
     if contains_business_keyword(lowered, REAL_ESTATE_BUSINESS_KEYWORDS):
         return "real_estate"
     return None
+
+
+def detect_customer_subsector(text: str, history: list[dict[str, Any]] | None = None) -> str | None:
+    current = sanitize_text(text)
+    current_lower = current.lower()
+    if contains_business_keyword(current_lower, TATTOO_SUBSECTOR_KEYWORDS):
+        return "tattoo"
+    combined = current
+    for item in history or []:
+        if item.get("direction") == "in":
+            combined = f"{combined} {sanitize_text(item.get('message_text') or '')}".strip()
+    if contains_business_keyword(combined.lower(), TATTOO_SUBSECTOR_KEYWORDS):
+        return "tattoo"
+    return None
+
+
+def detect_customer_goal(text: str, history: list[dict[str, Any]] | None = None) -> str | None:
+    lowered = sanitize_text(text).lower()
+    if not lowered:
+        return None
+    dm_strength = sum(1 for keyword in DM_AUTOMATION_GOAL_KEYWORDS if keyword in lowered)
+    visibility_strength = sum(1 for keyword in VISIBILITY_ADS_GOAL_KEYWORDS if keyword in lowered)
+    portfolio_strength = sum(1 for keyword in PORTFOLIO_TRUST_GOAL_KEYWORDS if keyword in lowered)
+    booking_strength = sum(1 for keyword in MORE_BOOKINGS_GOAL_KEYWORDS if keyword in lowered)
+
+    if dm_strength >= 2 or ("dm" in lowered and any(token in lowered for token in ["çok", "cok", "yoğun", "yogun", "karış", "karis", "randevu"])):
+        return "dm_automation"
+    if visibility_strength >= 1:
+        return "visibility/ads"
+    if portfolio_strength >= 1:
+        return "portfolio_trust"
+    if booking_strength >= 1:
+        return "more_bookings"
+    return None
+
+
+def merge_customer_context_memory(
+    message_text: str,
+    conversation: dict[str, Any],
+    history: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    memory = ensure_conversation_memory(conversation)
+    sector = detect_business_sector(message_text, history)
+    subsector = detect_customer_subsector(message_text, history)
+    goal = detect_customer_goal(message_text, history)
+
+    if subsector == "tattoo":
+        sector = "beauty"
+    if sector:
+        memory["customer_sector"] = sector
+    if subsector:
+        memory["customer_subsector"] = subsector
+    if goal:
+        memory["customer_goal"] = goal
+    conversation["memory_state"] = memory
+    return memory
 
 
 def is_all_choice_message(text: str) -> bool:
@@ -4650,6 +4728,8 @@ def build_conversation_memory_summary(conversation: dict[str, Any]) -> str | Non
     parts: list[str] = []
     if memory.get("customer_sector"):
         parts.append(f"sektör={memory['customer_sector']}")
+    if memory.get("customer_subsector"):
+        parts.append(f"alt_sektör={memory['customer_subsector']}")
     if memory.get("customer_goal"):
         parts.append(f"hedef={memory['customer_goal']}")
     if memory.get("pain_points"):
@@ -4722,13 +4802,12 @@ def update_conversation_memory_from_user_message(
     detected_time: str | None = None,
 ) -> None:
     llm_data = llm_data or {}
-    memory = ensure_conversation_memory(conversation)
-    sector = detect_business_sector(message_text, history)
-    if sector:
-        memory["customer_sector"] = sector
+    memory = merge_customer_context_memory(message_text, conversation, history)
 
-    goal = sanitize_text(str(llm_data.get("what_user_needs") or infer_user_need(message_text, conversation, history) or ""))
-    if goal:
+    inferred_goal = sanitize_text(str(llm_data.get("what_user_needs") or infer_user_need(message_text, conversation, history) or ""))
+    existing_goal = sanitize_text(str(memory.get("customer_goal") or ""))
+    if inferred_goal and existing_goal not in NORMALIZED_CUSTOMER_GOALS:
+        goal = inferred_goal
         memory["customer_goal"] = goal[:240]
 
     if recent_outbound_requested_priority(history) or memory.get("last_bot_question_type") == "priority":
@@ -8101,7 +8180,76 @@ def build_short_service_interest_reply(service_meta: dict[str, Any]) -> str:
     return f"{display} tarafında ihtiyaca göre net bir yapı kuruyoruz.{suffix}"
 
 
-def build_business_fit_reply(conversation: dict[str, Any]) -> str:
+def has_tattoo_customer_context(
+    conversation: dict[str, Any],
+    message_text: str | None = None,
+    history: list[dict[str, Any]] | None = None,
+) -> bool:
+    memory = ensure_conversation_memory(conversation)
+    if sanitize_text(str(memory.get("customer_subsector") or "")).lower() == "tattoo":
+        return True
+    return detect_customer_subsector(message_text or "", history) == "tattoo"
+
+
+def is_evasive_recommendation_reply(reply_text: str | None) -> bool:
+    lowered = sanitize_text(reply_text or "").lower()
+    return any(phrase in lowered for phrase in EVASIVE_RECOMMENDATION_REPLY_BLOCKLIST)
+
+
+def build_tattoo_recommendation_reply(
+    conversation: dict[str, Any],
+    message_text: str | None = None,
+    history: list[dict[str, Any]] | None = None,
+) -> str:
+    memory = ensure_conversation_memory(conversation)
+    current_goal = detect_customer_goal(message_text or "", history)
+    goal = current_goal or sanitize_text(str(memory.get("customer_goal") or ""))
+    if current_goal:
+        memory["customer_goal"] = current_goal
+    if not memory.get("customer_sector"):
+        memory["customer_sector"] = "beauty"
+    memory["customer_subsector"] = "tattoo"
+
+    if goal == "dm_automation":
+        return "DM ve randevu yoğunluğu varsa otomasyon mantıklı olur; gelen mesajları karşılayıp randevu taleplerini CRM’e aktarır. Görünürlük tarafı için sosyal medya yönetimi + performans reklamları ayrı güçlendirilmeli."
+    if goal in {"visibility/ads", "portfolio_trust"}:
+        return "Sizin için sosyal medya yönetimi + performans reklamları en doğru başlangıç olur. Mevcut reklamların doğru kitleye gidip gitmediğini kontrol edip Instagram’da portfolyonuzu daha görünür hale getirebiliriz. Reklamları şu an kendiniz mi yönetiyorsunuz?"
+    return "Dövme işi için ilk önerim sosyal medya yönetimi + performans reklamları; portfolyo, lokasyon ve görsel iş Instagram’da güçlü görünmeli. Web sitesi güven ve portfolyo desteği olur, otomasyon ise DM/randevu yoğunluğu varsa ikinci aşamada mantıklı. Şu an hedefiniz görünürlük mü, randevu yoğunluğu mu?"
+
+
+def should_use_customer_recommendation_override(
+    message_text: str,
+    decision: dict[str, Any],
+    conversation: dict[str, Any],
+    history: list[dict[str, Any]] | None = None,
+) -> bool:
+    if (
+        is_simple_greeting(message_text)
+        or is_smalltalk_message(message_text)
+        or is_assistant_identity_question(message_text)
+        or is_real_estate_off_topic_question(message_text)
+        or is_angry_complaint_message(message_text)
+        or is_meeting_clarification_question(message_text)
+        or is_meeting_method_question(message_text)
+        or is_phone_reason_question(message_text)
+    ):
+        return False
+    memory = ensure_conversation_memory(conversation)
+    has_customer_context = bool(memory.get("customer_sector") or memory.get("customer_subsector") or memory.get("customer_goal"))
+    has_goal_in_message = bool(detect_customer_goal(message_text, history))
+    return bool(
+        has_customer_context
+        and (is_business_fit_question(message_text) or is_service_choice_help_request(message_text) or has_goal_in_message or is_evasive_recommendation_reply(decision.get("reply_text")))
+    )
+
+
+def build_business_fit_reply(
+    conversation: dict[str, Any],
+    message_text: str | None = None,
+    history: list[dict[str, Any]] | None = None,
+) -> str:
+    if has_tattoo_customer_context(conversation, message_text, history):
+        return build_tattoo_recommendation_reply(conversation, message_text, history)
     service = display_service_name(conversation.get("service"))
     service_meta = match_service_catalog(service, service) if service else None
     slug = str((service_meta or {}).get("slug") or "")
@@ -8428,6 +8576,7 @@ def build_compact_known_facts(conversation: dict[str, Any], *, include_contact: 
         for key in [
             "customer_goal",
             "customer_sector",
+            "customer_subsector",
             "pain_points",
             "last_bot_question_type",
             "answered_question_types",
@@ -9904,6 +10053,14 @@ def apply_ai_first_quality_overrides(
     direct_service_meta = match_service_catalog(direct_service, direct_service) if direct_service else None
     known_service_name = conversation.get("service") or decision.get("extracted_service") or direct_service
     known_service_meta = match_service_catalog(known_service_name, known_service_name) if known_service_name else None
+    merge_customer_context_memory(message_text, conversation, history)
+    if has_tattoo_customer_context(conversation, message_text, history) and should_use_customer_recommendation_override(message_text, decision, conversation, history):
+        decision["reply_text"] = build_tattoo_recommendation_reply(conversation, message_text, history)
+        decision["intent"] = "business_recommendation"
+        decision["booking_intent"] = False
+        decision["missing_fields"] = []
+        decision["should_reply"] = True
+        return decision
     if is_completed_booking_closeout_message(message_text, conversation):
         decision["reply_text"] = "Rica ederiz, görüşme saatinde bekliyoruz."
         decision["intent"] = "closing"
@@ -9958,7 +10115,7 @@ def apply_ai_first_quality_overrides(
         decision["should_reply"] = True
         return decision
     if is_business_fit_question(message_text):
-        decision["reply_text"] = build_business_fit_reply(conversation)
+        decision["reply_text"] = build_business_fit_reply(conversation, message_text, history)
         decision["intent"] = "business_fit"
         decision["booking_intent"] = False
         decision["missing_fields"] = []

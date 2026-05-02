@@ -570,6 +570,112 @@ def test_business_fit_question_does_not_become_brochure_dump(monkeypatch):
     assert len(decision["reply_text"].split()) <= 45
 
 
+def test_tattoo_sector_memory_merges_visibility_goal_without_losing_subsector():
+    conversation = {"state": "new", "memory_state": {}}
+
+    main.update_conversation_memory_from_user_message("Ben dovmeciyim", conversation, [], {})
+    memory = conversation["memory_state"]
+    assert memory["customer_sector"] == "beauty"
+    assert memory["customer_subsector"] == "tattoo"
+
+    main.update_conversation_memory_from_user_message(
+        "Sosyal medyada gorunur olmak istiyorum reklam veriyorum",
+        conversation,
+        [],
+        {},
+    )
+
+    memory = conversation["memory_state"]
+    assert memory["customer_goal"] == "visibility/ads"
+    assert memory["customer_sector"] == "beauty"
+    assert memory["customer_subsector"] == "tattoo"
+
+
+def test_tattoo_business_fit_recommends_social_and_ads_before_asking(monkeypatch):
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text="Yarar saglayip saglamayacagini net soylemek icin isinizi ve hedefinizi bilmem gerekir.",
+            intent="service_advice",
+            booking_intent=False,
+            missing_fields=[],
+        ),
+    )
+    conversation = {"service": None, "state": "new", "memory_state": {}}
+
+    decision = main.build_ai_first_decision("Bunlardan hangisi isime yarar? Ben dovmeciyim", conversation, [], {})
+
+    reply = main.sanitize_text(decision["reply_text"]).lower()
+    assert "sosyal medya" in reply or "performans reklam" in reply
+    assert any(token in reply for token in ["dovme", "portfolyo", "lokasyon", "gorsel", "instagram"])
+    assert reply.count("?") <= 1
+    assert "isinizi ve hedefinizi bilmem gerekir" not in reply
+    assert "yarar saglayip saglamayacagini net soylemek" not in reply
+
+
+def test_tattoo_visibility_ads_goal_gets_direct_recommendation_without_cta(monkeypatch):
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text="Hedefinizi bilmem gerekir, daha net bilgi verirseniz yardimci olurum.",
+            intent="service_advice",
+            booking_intent=False,
+            missing_fields=[],
+        ),
+    )
+    conversation = {
+        "service": None,
+        "state": "new",
+        "memory_state": {"customer_sector": "beauty", "customer_subsector": "tattoo"},
+    }
+
+    decision = main.build_ai_first_decision(
+        "Sosyal medyada gorunur olmak istiyorum reklam veriyorum",
+        conversation,
+        [],
+        {},
+    )
+
+    reply = main.sanitize_text(decision["reply_text"]).lower()
+    assert "sosyal medya" in reply
+    assert "performans reklam" in reply or "reklam" in reply
+    assert any(token in reply for token in ["kitle", "portfolyo", "instagram", "gorsel"])
+    assert "otomasyon" not in reply
+    assert "on gorusme" not in reply and "10 dakikalik" not in reply and "randevu" not in reply
+    assert "web tasarim" not in reply or "sosyal medya" in reply
+    assert "hedefinizi bilmem gerekir" not in reply
+    assert conversation["memory_state"]["customer_goal"] == "visibility/ads"
+    assert conversation["memory_state"]["customer_subsector"] == "tattoo"
+
+
+def test_tattoo_dm_and_appointment_goal_allows_automation_recommendation(monkeypatch):
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text="Sosyal medya tarafinda ilerleyebiliriz.",
+            intent="service_advice",
+            booking_intent=False,
+            missing_fields=[],
+        ),
+    )
+    conversation = {
+        "service": None,
+        "state": "new",
+        "memory_state": {"customer_sector": "beauty", "customer_subsector": "tattoo"},
+    }
+
+    decision = main.build_ai_first_decision("DM cok geliyor randevular karisiyor", conversation, [], {})
+
+    reply = main.sanitize_text(decision["reply_text"]).lower()
+    assert "otomasyon" in reply
+    assert "dm" in reply
+    assert "randevu" in reply
+    assert conversation["memory_state"]["customer_goal"] == "dm_automation"
+
+
 def test_completed_booking_thanks_does_not_repeat_appointment_summary(monkeypatch):
     monkeypatch.setattr(
         main,
