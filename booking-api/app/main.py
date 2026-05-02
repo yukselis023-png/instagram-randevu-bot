@@ -569,6 +569,8 @@ EVASIVE_RECOMMENDATION_REPLY_BLOCKLIST = [
     "hangi hizmetlerden yararlanmak istiyorsunuz",
     "hangi hizmetimizden yararlanmak istiyorsunuz",
     "hangi hizmeti istiyorsunuz",
+    "hangi hizmete interesse",
+    "hangi hizmete ilgi duyuyorsunuz",
     "daha fazla bilgi ister misiniz",
     "size nasıl yardımcı olabilirim",
     "size nasil yardimci olabilirim",
@@ -10452,6 +10454,26 @@ def apply_ai_first_quality_overrides(
     if is_real_estate_off_topic_question(message_text):
         decision["reply_text"] = build_real_estate_off_topic_reply()
         decision["intent"] = "off_topic"
+        decision["booking_intent"] = False
+        decision["missing_fields"] = []
+        decision["should_reply"] = True
+        return decision
+    memory = ensure_conversation_memory(conversation)
+    has_customer_context = bool(memory.get("customer_sector") or memory.get("customer_subsector") or memory.get("customer_goal"))
+    if is_price_question(message_text) and has_customer_context:
+        decision["reply_text"] = build_contextual_price_reply(conversation)
+        decision["intent"] = "pricing_info"
+        decision["booking_intent"] = False
+        decision["missing_fields"] = []
+        decision["should_reply"] = True
+        return decision
+    if (
+        is_business_context_intro_message(message_text, history)
+        and not is_service_overview_question(message_text)
+        and not is_general_information_request(message_text)
+    ):
+        decision["reply_text"] = recommendation_engine(conversation, message_text, history)
+        decision["intent"] = "business_context_intro"
         decision["booking_intent"] = False
         decision["missing_fields"] = []
         decision["should_reply"] = True
