@@ -7391,11 +7391,7 @@ def build_owner_check_reply(conversation: dict[str, Any]) -> str:
 
 
 def build_assistant_identity_reply(conversation: dict[str, Any]) -> str:
-    return "Ben DOEL Digital'in yapay zeka destekli dijital asistaniyim. Basit sorularda yardimci olurum, detay gereken yerde ekibe yonlendirebilirim."
-    base = "Ben DOEL Digital'in yapay zeka mesaj asistanıyım. Sorularınızı buradan yanıtlayabilir, gerekirse ekibe aktarabilirim."
-    if has_resumeable_booking_context(conversation):
-        return f"{base} {build_booking_resume_hint(conversation)}"
-    return base
+    return "Ben DOEL Digital'in yapay zeka destekli dijital asistanıyım. Basit sorularda yardımcı olurum, detay gereken yerde ekibe yönlendirebilirim."
 
 
 def build_greeting_interrupt_reply(conversation: dict[str, Any]) -> str:
@@ -8397,16 +8393,29 @@ def build_real_estate_off_topic_reply() -> str:
     return "Hayır, ev veya emlak satmıyoruz. DOEL Digital olarak dijital hizmetler tarafında destek veriyoruz."
 
 
+def format_company_capability_activity(activity: str) -> str:
+    normalized = sanitize_text(activity).lower()
+    labels = {
+        "sac kesimi": "saç kesimi",
+        "kuafor hizmeti": "kuaför hizmeti",
+        "ev veya emlak satisi": "ev veya emlak satışı",
+        "dis cekimi": "diş çekimi",
+        "urun satisi": "ürün satışı",
+    }
+    return labels.get(normalized, activity)
+
+
 def build_company_capability_reply(message_text: str) -> str:
     activity = detect_company_capability_activity(message_text) or "bu hizmeti"
+    activity_label = format_company_capability_activity(activity)
     if "emlak" in activity or "ev" in activity:
         return (
-            "Hayir, biz ev veya emlak satmiyoruz. "
-            "DOEL Digital olarak web sitesi, reklam, sosyal medya yonetimi ve otomasyon hizmetleri veriyoruz."
+            "Hayır, biz ev veya emlak satmıyoruz. "
+            "DOEL Digital olarak web sitesi, reklam, sosyal medya yönetimi ve otomasyon hizmetleri veriyoruz."
         )
     return (
-        f"Hayir, biz {activity} yapmiyoruz. "
-        "DOEL Digital olarak web sitesi, reklam, sosyal medya yonetimi ve otomasyon hizmetleri veriyoruz."
+        f"Hayır, biz {activity_label} yapmıyoruz. "
+        "DOEL Digital olarak web sitesi, reklam, sosyal medya yönetimi ve otomasyon hizmetleri veriyoruz."
     )
 
 
@@ -8653,7 +8662,7 @@ def build_safe_reply_builder(
     if is_assistant_identity_question(message_text):
         return build_assistant_identity_reply(conversation)
     if is_ping_or_attention_message(message_text):
-        return "Buradayim, yazabilirsiniz."
+        return "Buradayım, yazabilirsiniz."
     if is_real_estate_off_topic_question(message_text):
         return build_real_estate_off_topic_reply()
     if is_price_question(message_text):
@@ -10640,7 +10649,7 @@ def apply_ai_first_quality_overrides(
         decision["should_reply"] = True
         return decision
     if is_ping_or_attention_message(message_text):
-        decision["reply_text"] = "Buradayim, yazabilirsiniz."
+        decision["reply_text"] = "Buradayım, yazabilirsiniz."
         decision["intent"] = "ping_or_attention"
         decision["booking_intent"] = False
         decision["missing_fields"] = []
