@@ -509,7 +509,7 @@ def test_unrelated_question_gets_direct_answer_without_previous_service_pitch(mo
     assert "hayir" in reply or "hayır" in reply
     assert "emlak" in reply or "ev" in reply
     assert "sunmuyoruz" in reply or "satmiyoruz" in reply or "satmıyoruz" in reply
-    assert "otomasyon" not in reply
+    assert "daha once" not in reply and "daha önce" not in reply
     assert "detaylari gorusebiliriz" not in reply
 
 
@@ -1123,3 +1123,173 @@ def test_real_estate_intro_sets_memory_and_uses_real_estate_context(monkeypatch)
     assert "emlak" in reply
     assert "lead" in reply or "reklam" in reply or "crm" in reply
     assert "neyi merak" not in reply
+
+
+def test_company_capability_haircut_question_does_not_write_hairdresser_memory(monkeypatch):
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text="Kuafor/berber tarafinda sosyal medya yonetimi + lokal reklam en mantikli baslangic olur.",
+            intent="service_advice",
+            booking_intent=False,
+            missing_fields=[],
+        ),
+    )
+    conversation = {"service": None, "state": "new", "memory_state": {}}
+
+    decision = main.build_ai_first_decision("Sac kesiyor musunuz?", conversation, [], {})
+
+    reply = main.sanitize_text(decision["reply_text"]).lower()
+    memory = conversation["memory_state"]
+    assert "hayir" in reply
+    assert "sac kesimi" in reply or "sac kes" in reply
+    assert "sosyal medya yonetimi + lokal reklam" not in reply
+    assert memory.get("customer_sector") is None
+    assert memory.get("customer_subsector") is None
+
+
+def test_company_capability_question_general_patterns_do_not_update_sector_memory(monkeypatch):
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text="Emlak tarafinda web/landing page + lead reklam en dogru baslangic olur.",
+            intent="service_advice",
+            booking_intent=False,
+            missing_fields=[],
+        ),
+    )
+    cases = [
+        ("Ev satiyor musunuz?", ["ev", "emlak"]),
+        ("Musluk tamir ediyor musunuz?", ["musluk", "tamir"]),
+        ("Dis cekiyor musunuz?", ["dis", "cek"]),
+        ("Kargo yapiyor musunuz?", ["kargo"]),
+        ("Kuafor musunuz?", ["kuafor"]),
+    ]
+
+    for message, expected_terms in cases:
+        conversation = {"service": None, "state": "new", "memory_state": {}}
+        decision = main.build_ai_first_decision(message, conversation, [], {})
+
+        reply = main.sanitize_text(decision["reply_text"]).lower()
+        assert "hayir" in reply
+        assert any(term in reply for term in expected_terms)
+        assert "sosyal medya yonetimi + lokal reklam" not in reply
+        assert "lead reklam en dogru baslangic" not in reply
+        assert conversation["memory_state"].get("customer_sector") is None
+        assert conversation["memory_state"].get("customer_subsector") is None
+
+
+def test_user_correction_company_capability_runs_before_recommendation(monkeypatch):
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text="Kuafor/berber tarafinda sosyal medya yonetimi + lokal reklam en mantikli baslangic olur.",
+            intent="service_advice",
+            booking_intent=False,
+            missing_fields=[],
+        ),
+    )
+    conversation = {
+        "service": None,
+        "state": "new",
+        "memory_state": {"customer_sector": "beauty", "customer_subsector": "hairdresser"},
+    }
+
+    decision = main.build_ai_first_decision("Hayir siz sac kesiyor musunuz?", conversation, [], {})
+
+    reply = main.sanitize_text(decision["reply_text"]).lower()
+    assert "hayir" in reply
+    assert "sac kesimi" in reply or "sac kes" in reply
+    assert "lokal reklam" not in reply
+    assert "kuafor/berber tarafinda" not in reply
+
+
+def test_user_business_identity_hairdresser_still_triggers_recommendation(monkeypatch):
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text="Hayir, biz kuafor hizmeti vermiyoruz.",
+            intent="company_capability",
+            booking_intent=False,
+            missing_fields=[],
+        ),
+    )
+    conversation = {"service": None, "state": "new", "memory_state": {}}
+
+    decision = main.build_ai_first_decision("Ben kuaforum, hangisi isime yarar?", conversation, [], {})
+
+    reply = main.sanitize_text(decision["reply_text"]).lower()
+    assert conversation["memory_state"]["customer_subsector"] == "hairdresser"
+    assert "sosyal medya" in reply
+    assert "lokal reklam" in reply or "reklam" in reply
+    assert "biz kuafor hizmeti vermiyoruz" not in reply
+
+
+def test_assistant_identity_question_gets_digital_assistant_answer(monkeypatch):
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text="Evet, yapay zeka ve otomasyon cozumleri konusunda uzman bir ekibiz.",
+            intent="assistant_identity",
+            booking_intent=False,
+            missing_fields=[],
+        ),
+    )
+    conversation = {"service": None, "state": "new", "memory_state": {}}
+
+    decision = main.build_ai_first_decision("Yapay zeka misin sen?", conversation, [], {})
+
+    reply = main.sanitize_text(decision["reply_text"]).lower()
+    assert "doel digital" in reply
+    assert "dijital asistan" in reply
+    assert "uzman bir ekibiz" not in reply
+
+
+def test_ping_attention_does_not_reset_context_or_recommend(monkeypatch):
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text="Kuafor/berber tarafinda sosyal medya yonetimi + lokal reklam en mantikli baslangic olur.",
+            intent="service_advice",
+            booking_intent=False,
+            missing_fields=[],
+        ),
+    )
+    conversation = {
+        "service": None,
+        "state": "new",
+        "memory_state": {"customer_sector": "beauty", "customer_subsector": "hairdresser"},
+    }
+
+    decision = main.build_ai_first_decision("Alo?", conversation, [], {})
+
+    reply = main.sanitize_text(decision["reply_text"]).lower()
+    assert "buradayim" in reply
+    assert "lokal reklam" not in reply
+    assert conversation["memory_state"]["customer_subsector"] == "hairdresser"
+
+
+def test_forced_bad_ai_capability_reply_is_rejected_and_repaired():
+    conversation = {"service": None, "state": "new", "memory_state": {}}
+    bad_reply = "Kuafor/berber tarafinda sosyal medya yonetimi + lokal reklam en mantikli baslangic olur."
+
+    guarded = main.guard_and_repair_final_answer(
+        "Sac kesiyor musunuz?",
+        bad_reply,
+        conversation,
+        [],
+        decision_label="service_advice",
+    )
+
+    reply = main.sanitize_text(guarded["reply_text"]).lower()
+    assert guarded["passed"] is True
+    assert guarded["repaired"] is True
+    assert "hayir" in reply
+    assert "sac kesimi" in reply or "sac kes" in reply
+    assert "lokal reklam" not in reply

@@ -3766,6 +3766,16 @@ def is_presence_check_message(text: str) -> bool:
     return any(cue in lowered for cue in ["kimse", "burada", "burda", "orda", "orada", "aktif", "bakan", "bakıyor", "bakiyor"])
 
 
+def is_ping_or_attention_message(text: str) -> bool:
+    lowered = sanitize_text(text).lower()
+    compact = re.sub(r"[^a-z0-9]+", "", lowered)
+    if compact in {"alo", "aloo", "alooo"}:
+        return True
+    if any(phrase in lowered for phrase in ["cevap versene", "orada misiniz", "orda misiniz", "burada misiniz", "burda misiniz"]):
+        return True
+    return is_presence_check_message(text)
+
+
 def is_smalltalk_message(text: str) -> bool:
     lowered = sanitize_text(text).lower()
     if not lowered:
@@ -3873,7 +3883,116 @@ def contains_business_keyword(text: str, keywords: list[str]) -> bool:
     return False
 
 
+def is_user_correction_message(text: str) -> bool:
+    lowered = sanitize_text(text).lower()
+    correction_cues = [
+        "hayir siz",
+        "yok siz",
+        "ben size sordum",
+        "size sordum",
+        "siz yapiyor musunuz",
+        "siz yapıyor musunuz",
+        "siz yapiyor musunuz diyorum",
+        "yanlis anladin",
+        "yanlis anladiniz",
+        "yanlis anladın",
+        "yanlış anladın",
+        "ben onu demedim",
+        "onu demedim",
+    ]
+    return any(cue in lowered for cue in correction_cues)
+
+
+def detect_company_capability_activity(text: str) -> str | None:
+    lowered = sanitize_text(text).lower()
+    compact = re.sub(r"\s+", " ", lowered).strip(" ?.!,:;")
+    if not compact:
+        return None
+    if compact.startswith(("ben ", "biz ", "benim ", "bizim ")) or is_user_business_identity_message(text):
+        return None
+    capability_verbs = [
+        "musunuz", "müsünüz", "misiniz", "miyim",
+        "yapiyor musunuz", "yapıyor musunuz",
+        "satiyor musunuz", "satıyor musunuz",
+        "tamir ediyor musunuz", "kesiyor musunuz", "cekiyor musunuz", "çekiyor musunuz",
+        "hizmeti veriyor musunuz",
+    ]
+    if not any(verb in compact for verb in capability_verbs):
+        return None
+
+    activity_map = [
+        (["sac kes", "saç kes", "sac kesimi", "saç kesimi"], "sac kesimi"),
+        (["kuafor musunuz", "kuaför müsünüz", "kuafor hizmet", "kuaför hizmet"], "kuafor hizmeti"),
+        (["ev sat", "emlak sat", "daire sat", "konut sat", "arsa sat"], "ev veya emlak satisi"),
+        (["musluk tamir", "tesisat tamir", "su kacagi", "su kaçağı"], "musluk veya tesisat tamiri"),
+        (["dis cek", "diş çek"], "dis cekimi"),
+        (["kargo yap", "kargo hizmet"], "kargo hizmeti"),
+        (["urun sat", "ürün sat", "satis yapiyor", "satış yapıyor"], "urun satisi"),
+    ]
+    for needles, activity in activity_map:
+        if any(needle in compact for needle in needles):
+            return activity
+
+    patterns = [
+        r"^(?:siz\s+)?(.+?)\s+(?:yapiyor|yapıyor|yapar|veriyor|verir|satiyor|satıyor|tamir ediyor|ediyor)\s+musunuz$",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, compact)
+        if match:
+            activity = re.sub(r"^(siz|bir|bu)\s+", "", match.group(1)).strip()
+            if activity and len(activity.split()) <= 5:
+                return f"{activity} hizmeti"
+    return None
+
+
+def is_company_capability_question(text: str) -> bool:
+    lowered = sanitize_text(text).lower()
+    if not lowered or lowered.startswith(("ben ", "biz ", "benim ", "bizim ")) or is_user_business_identity_message(text):
+        return False
+    if is_user_correction_message(text) and detect_company_capability_activity(text):
+        return True
+    if "?" not in text and not any(token in lowered for token in ["musunuz", "misiniz", "müsünüz", "yapiyor musunuz", "yapıyor musunuz"]):
+        return False
+    return detect_company_capability_activity(text) is not None
+
+
+def is_user_business_identity_message(text: str) -> bool:
+    lowered = sanitize_text(text).lower()
+    identity_cues = [
+        "ben ",
+        "benim ",
+        "isletmem var",
+        "işletmem var",
+        "dukkanim var",
+        "dükkanım var",
+        "salonum var",
+        "kafem var",
+        "restoranim var",
+        "restoranım var",
+        "olarak calisiyorum",
+        "olarak çalışıyorum",
+        "sektorundeyim",
+        "sektöründeyim",
+    ]
+    if any(cue in lowered for cue in identity_cues):
+        return bool(
+            contains_business_keyword(lowered, BEAUTY_BUSINESS_KEYWORDS)
+            or contains_business_keyword(lowered, REAL_ESTATE_BUSINESS_KEYWORDS)
+            or contains_business_keyword(lowered, TATTOO_SUBSECTOR_KEYWORDS)
+            or contains_business_keyword(lowered, HAIRDRESSER_SUBSECTOR_KEYWORDS)
+            or contains_business_keyword(lowered, PLUMBING_SUBSECTOR_KEYWORDS)
+            or contains_business_keyword(lowered, RESTAURANT_SUBSECTOR_KEYWORDS)
+            or contains_business_keyword(lowered, CLINIC_SUBSECTOR_KEYWORDS)
+            or contains_business_keyword(lowered, ECOMMERCE_SUBSECTOR_KEYWORDS)
+            or contains_business_keyword(lowered, GYM_SUBSECTOR_KEYWORDS)
+            or contains_business_keyword(lowered, CLEANING_SUBSECTOR_KEYWORDS)
+        )
+    return bool(re.search(r"\b(kuaforum|berberim|dovmeciyim|muslukcuyum|tesisatciyim|tamirciyim|emlakciyim)\b", lowered))
+
+
 def detect_business_sector(text: str, history: list[dict[str, Any]] | None = None) -> str | None:
+    if is_company_capability_question(text) or is_user_correction_message(text):
+        return None
     current = sanitize_text(text)
     current_lower = current.lower()
     current_subsector = detect_customer_subsector(current, None)
@@ -3913,6 +4032,8 @@ def customer_sector_for_subsector(subsector: str | None) -> str | None:
 
 
 def detect_customer_subsector(text: str, history: list[dict[str, Any]] | None = None) -> str | None:
+    if is_company_capability_question(text) or is_user_correction_message(text):
+        return None
     current = sanitize_text(text)
     current_lower = current.lower()
     if contains_business_keyword(current_lower, TATTOO_SUBSECTOR_KEYWORDS):
@@ -3985,6 +4106,9 @@ def merge_customer_context_memory(
     history: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     memory = ensure_conversation_memory(conversation)
+    if is_company_capability_question(message_text) or is_user_correction_message(message_text):
+        conversation["memory_state"] = memory
+        return memory
     sector = detect_business_sector(message_text, None)
     subsector = detect_customer_subsector(message_text, None)
     goal = detect_customer_goal(message_text, history)
@@ -6386,8 +6510,6 @@ def extract_date(text: str) -> str | None:
     for word, weekday in WEEKDAY_MAP.items():
         if re.search(rf"\b{re.escape(word)}\b", lowered):
             delta = (weekday - today.weekday()) % 7
-            if delta == 0:
-                delta = 7
             return (today + timedelta(days=delta)).isoformat()
 
     results = search_dates(
@@ -7269,6 +7391,7 @@ def build_owner_check_reply(conversation: dict[str, Any]) -> str:
 
 
 def build_assistant_identity_reply(conversation: dict[str, Any]) -> str:
+    return "Ben DOEL Digital'in yapay zeka destekli dijital asistaniyim. Basit sorularda yardimci olurum, detay gereken yerde ekibe yonlendirebilirim."
     base = "Ben DOEL Digital'in yapay zeka mesaj asistanıyım. Sorularınızı buradan yanıtlayabilir, gerekirse ekibe aktarabilirim."
     if has_resumeable_booking_context(conversation):
         return f"{base} {build_booking_resume_hint(conversation)}"
@@ -8274,6 +8397,39 @@ def build_real_estate_off_topic_reply() -> str:
     return "Hayır, ev veya emlak satmıyoruz. DOEL Digital olarak dijital hizmetler tarafında destek veriyoruz."
 
 
+def build_company_capability_reply(message_text: str) -> str:
+    activity = detect_company_capability_activity(message_text) or "bu hizmeti"
+    if "emlak" in activity or "ev" in activity:
+        return (
+            "Hayir, biz ev veya emlak satmiyoruz. "
+            "DOEL Digital olarak web sitesi, reklam, sosyal medya yonetimi ve otomasyon hizmetleri veriyoruz."
+        )
+    return (
+        f"Hayir, biz {activity} yapmiyoruz. "
+        "DOEL Digital olarak web sitesi, reklam, sosyal medya yonetimi ve otomasyon hizmetleri veriyoruz."
+    )
+
+
+def reply_answers_company_capability_question(message_text: str, reply_text: str | None) -> bool:
+    lowered = sanitize_text(reply_text or "").lower()
+    if not lowered:
+        return False
+    if not any(token in lowered for token in ["hayir", "yapmiyoruz", "vermiyoruz", "sunmuyoruz", "satmiyoruz"]):
+        return False
+    if any(token in lowered for token in ["en mantikli baslangic", "lokal reklam", "lead reklam", "performans reklam", "randevu yogunlugu artarsa"]):
+        return False
+    activity = detect_company_capability_activity(message_text) or ""
+    if activity and "sac" in activity:
+        return "sac" in lowered
+    if activity and "emlak" in activity:
+        return "emlak" in lowered or "ev" in lowered
+    if activity and "musluk" in activity:
+        return "musluk" in lowered or "tesisat" in lowered
+    if activity and "kuafor" in activity:
+        return "kuafor" in lowered
+    return True
+
+
 def is_bare_service_interest_message(message_text: str, service_meta: dict[str, Any] | None) -> bool:
     if not service_meta:
         return False
@@ -8333,6 +8489,11 @@ def current_turn_analyzer(
     llm_data: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     llm_data = llm_data or {}
+    company_capability = is_company_capability_question(message_text)
+    correction = is_user_correction_message(message_text)
+    bot_identity = is_assistant_identity_question(message_text)
+    ping_attention = is_ping_or_attention_message(message_text)
+    business_identity = is_user_business_identity_message(message_text)
     current_subsector = detect_customer_subsector(message_text, None)
     current_sector = detect_business_sector(message_text, None)
     current_goal = detect_customer_goal(message_text, history)
@@ -8346,6 +8507,12 @@ def current_turn_analyzer(
         "current_sector": current_sector,
         "current_subsector": current_subsector,
         "current_goal": current_goal,
+        "is_company_capability_question": company_capability,
+        "is_user_business_identity": business_identity,
+        "is_user_correction": correction,
+        "is_bot_identity_question": bot_identity,
+        "is_ping_or_attention": ping_attention,
+        "company_capability_activity": detect_company_capability_activity(message_text) if company_capability or correction else None,
         "has_problem": is_fatigue_painpoint_message(message_text) or current_goal == "dm_automation",
         "is_price_question": is_price_question(message_text),
         "is_scope_question": is_service_information_request(message_text, match_service_catalog(conversation.get("service"), conversation.get("service")) if conversation.get("service") else None) or is_service_overview_question(message_text),
@@ -8364,6 +8531,8 @@ def memory_manager(
     llm_data: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     # Son kullanıcı mesajındaki açık bilgi eski memory'den üstündür; açık bilgi yoksa eski memory korunur.
+    if is_company_capability_question(message_text) or is_user_correction_message(message_text):
+        return ensure_conversation_memory(conversation)
     return merge_customer_context_memory(message_text, conversation, history)
 
 
@@ -8479,6 +8648,12 @@ def build_safe_reply_builder(
     history: list[dict[str, Any]] | None = None,
     decision_label: str | None = None,
 ) -> str:
+    if is_company_capability_question(message_text) or (is_user_correction_message(message_text) and detect_company_capability_activity(message_text)):
+        return build_company_capability_reply(message_text)
+    if is_assistant_identity_question(message_text):
+        return build_assistant_identity_reply(conversation)
+    if is_ping_or_attention_message(message_text):
+        return "Buradayim, yazabilirsiniz."
     if is_real_estate_off_topic_question(message_text):
         return build_real_estate_off_topic_reply()
     if is_price_question(message_text):
@@ -8558,6 +8733,12 @@ def final_answer_quality_guard(
     allow_four_sentence_info = label in {"more_details_acceptance", "detailed_service_overview"}
     if not reply:
         return {"passed": False, "reason": "empty_reply", "analyzer": analyzer}
+    if analyzer.get("is_company_capability_question") and not reply_answers_company_capability_question(message_text, reply):
+        return {"passed": False, "reason": "company_capability_not_directly_answered", "analyzer": analyzer}
+    if analyzer.get("is_user_correction") and analyzer.get("company_capability_activity") and not reply_answers_company_capability_question(message_text, reply):
+        return {"passed": False, "reason": "correction_repeated_wrong_intent", "analyzer": analyzer}
+    if analyzer.get("is_bot_identity_question") and not reply_answers_assistant_identity(reply):
+        return {"passed": False, "reason": "assistant_identity_not_directly_answered", "analyzer": analyzer}
     if any(phrase in lowered_reply for phrase in EVASIVE_RECOMMENDATION_REPLY_BLOCKLIST) and not is_simple_greeting(message_text):
         return {"passed": False, "reason": "blocked_evasive_phrase", "analyzer": analyzer}
     if not booking_or_system and count_reply_sentences(reply) > (4 if allow_four_sentence_info else 3):
@@ -8578,7 +8759,7 @@ def final_answer_quality_guard(
         recommendation_tokens = ["mantıklı", "mantikli", "başlangıç", "baslangic", "öner", "oner", "uygun"]
         if not any(token in lowered_reply for token in recommendation_tokens):
             return {"passed": False, "reason": "missing_recommendation", "analyzer": analyzer}
-    if is_real_estate_off_topic_question(message_text) and any(token in lowered_reply for token in ["otomasyon", "sosyal medya", "reklam"]):
+    if (not analyzer.get("is_company_capability_question")) and is_real_estate_off_topic_question(message_text) and any(token in lowered_reply for token in ["otomasyon", "sosyal medya", "reklam"]):
         return {"passed": False, "reason": "off_topic_sales_pitch", "analyzer": analyzer}
     return {"passed": True, "reason": "passed", "analyzer": analyzer}
 
@@ -10258,10 +10439,12 @@ def reply_answers_assistant_identity(reply_text: str | None) -> bool:
     lowered = sanitize_text(reply_text or "").lower()
     if not lowered or reply_is_confirmed_booking_takeover(lowered):
         return False
+    if "uzman bir ekibiz" in lowered or "uzman ekibiz" in lowered or "cozumleri konusunda uzman" in lowered:
+        return False
     denial_cues = ["hayır", "hayir", "değilim", "degilim", "değil", "degil", "otomatik yanıt sistemi", "otomatik yanit sistemi"]
     if any(cue in lowered for cue in denial_cues):
         return False
-    return any(cue in lowered for cue in ["yapay zeka", "asistan", "bot"])
+    return "dijital asistan" in lowered or "dijital asistani" in lowered or ("doel digital" in lowered and "asistan" in lowered)
 
 
 def reply_answers_meeting_method(reply_text: str | None) -> bool:
@@ -10442,6 +10625,27 @@ def apply_ai_first_quality_overrides(
     decision["reply_text"] = cleanup_ai_first_reply_text(decision.get("reply_text"))
     lowered = sanitize_text(message_text).lower()
     decision_intent = sanitize_text(str(decision.get("intent") or "")).lower()
+    if is_company_capability_question(message_text) or (is_user_correction_message(message_text) and detect_company_capability_activity(message_text)):
+        decision["reply_text"] = build_company_capability_reply(message_text)
+        decision["intent"] = "company_capability_question"
+        decision["booking_intent"] = False
+        decision["missing_fields"] = []
+        decision["should_reply"] = True
+        return decision
+    if is_assistant_identity_question(message_text):
+        decision["reply_text"] = build_assistant_identity_reply(conversation)
+        decision["intent"] = "assistant_identity"
+        decision["booking_intent"] = False
+        decision["missing_fields"] = []
+        decision["should_reply"] = True
+        return decision
+    if is_ping_or_attention_message(message_text):
+        decision["reply_text"] = "Buradayim, yazabilirsiniz."
+        decision["intent"] = "ping_or_attention"
+        decision["booking_intent"] = False
+        decision["missing_fields"] = []
+        decision["should_reply"] = True
+        return decision
     direct_service = pick_service(message_text, decision.get("extracted_service") or conversation.get("service"))
     direct_service_meta = match_service_catalog(direct_service, direct_service) if direct_service else None
     known_service_name = conversation.get("service") or decision.get("extracted_service") or direct_service
