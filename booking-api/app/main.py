@@ -553,7 +553,7 @@ CLEANING_SUBSECTOR_KEYWORDS = ["temizlik", "koltuk yıkama", "koltuk yikama", "o
 VISIBILITY_ADS_GOAL_KEYWORDS = ["sosyal medya", "instagram", "görünür", "gorunur", "görünürlük", "gorunurluk", "reklam", "ads", "performans reklam", "kitle", "takipçi", "takipci", "keşfet", "kesfet"]
 DM_AUTOMATION_GOAL_KEYWORDS = ["dm", "mesaj", "randevu", "randevular", "karışıyor", "karisiyor", "çok geliyor", "cok geliyor", "yoğun", "yogun", "yetişemiyorum", "yetisemiyorum", "otomatik", "otomasyon"]
 PORTFOLIO_TRUST_GOAL_KEYWORDS = ["portfolyo", "portfolio", "güven", "guven", "web", "website", "site", "kurumsal"]
-MORE_BOOKINGS_GOAL_KEYWORDS = ["daha çok müşteri", "daha cok musteri", "müşteri gelsin", "musteri gelsin", "müşteri bulmak", "musteri bulmak", "randevu almak", "randevu sayısı", "randevu sayisi", "satış", "satis", "talep art"]
+MORE_BOOKINGS_GOAL_KEYWORDS = ["daha çok müşteri", "daha cok musteri", "müşteri gelsin", "musteri gelsin", "müşteri bulmak", "musteri bulmak", "randevu almak", "randevu sayısı", "randevu sayisi", "satış", "satis", "talep art", "müşteri istiyorum", "musteri istiyorum", "düz müşteri", "duz musteri"]
 NORMALIZED_CUSTOMER_GOALS = {"visibility/ads", "more_bookings", "dm_automation", "portfolio_trust"}
 EVASIVE_RECOMMENDATION_REPLY_BLOCKLIST = [
     "işinizi ve hedefinizi bilmem gerekir",
@@ -625,6 +625,7 @@ ASSISTANT_IDENTITY_KEYWORDS = [
     "insanla mı görüşüyorum", "insanla mi gorusuyorum", "insanla mı gorusuyorum", "insanla mi görüşüyorum",
     "sen yapay zeka mısın", "sen yapay zeka misin", "siz yapay zeka mısınız", "siz yapay zeka misiniz",
     "yapay zeka mısın", "yapay zeka misin", "bot musun", "bot musunuz",
+    "berkay bey misiniz", "berkay siz misiniz", "sen berkay", "neredesiniz", "oradami", "orada mi"
 ]
 CLARIFICATION_KEYWORDS = [
     "nasıl yani", "nasil yani", "ne demek", "anlamadım", "anlamadim", "tam olarak ne", "yani ne", "nasıl oluyor", "nasil oluyor",
@@ -6887,6 +6888,9 @@ def is_company_background_question(text: str) -> bool:
         "ne zamandır",
         "kac yildir",
         "kaç yıldır",
+        "ne zaman kuruldu",
+        "kurulus tarihi",
+        "kuruluş tarihi",
         "sektorde",
         "sektörde",
         "deneyiminiz",
@@ -6905,8 +6909,8 @@ def is_company_background_question(text: str) -> bool:
 
 def build_company_background_reply() -> str:
     return (
-        f"{BUSINESS_NAME} olarak web tasarım, otomasyon, reklam yönetimi ve sosyal medya alanlarında markalara profesyonel destek veriyoruz. "
-        "Dijital tarafta işleri daha düzenli, hızlı ve verimli hale getirmeye odaklanıyoruz."
+        "Kuruluş tarihiyle ilgili net bilgi için ekibe yönlendirebilirim. "
+        f"{BUSINESS_NAME} olarak web tasarım, reklam, sosyal medya ve otomasyon tarafında hizmet veriyoruz."
     )
 
 
@@ -7137,6 +7141,10 @@ def is_meeting_clarification_question(text: str) -> bool:
         "nasıl görüşecegiz",
         "nereden gorusecegiz",
         "nereden görüşeceğiz",
+        "ne konusacagiz",
+        "ne konuşacağız",
+        "gorusmede ne",
+        "görüşmede ne",
     ]
     return any(phrase in lowered for phrase in phrases)
 
@@ -7465,7 +7473,7 @@ def build_owner_check_reply(conversation: dict[str, Any]) -> str:
 
 
 def build_assistant_identity_reply(conversation: dict[str, Any]) -> str:
-    return "Ben DOEL Digital'in yapay zeka destekli dijital asistanıyım. Basit sorularda yardımcı olurum, detay gereken yerde ekibe yönlendirebilirim."
+    return "Ben DOEL Digital'in yapay zeka tabanlı dijital asistanıyım, Berkay Bey değilim. Basit sorularda yardımcı olurum, detay gerekiyorsa mesajınızı ekibe veya Berkay Bey'e iletebilirim."
 
 
 def build_greeting_interrupt_reply(conversation: dict[str, Any]) -> str:
@@ -7520,6 +7528,11 @@ def build_contextual_clarification_reply(conversation: dict[str, Any], message_t
             "telefon paylaşmadan da temel bilgileri buradan anlatabilirim."
         )
     if is_meeting_clarification_question(lowered_message):
+        if "ne konusacagiz" in lowered_message or "ne konuşacağız" in lowered_message or "ne konuşacagız" in lowered_message or "ne konusulacak" in lowered_message:
+            return (
+                "Ön görüşmede işletmenizin hedefini, mevcut durumunu, beklentinizi ve size en uygun olan kapsam/paketi netleştiriyoruz. "
+                "Uygun görürseniz sonrasında projeyi başlatma adımlarını konuşuruz. İsterseniz numaranızı bırakın, uygun zamanda görüşelim."
+            )
         focus = service or "ihtiyacınız"
         return (
             f"Ön görüşme, {focus} için size uygun çözümü hızlıca netleştirdiğimiz kısa bir görüşmedir. "
@@ -8432,26 +8445,25 @@ def should_use_generic_ai_reply(message_text: str, llm_data: dict[str, Any] | No
 
 def is_business_fit_question(message_text: str) -> bool:
     lowered = sanitize_text(message_text).lower()
-    if "?" not in lowered:
+    
+    # "yardimci olur musunuz" is a request for help, not a product fit question
+    if "yardımcı olur" in lowered or "yardimci olur" in lowered:
         return False
+        
     direct_fit_phrases = [
-        "işime yarar",
-        "isime yarar",
-        "bana yarar",
-        "fayda sağlar",
-        "fayda saglar",
-        "yarar mı",
-        "yarar mi",
+        "işime yarar", "isime yarar", "bana yarar",
+        "fayda sağlar", "fayda saglar", "yarar mı", "yarar mi",
+        "bana uygun mu", "uygun mu", "uyar mı", "uyar mi", "mantıklı mı", "mantikli mi"
     ]
     if any(phrase in lowered for phrase in direct_fit_phrases):
         return not bool(extract_date(lowered) or extract_time_for_state(lowered, "collect_service"))
+        
     fit_words = ["uygun", "uyar", "olur mu", "mantıklı", "mantikli"]
-    business_words = ["ajans", "firma", "şirket", "sirket", "işletme", "isletme", "marka", "sektör", "sektor", "bizim", "bize"]
-    if not any(word in lowered for word in fit_words):
-        return False
-    if not any(word in lowered for word in business_words):
-        return False
-    return not bool(extract_date(lowered) or extract_time_for_state(lowered, "collect_service"))
+    business_words = ["ajans", "firma", "şirket", "sirket", "işletme", "isletme", "marka", "sektör", "sektor", "bizim", "bize", "bana", "benim", "işim", "isim", "website"]
+    
+    if any(word in lowered for word in fit_words) and any(word in lowered for word in business_words):
+        return not bool(extract_date(lowered) or extract_time_for_state(lowered, "collect_service"))
+    return False
 
 
 def is_real_estate_off_topic_question(message_text: str) -> bool:
@@ -8720,6 +8732,10 @@ def recommendation_engine(
         return "Spor salonu için sosyal medya içerikleri + lokal lead reklam iyi başlangıç olur; lokasyon, dönüşüm hikayeleri ve üyelik teklifleri net görünmeli. Gelen başvuruları kaçırmamak için CRM takibi eklenebilir."
     if subsector == "cleaning":
         return "Temizlik/yıkama gibi lokal hizmetlerde Google odaklı reklam + güven veren landing page mantıklı başlangıç olur; müşteri hızlı fiyat ve randevu ister. WhatsApp takip otomasyonu da kaçan talepleri azaltır."
+    
+    if goal == "more_bookings":
+        return "Anladım, amacınız direkt müşteri kazanmaksa web sitesi tek başına değil; web/landing page + reklam yönlendirmesi daha mantıklı olur. İnsanlar sizi görüp hızlıca iletişime geçebilmeli."
+
     return "Lokal işletmelerde genelde web/landing page + Google veya sosyal medya reklamı en mantıklı başlangıç olur; talep arttıkça CRM ve mesaj otomasyonu eklenir. Şu an öncelik yeni müşteri bulmak mı, gelen talepleri daha iyi takip etmek mi?"
 
 
@@ -8926,15 +8942,20 @@ def build_business_fit_reply(
     history: list[dict[str, Any]] | None = None,
 ) -> str:
     memory = ensure_conversation_memory(conversation)
-    if memory.get("customer_sector") or memory.get("customer_subsector") or detect_customer_subsector(message_text or "", history):
-        return recommendation_engine(conversation, message_text, history)
     service = display_service_name(conversation.get("service"))
     service_meta = match_service_catalog(service, service) if service else None
     slug = str((service_meta or {}).get("slug") or "")
+    
+    msg_lowered = sanitize_text(message_text or "").lower()
+    if "web" in msg_lowered or "site" in msg_lowered or slug == "web-tasarim":
+        return "Uygun olup olmadığını netleştirmek için işletmenizin sektörü, hedefi ve web sitesinden beklentiniz önemli. Eğer amacınız güven vermek ve müşteri başvurusu almaksa web sitesi mantıklı bir başlangıç olabilir."
+        
+    if memory.get("customer_sector") or memory.get("customer_subsector") or detect_customer_subsector(message_text or "", history):
+        return recommendation_engine(conversation, message_text, history)
+        
     if slug == "otomasyon-ai":
         return "Evet, özellikle DM, randevu veya müşteri takibi tekrara düşüyorsa yarar sağlar. En çok hangi kısmı otomatikleştirmek istiyorsunuz?"
-    if slug == "web-tasarim":
-        return "Evet, dijitalde güven vermek ve görünür olmak istiyorsanız web sitesi yarar sağlar. Sektörünüzü yazarsanız size uygun yapıyı net söyleyeyim."
+        
     return "Yarar sağlayıp sağlamayacağını net söylemek için işinizi ve hedefinizi bilmem gerekir. En çok hangi süreci geliştirmek istiyorsunuz?"
 
 
@@ -10548,6 +10569,11 @@ def reply_answers_assistant_identity(reply_text: str | None) -> bool:
         return False
     if "uzman bir ekibiz" in lowered or "uzman ekibiz" in lowered or "cozumleri konusunda uzman" in lowered:
         return False
+    
+    # Allow saying "değilim" if it's explicitly clarifying they are a digital assistant
+    if "dijital asistan" in lowered or "doel digital" in lowered or "asistan" in lowered:
+        return True
+        
     denial_cues = ["hayır", "hayir", "değilim", "degilim", "değil", "degil", "otomatik yanıt sistemi", "otomatik yanit sistemi"]
     if any(cue in lowered for cue in denial_cues):
         return False

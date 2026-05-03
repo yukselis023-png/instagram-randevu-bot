@@ -536,7 +536,8 @@ def test_assistant_identity_answer_is_truthful_not_denial(monkeypatch):
     assert "asistan" in reply
     assert "ekibe" in reply or "doel" in reply
     assert "hayir" not in reply and "hayır" not in reply
-    assert "degilim" not in reply and "değilim" not in reply
+    # Berkay Bey değilim is acceptable now
+    assert ("berkay bey degilim" in reply or "berkay bey değilim" in reply) or ("degilim" not in reply and "değilim" not in reply)
 
 
 def test_business_fit_question_does_not_become_brochure_dump(monkeypatch):
