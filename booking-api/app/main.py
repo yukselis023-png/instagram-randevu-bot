@@ -3949,6 +3949,13 @@ def detect_company_capability_activity(text: str) -> str | None:
         if any(needle in compact for needle in needles):
             return activity
 
+    # DOEL'in kendi hizmetleri capability sorusu sayılmamalı
+    _DOEL_OWN_SERVICES = [
+        "sosyal medya", "reklam", "performans reklam", "google reklam", "meta reklam",
+        "web", "web tasarim", "website", "landing page",
+        "otomasyon", "yapay zeka", "dijital pazarlama",
+        "instagram yonetim", "seo",
+    ]
     patterns = [
         r"^(?:siz\s+)?(.+?)\s+(?:yapiyor|yapıyor|yapar|veriyor|verir|satiyor|satıyor|tamir ediyor|ediyor)\s+musunuz$",
     ]
@@ -3956,6 +3963,9 @@ def detect_company_capability_activity(text: str) -> str | None:
         match = re.search(pattern, compact)
         if match:
             activity = re.sub(r"^(siz|bir|bu)\s+", "", match.group(1)).strip()
+            # DOEL'in kendi hizmetlerinden biri ise capability degil, hizmet sorusu
+            if any(svc in activity for svc in _DOEL_OWN_SERVICES):
+                return None
             if activity and len(activity.split()) <= 5:
                 return f"{activity} hizmeti"
     return None
