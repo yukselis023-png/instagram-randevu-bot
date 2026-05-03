@@ -3968,6 +3968,33 @@ def is_company_capability_question(text: str) -> bool:
     return detect_company_capability_activity(text) is not None
 
 
+_REFERRAL_PATTERNS = [
+    r"\b(arkada[\u015fs][\u0131i]m|arkada[\u015fs]im)\b.{0,50}\b([\u00f6o]nerdi|[\u00f6o]nerilen|g[\u00f6o]nderdi|bahsetti)\b",
+    r"\b(tavsiye\s+[\u00fcu]zerine|tavsiyeyle|tavsiye\s+[\u00fcu]st[\u00fcu]ne)\b",
+    r"\b(referans(la|tan|la\s+geldim)?)\b",
+    r"\b(sizi\s+([\u00f6o]nerdiler|[\u00f6o]nerdi|tavsiye\s+etti))\b",
+    r"\b([\u00f6o]neri\s+[\u00fcu]zerine|[\u00f6o]neri\s+ile)\b",
+    r"\b(onun\s+i[\u00e7c]in\s+yazd\u0131m|onun\s+icin\s+yazdim)\b",
+    r"\b([\u00f6o]neriyle\s+geldim|[\u00f6o]neri\s+[\u00fcu]zerine\s+geldim|[\u00f6o]neriyle\s+yazd\u0131m)\b",
+]
+_REFERRAL_RE = re.compile("|".join(_REFERRAL_PATTERNS), re.IGNORECASE)
+
+
+def is_referral_intent_message(text: str) -> bool:
+    """Return True when user mentions they were referred by someone."""
+    lowered = sanitize_text(text).lower()
+    return bool(_REFERRAL_RE.search(lowered))
+
+
+def build_referral_intent_reply() -> str:
+    """Natural acknowledgement for referral messages — no greeting reset, no booking CTA."""
+    return (
+        "Arkada\u015f\u0131n\u0131z\u0131n \u00f6nerisi i\u00e7in te\u015fekk\u00fcr ederiz. "
+        "DOEL Digital olarak web sitesi, reklam, sosyal medya y\u00f6netimi ve otomasyon hizmetleri taraf\u0131nda destek oluyoruz; "
+        "i\u015fletmeniz i\u00e7in hangi konuda bilgi almak istiyorsunuz?"
+    )
+
+
 def is_user_business_identity_message(text: str) -> bool:
     lowered = sanitize_text(text).lower()
     identity_cues = [
@@ -8791,6 +8818,11 @@ def final_answer_quality_guard(
             return {"passed": False, "reason": "missing_recommendation", "analyzer": analyzer}
     if (not analyzer.get("is_company_capability_question")) and is_real_estate_off_topic_question(message_text) and any(token in lowered_reply for token in ["otomasyon", "sosyal medya", "reklam"]):
         return {"passed": False, "reason": "off_topic_sales_pitch", "analyzer": analyzer}
+    # referral_intent: reply must acknowledge the referral (no generic greeting reset)
+    if is_referral_intent_message(message_text):
+        has_referral_ack = any(word in lowered_reply for word in ["te\u015fekk\u00fcr", "tesekkur", "\u00f6nerin", "onerini", "arkada\u015f", "arkadas", "referans", "tavsiye"])
+        if not has_referral_ack:
+            return {"passed": False, "reason": "referral_not_acknowledged", "analyzer": analyzer}
     return {"passed": True, "reason": "passed", "analyzer": analyzer}
 
 
@@ -8804,6 +8836,10 @@ def guard_and_repair_final_answer(
     first = final_answer_quality_guard(message_text, reply_text, conversation, history, decision_label)
     if first["passed"]:
         return {"reply_text": sanitize_text(reply_text or ""), "passed": True, "repaired": False, "reason": first["reason"]}
+    # Fast-path for known deterministic fixes
+    if first["reason"] == "referral_not_acknowledged":
+        repaired = build_referral_intent_reply()
+        return {"reply_text": repaired, "passed": True, "repaired": True, "reason": first["reason"]}
     repaired = build_safe_reply_builder(message_text, conversation, history, decision_label)
     second = final_answer_quality_guard(message_text, repaired, conversation, history, decision_label)
     if second["passed"]:
@@ -10658,6 +10694,14 @@ def apply_ai_first_quality_overrides(
     if is_company_capability_question(message_text) or (is_user_correction_message(message_text) and detect_company_capability_activity(message_text)):
         decision["reply_text"] = build_company_capability_reply(message_text)
         decision["intent"] = "company_capability_question"
+        decision["booking_intent"] = False
+        decision["missing_fields"] = []
+        decision["should_reply"] = True
+        return decision
+    # referral_intent: thank the referral, no greeting reset, no booking CTA
+    if is_referral_intent_message(message_text):
+        decision["reply_text"] = build_referral_intent_reply()
+        decision["intent"] = "referral_intent"
         decision["booking_intent"] = False
         decision["missing_fields"] = []
         decision["should_reply"] = True
