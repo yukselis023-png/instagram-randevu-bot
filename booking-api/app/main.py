@@ -8945,6 +8945,9 @@ def is_completed_booking_closeout_message(message_text: str, conversation: dict[
         return False
     if confirmed_booking_should_take_over_message(message_text, conversation):
         return False
+    # Payment/info questions are not closeouts even if they contain 'peki'/'tamam'
+    if is_payment_question(message_text) or "?" in message_text:
+        return False
     lowered = sanitize_text(message_text).lower()
     closeout_terms = [
         "teşekkür",
