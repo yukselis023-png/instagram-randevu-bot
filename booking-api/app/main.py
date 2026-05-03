@@ -8889,6 +8889,9 @@ def should_use_customer_recommendation_override(
     conversation: dict[str, Any],
     history: list[dict[str, Any]] | None = None,
 ) -> bool:
+    # Never override during active booking collection
+    if sanitize_text(str(conversation.get("state") or "")) in ACTIVE_BOOKING_STATES:
+        return False
     if (
         is_simple_greeting(message_text)
         or is_smalltalk_message(message_text)
