@@ -5712,6 +5712,14 @@ def build_post_confirmation_followup_reply(conversation: dict[str, Any], message
 
 def confirmed_booking_should_take_over_message(message_text: str, conversation: dict[str, Any]) -> bool:
     lowered = sanitize_text(message_text).lower()
+    if is_service_term_clarification(message_text):
+        decision["reply_text"] = build_service_term_clarification_reply(message_text)
+        decision["intent"] = "service_term_clarification"
+        decision["booking_intent"] = False
+        decision["missing_fields"] = []
+        decision["should_reply"] = True
+        return decision
+
     if is_assistant_identity_question(message_text):
         return False
     if is_angry_complaint_message(message_text):
@@ -6703,6 +6711,40 @@ def is_ambiguous_appointment_question(text: str) -> bool:
 
 def build_ambiguous_appointment_reply() -> str:
     return "Randevu tarafında iki şekilde yardımcı olabiliriz: bizimle ön görüşme planlayabiliriz ya da işletmeniz için randevu/müşteri takip sistemi kurabiliriz. Hangisini merak ediyorsunuz?"
+
+def is_service_term_clarification(text: str) -> bool:
+    try:
+        from app.main import sanitize_text
+        lowered = sanitize_text(text).lower()
+        triggers = ["ne demek", "ayni sey mi", "aynı şey mi", "neyi kapsiyor", "neyi kapsıyor", 
+                    "nasil calisiyor", "nasıl çalışıyor", "farki ne", "farkı ne", "farki nedir", "nedir"]
+        if not any(t in lowered for t in triggers):
+            return False
+            
+        terms = ["otomasyon", "crm", "landing", "web tasarim", "web sitesi", "website", 
+                 "sosyal medya", "reklam", "performans"]
+        return any(term in lowered for term in terms)
+    except:
+        return False
+
+def build_service_term_clarification_reply(text: str) -> str:
+    from app.main import sanitize_text
+    lowered = sanitize_text(text).lower()
+    
+    if "otomasyon" in lowered:
+        return "Otomasyon, tekrar eden işleri sistemin otomatik yapmasıdır. Örneğin gelen mesajlara yanıt verme, randevu toplama ve müşteri takibini düzenleme gibi süreçleri kolaylaştırır."
+    elif "crm" in lowered:
+        return "CRM, müşteri takip sistemi demektir. Gelen müşterileri, randevuları, konuşmaları ve süreçleri daha düzenli yönetmenizi sağlar."
+    elif "landing" in lowered or "landing page" in lowered:
+        return "Landing page, reklamdan gelen kişiyi tek bir hedefe yönlendiren özel sayfadır. Genelde WhatsApp'a yazma, form doldurma veya randevu alma gibi dönüşümler için kullanılır."
+    elif "web" in lowered and ("tasarim" in lowered or "site" in lowered):
+        return "Evet, çoğu zaman aynı anlamda kullanılır. Web tasarım, web sitesinin görünüm, yapı ve kullanıcı deneyimi tarafını ifade eder."
+    elif "sosyal" in lowered or "medya" in lowered:
+        return "Sosyal medya yönetimi, işletmenizin Instagram/Facebook gibi hesaplarında içerik üretimi, paylaşım düzeni ve marka imajını profesyonelce kurgulamayı kapsar."
+    elif "reklam" in lowered:
+        return "Performans reklamı, bütçenizi doğrudan potansiyel müşterilere ulaşacak şekilde optimize ettiğimiz ücretli sponsorlu kampanyalardır. Takipçi değil, dönüşüm/satış odaklıdır."
+        
+    return "Hizmetlerimiz temel olarak dijital görünürlüğünüzü ve müşteri çekme/yönetme süreçlerinizi iyileştirir."
 
 def is_service_overview_question(text: str) -> bool:
     lowered = sanitize_text(text).lower()
@@ -8044,6 +8086,14 @@ def maybe_build_information_reply(message_text: str, llm_data: dict[str, Any], m
             "next_state": conversation.get("state", "collect_service") or "collect_service",
             "set_service": conversation.get("service"),
         }
+    if is_service_term_clarification(message_text):
+        decision["reply_text"] = build_service_term_clarification_reply(message_text)
+        decision["intent"] = "service_term_clarification"
+        decision["booking_intent"] = False
+        decision["missing_fields"] = []
+        decision["should_reply"] = True
+        return decision
+
     if is_assistant_identity_question(message_text):
         return {
             "reply": build_assistant_identity_reply(conversation),
@@ -8809,6 +8859,14 @@ def build_safe_reply_builder(
 ) -> str:
     if is_company_capability_question(message_text) or (is_user_correction_message(message_text) and detect_company_capability_activity(message_text)):
         return build_company_capability_reply(message_text)
+    if is_service_term_clarification(message_text):
+        decision["reply_text"] = build_service_term_clarification_reply(message_text)
+        decision["intent"] = "service_term_clarification"
+        decision["booking_intent"] = False
+        decision["missing_fields"] = []
+        decision["should_reply"] = True
+        return decision
+
     if is_assistant_identity_question(message_text):
         return build_assistant_identity_reply(conversation)
     if is_ping_or_attention_message(message_text):
@@ -8883,10 +8941,14 @@ def final_answer_quality_guard(
     whitelist = [
         "correction", "assistant_identity", "company_capability_question", "company_background", 
         "referral_not_acknowledged", "detailed_service_overview", "pricing_info", 
-        "service_overview", "ambiguous_appointment_disambiguation", "business_recommendation"
+        "service_overview", "ambiguous_appointment_disambiguation", "business_recommendation", "service_term_clarification"
     ]
     if decision_label in whitelist:
         return {"passed": True, "reason": "whitelisted_intent"}
+        
+    if is_service_term_clarification(message_text):
+        if any(w in str(reply_text).lower() for w in ["tl", "fiyat", "paket", "reklam kampanyasi", "tutar"]):
+            return {"passed": False, "reason": "service_term_clarification"}
 
     reply = sanitize_text(reply_text or "")
     lowered_reply = reply.lower()
@@ -8960,6 +9022,10 @@ def guard_and_repair_final_answer(
     elif first["reason"] == "repeated_greeting":
         safe_rep = "İşletmeniz için hangi alanda destek arıyorsunuz?"
         return {"reply_text": safe_rep, "passed": True, "repaired": True, "reason": first["reason"]}
+    elif first["reason"] == "service_term_clarification":
+        safe_rep = build_service_term_clarification_reply(message_text)
+        return {"reply_text": safe_rep, "passed": True, "repaired": True, "reason": "service_term_clarification"}
+
 
     repaired = build_safe_reply_builder(message_text, conversation, history, decision_label)
     second = final_answer_quality_guard(message_text, repaired, conversation, history, decision_label)
@@ -10880,6 +10946,14 @@ def apply_ai_first_quality_overrides(
         decision["should_reply"] = True
         return decision
 
+    if is_service_term_clarification(message_text):
+        decision["reply_text"] = build_service_term_clarification_reply(message_text)
+        decision["intent"] = "service_term_clarification"
+        decision["booking_intent"] = False
+        decision["missing_fields"] = []
+        decision["should_reply"] = True
+        return decision
+
     if is_assistant_identity_question(message_text):
         decision["reply_text"] = build_assistant_identity_reply(conversation)
         decision["intent"] = "assistant_identity"
@@ -11140,6 +11214,14 @@ def apply_ai_first_quality_overrides(
         decision["booking_intent"] = True
         decision["missing_fields"] = ["name"]
         return decision
+    if is_service_term_clarification(message_text):
+        decision["reply_text"] = build_service_term_clarification_reply(message_text)
+        decision["intent"] = "service_term_clarification"
+        decision["booking_intent"] = False
+        decision["missing_fields"] = []
+        decision["should_reply"] = True
+        return decision
+
     if is_assistant_identity_question(message_text):
         if reply_answers_assistant_identity(decision.get("reply_text")):
             decision["intent"] = "assistant_identity"
