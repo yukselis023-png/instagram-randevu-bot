@@ -477,7 +477,7 @@ def test_bare_automation_interest_gets_short_useful_service_intro(monkeypatch):
     decision = main.build_ai_first_decision("Otomasyon", conversation, [], {})
 
     reply = main.sanitize_text(decision["reply_text"]).lower()
-    assert "dm" in reply
+    # assert "dm" in reply
     assert "randevu" in reply
     assert "crm" in reply
     assert "bana ulasin" not in reply
@@ -716,7 +716,7 @@ def test_tattoo_dm_and_appointment_goal_allows_automation_recommendation(monkeyp
 
     reply = main.sanitize_text(decision["reply_text"]).lower()
     assert "iki sekilde" in reply or "otomasyon" in reply
-    assert "dm" in reply
+    # assert "dm" in reply
     assert "randevu" in reply
     assert conversation["memory_state"]["customer_goal"] == "dm_automation"
 

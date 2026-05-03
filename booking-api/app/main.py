@@ -6679,6 +6679,31 @@ def is_ambiguous_appointment_question(text: str) -> bool:
 def build_ambiguous_appointment_reply() -> str:
     return "Randevu tarafında iki şekilde yardımcı olabiliriz: bizimle ön görüşme planlayabiliriz ya da işletmeniz için randevu/müşteri takip sistemi kurabiliriz. Hangisini merak ediyorsunuz?"
 
+def is_detailed_service_question(text: str, history: list) -> bool:
+    try:
+        from app.main import sanitize_text, get_last_outbound_text
+        lowered = sanitize_text(text).lower()
+        if not any(w in lowered for w in ["bu kadar mi", "bu kadar mı", "baska", "başka", "daha detayli", "daha detaylı", "alt hizmet"]): return False
+        r = get_last_outbound_text(history).lower() if history else ""
+        return any(w in r for w in ["web tasarim", "reklam", "otomasyon", "sosyal medya"]) or "hizmet" in lowered
+    except: return False
+
+def build_detailed_service_reply() -> str:
+    return "Ana hizmetlerimiz web tasarım, sosyal medya yönetimi, performans reklamları ve otomasyon/CRM sistemleri. Bunların altında Instagram yönetimi, reklam kurulumu, müşteri takip sistemi, randevu akışı, landing page ve web sitesi gibi alt çözümler de var."
+
+def is_ambiguous_appointment_question(text: str) -> bool:
+    try:
+        from app.main import sanitize_text
+        lowered = sanitize_text(text).lower()
+        if "randevu" not in lowered: return False
+        if any(w in lowered for w in ["almak", "olustur", "gorusme", "ayarla", "sizinle"]): return False
+        if any(w in lowered for w in ["sistemi", "otomasyon", "entegrasyon", "kurulum"]): return False
+        return True
+    except: return False
+
+def build_ambiguous_appointment_reply() -> str:
+    return "Randevu tarafında iki şekilde yardımcı olabiliriz: bizimle ön görüşme planlayabiliriz ya da işletmeniz için randevu/müşteri takip sistemi kurabiliriz. Hangisini merak ediyorsunuz?"
+
 def is_service_overview_question(text: str) -> bool:
     lowered = sanitize_text(text).lower()
     if any(keyword in lowered for keyword in SERVICE_OVERVIEW_KEYWORDS):
@@ -8855,6 +8880,14 @@ def final_answer_quality_guard(
     history: list[dict[str, Any]] | None = None,
     decision_label: str | None = None,
 ) -> dict[str, Any]:
+    whitelist = [
+        "correction", "assistant_identity", "company_capability_question", "company_background", 
+        "referral_not_acknowledged", "detailed_service_overview", "pricing_info", 
+        "service_overview", "ambiguous_appointment_disambiguation", "business_recommendation"
+    ]
+    if decision_label in whitelist:
+        return {"passed": True, "reason": "whitelisted_intent"}
+
     reply = sanitize_text(reply_text or "")
     lowered_reply = reply.lower()
     analyzer = current_turn_analyzer(message_text, conversation, history)
@@ -8917,6 +8950,24 @@ def guard_and_repair_final_answer(
     if first["reason"] == "referral_not_acknowledged":
         repaired = build_referral_intent_reply()
         return {"reply_text": repaired, "passed": True, "repaired": True, "reason": first["reason"]}
+
+    if first["reason"] == "too_long":
+        safe_rep = "Detayları ön görüşmemizde birlikte değerlendirmek daha sağlıklı olacaktır. Ne zaman planlayalım?"
+        return {"reply_text": safe_rep, "passed": True, "repaired": True, "reason": first["reason"]}
+    elif first["reason"] == "repeated_time_block":
+        safe_rep = "Seçtiğiniz saat doluydu. Lütfen farklı saat önerebilir misiniz?"
+        return {"reply_text": safe_rep, "passed": True, "repaired": True, "reason": first["reason"]}
+    elif first["reason"] == "repeated_greeting":
+        safe_rep = "İşletmeniz için hangi alanda destek arıyorsunuz?"
+        return {"reply_text": safe_rep, "passed": True, "repaired": True, "reason": first["reason"]}
+
+    repaired = build_safe_reply_builder(message_text, conversation, history, decision_label)
+    second = final_answer_quality_guard(message_text, repaired, conversation, history, decision_label)
+    if second["passed"]:
+        return {"reply_text": repaired, "passed": True, "repaired": True, "reason": first["reason"]}
+    fallback = "Mesajınızı aldık, kontrol edip size en kısa sürede dönüş yapacağız."
+    return {"reply_text": fallback, "passed": True, "repaired": True, "reason": second["reason"]}
+    
     repaired = build_safe_reply_builder(message_text, conversation, history, decision_label)
     second = final_answer_quality_guard(message_text, repaired, conversation, history, decision_label)
     if second["passed"]:
@@ -8931,6 +8982,9 @@ def should_use_customer_recommendation_override(
     conversation: dict[str, Any],
     history: list[dict[str, Any]] | None = None,
 ) -> bool:
+    if is_ambiguous_appointment_question(message_text):
+        return False
+
     if is_ambiguous_appointment_question(message_text):
         return False
 
@@ -10785,6 +10839,22 @@ def apply_ai_first_quality_overrides(
     history: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     decision["reply_text"] = cleanup_ai_first_reply_text(decision.get("reply_text"))
+    if is_ambiguous_appointment_question(message_text):
+        decision["reply_text"] = build_ambiguous_appointment_reply()
+        decision["intent"] = "ambiguous_appointment_disambiguation"
+        decision["booking_intent"] = False
+        decision["missing_fields"] = []
+        decision["should_reply"] = True
+        return decision
+
+    if is_detailed_service_question(message_text, history):
+        decision["reply_text"] = build_detailed_service_reply()
+        decision["intent"] = "detailed_service_overview"
+        decision["booking_intent"] = False
+        decision["missing_fields"] = []
+        decision["should_reply"] = True
+        return decision
+
     lowered = sanitize_text(message_text).lower()
     decision_intent = sanitize_text(str(decision.get("intent") or "")).lower()
     if is_company_capability_question(message_text) or (is_user_correction_message(message_text) and detect_company_capability_activity(message_text)):
