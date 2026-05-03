@@ -1,0 +1,105 @@
+{
+    "business_name": "DOEL Digital",
+    "business_type": "Dijital Ajans",
+    "business_tagline": "Dijital büyüme ortağınız",
+    "human_contact_name": "Berkay",
+    "appointment_service_labels": [
+        "danışmanlık",
+        "görüşme",
+        "toplantı",
+        "ön görüşme"
+    ],
+    "tone": "professionally helpful, direct, reassuring",
+    "booking_mode": "ön görüşme",
+    "unavailable_services": [
+        "saç kesimi",
+        "lazer",
+        "cilt bakımı",
+        "dövme",
+        "gayrimenkul",
+        "emlak",
+        "araç satışı",
+        "doktor muayenesi"
+    ],
+    "fallback_handoff_text": "İsterseniz mesajınızı ekibe iletebilirim.",
+    "service_catalog": [
+        {
+            "slug": "web-tasarim",
+            "display": "Web Tasarım",
+            "keywords": [
+                "web tasarım",
+                "web tasarim",
+                "web sitesi",
+                "website",
+                "kurumsal site",
+                "landing page",
+                "açılış sayfası",
+                "site yenileme"
+            ],
+            "price": "12.900 TL",
+            "price_note": "tek seferlik paket fiyatı",
+            "summary": "Google uyumlu, tüm cihazlara tam uyumlu, WhatsApp butonlu, 1 yıl altyapı garantili kurumsal web tasarım çözümü.",
+            "clarification": "Web tasarım, web sitesinin görünüm, yapı ve kullanıcı deneyimi tarafını ifade eder. Genellikle web sitesi yapmak, kurmak anlamında kullanılır.",
+            "fit_description": "İnternette profesyonel bir vitrin oluşturmak, müşterilerinize güven vermek ve hizmetlerinizi detaylıca sunmak istiyorsanız tam size göredir.",
+            "delivery_time": "7-14 iş günü"
+        },
+        {
+            "slug": "otomasyon-ai",
+            "display": "Otomasyon & Yapay Zeka Çözümleri",
+            "keywords": [
+                "otomasyon",
+                "yapay zeka",
+                "chatbot",
+                "n8n",
+                "ai",
+                "dm otomasyonu",
+                "instagram bot",
+                "randevu botu",
+                "crm",
+                "otomatik cevap",
+                "mesaj otomasyonu",
+                "sistem kurma"
+            ],
+            "price": "5.000 TL",
+            "price_note": "ilk 3 ay indirimli aylık hizmet bedeli",
+            "summary": "Müşteri mesajlarına 7/24 yanıt, randevuları otomatik ayarlama, teklif ve fatura otomasyonu içerir.",
+            "clarification": "Otomasyon, gelen mesajları anında yanıtlayan, tekrar eden işleri insansız çözen ve müşterileri kaydeden yazılım altyapısıdır.",
+            "fit_description": "Gelen mesajlara yetişemiyorsanız, randevu alımları karışıyorsa veya müşterilere geç dönüş yapmaktan müşteri kaybediyorsanız işe yarar. CRM, gelen müşteri taleplerini, randevuları ve takip süreçlerini düzenlemek istiyorsanız mantıklıdır.",
+            "delivery_time": "3-7 iş günü"
+        },
+        {
+            "slug": "performans-pazarlama",
+            "display": "Performans Pazarlama",
+            "keywords": [
+                "performans pazarlama",
+                "reklam",
+                "meta reklam",
+                "tiktok reklam",
+                "instagram reklam",
+                "meta ads",
+                "müşteri kazanmak"
+            ],
+            "price": "7.500 TL",
+            "price_note": "aylık danışmanlık bedeli, reklam bütçesi hariç",
+            "summary": "Meta ve TikTok reklam yönetimi, hedef kitle ve rakip analizi, kreatif reklam tasarımları sunar.",
+            "clarification": "Performans pazarlama, doğrudan satış veya randevu getirmeye odaklı, ölçülebilir dijital reklam kampanyaları yönetimidir.",
+            "fit_description": "Yeni müşteriler bulmak ve satışlarınızı ölçeklemek ana hedefinizse reklam en doğru yoldur."
+        },
+        {
+            "slug": "sosyal-medya-yonetimi",
+            "display": "Sosyal Medya Yönetimi",
+            "keywords": [
+                "sosyal medya",
+                "içerik yönetimi",
+                "sayfa yönetimi",
+                "içerik üretimi",
+                "reels yönetimi"
+            ],
+            "price": "Özel teklif",
+            "price_note": "marka ihtiyacına göre belirlenir",
+            "summary": "Topluluk inşası, kriz yönetimi, içerik planlama ve sürdürülebilir sosyal medya yönetimi sunar.",
+            "clarification": "Sosyal medya yönetimi, hesabınızın düzenli içeriklerle profesyonel görünmesi, takipçilerle etkileşim ve güven oluşturması sürecidir.",
+            "fit_description": "Sosyal medya yönetimi, markanızın daha profesyonel görünmesi, düzenli içerik paylaşması ve güven oluşturması için işe yarar. Instagram’da daha görünür olmak ve hesabı düzenli yönetmek istiyorsanız mantıklı olur; direkt müşteri kazanımı hedefleniyorsa reklamla birlikte düşünülmeli."
+        }
+    ]
+}

@@ -1,0 +1,58 @@
+{
+    "business_name": "Güzellik Merkezi",
+    "business_type": "Güzellik Salonu",
+    "business_tagline": "Kendinizi özel hissedin",
+    "human_contact_name": "yetkili",
+    "appointment_service_labels": [
+        "seans",
+        "randevu",
+        "uygulama randevusu"
+    ],
+    "tone": "warm, welcoming, professional, assuring",
+    "booking_mode": "uygulama randevusu",
+    "unavailable_services": [
+        "web tasarım",
+        "reklam",
+        "saç kesimi",
+        "ameliyat",
+        "dövme",
+        "gayrimenkul",
+        "otomasyon",
+        "crm"
+    ],
+    "fallback_handoff_text": "İsterseniz mesajınızı uzman ekibimize iletebilirim.",
+    "service_catalog": [
+        {
+            "slug": "hydrafacial",
+            "display": "Hydrafacial",
+            "keywords": [
+                "hydrafacial",
+                "cilt bakımı",
+                "derin temizlik",
+                "nemlendirme",
+                "bakım"
+            ],
+            "price": "1.500 TL",
+            "price_note": "tek seans fiyatı",
+            "summary": "Cildi derinlemesine temizler, nemlendirir ve besler. Acısız ve konforlu bir işlemdir.",
+            "clarification": "Hydrafacial, cildi temizleme, nemlendirme ve leke bakımı sürecini vakumlu özel başlıklarla bir arada sunan bir cihazlı cilt bakım uygulamasıdır.",
+            "fit_description": "Cilt bakımı, cildinizde temizlik, nem ve canlılık hedefliyorsanız uygun olabilir. Cilt tipiniz ve beklentiniz uygulama seçiminde önemli olur."
+        },
+        {
+            "slug": "lazer-epilasyon",
+            "display": "Buz Lazer Epilasyon",
+            "keywords": [
+                "lazer",
+                "epilasyon",
+                "lazer epilasyon",
+                "buz lazer",
+                "tüy alma"
+            ],
+            "price": "3.500 TL",
+            "price_note": "tüm vücut 6 seans paket",
+            "summary": "Acısız buz başlık teknolojisiyle tüm cilt tiplerinde etkili, kalıcı tüy dökme işlemi.",
+            "clarification": "Buz lazer epilasyon, kıl köklerini kalıcı olarak zayıflatan ve dökülmesini sağlayan yeni nesil acısız ve konforlu bir medikal yöntemdir.",
+            "fit_description": "Tüylerinizden kalıcı olarak kurtulmak ve pürüzsüz bir cilt elde etmek istiyorsanız %90'a varan kalıcı çözüm sunar."
+        }
+    ]
+}

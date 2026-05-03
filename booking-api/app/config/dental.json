@@ -1,0 +1,60 @@
+{
+    "business_name": "Estetik Diş Kliniği",
+    "business_type": "Diş Kliniği",
+    "business_tagline": "Sağlıklı gülüşler",
+    "human_contact_name": "doktorumuz",
+    "appointment_service_labels": [
+        "muayene",
+        "randevu",
+        "kontrol"
+    ],
+    "tone": "professional, clinical, reassuring, gentle",
+    "booking_mode": "muayene randevusu",
+    "unavailable_services": [
+        "web tasarım",
+        "reklam",
+        "cilt bakımı",
+        "lazer epilasyon",
+        "genel cerrahi",
+        "kardiyoloji",
+        "otomasyon",
+        "sosyal medya"
+    ],
+    "fallback_handoff_text": "Dilerseniz bilgilerinizi alayım, klinik asistanımız sizi arasın.",
+    "service_catalog": [
+        {
+            "slug": "implant",
+            "display": "İmplant Tedavisi",
+            "keywords": [
+                "implant",
+                "vidalı diş",
+                "vidali dis",
+                "yapay diş",
+                "eksik diş",
+                "çene kemiği"
+            ],
+            "price": "Klinik muayenede belirlenir",
+            "price_note": "vaka durumuna ve kullanılacak markaya göre değişir",
+            "summary": "Eksik dişlerin fonksiyon ve estetiğini geri kazandıran, çene kemiğine yerleştirilen titanyum destekli yapay diş kökü tedavisi.",
+            "clarification": "İmplant, eksik dişin yerine çene kemiğine yerleştirilen yapay diş kökü uygulamasıdır.",
+            "fit_description": "Çekilmiş dişleriniz ve ağzınızda boşluklar varsa, çiğneme fonksiyonunuzu doğal dişe en yakın hisle geri kazanmak için ağız ve çene yapınızın incelenmesi gerekir."
+        },
+        {
+            "slug": "dis-beyazlatma",
+            "display": "Diş Beyazlatma (Bleaching)",
+            "keywords": [
+                "diş beyazlatma",
+                "bleaching",
+                "dis beyazlatma",
+                "sararan diş",
+                "diş estetiği",
+                "gülüş estetiği"
+            ],
+            "price": "3.000 TL",
+            "price_note": "tek seans ofis tipi beyazlatma",
+            "summary": "Lazer ışık desteği ve beyazlatıcı jellerle diş renginin 2-4 ton açıldığı profesyonel klinik beyazlatma işlemi.",
+            "clarification": "Diş beyazlatma, diş yüzeyindeki gözeneklere işlemiş olan renklenmeleri diş hekimi kontrolünde açma ve dişi kendi renginden birkaç ton daha beyazlatma işlemidir.",
+            "fit_description": "Diş beyazlatma, diş renginizden memnun değilseniz ve daha estetik bir görünüm istiyorsanız uygun olabilir. Uygunluk için diş hekiminin kısa değerlendirmesi gerekir."
+        }
+    ]
+}

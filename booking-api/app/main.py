@@ -8,6 +8,7 @@ import unicodedata
 import time as time_module
 from datetime import date, datetime, time, timedelta
 from typing import Any
+from app.config.settings import get_config
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
@@ -99,82 +100,7 @@ MORNING_REMINDER_WINDOW_START = os.getenv("MORNING_REMINDER_WINDOW_START", "08:3
 MORNING_REMINDER_WINDOW_END = os.getenv("MORNING_REMINDER_WINDOW_END", "11:30")
 MORNING_REMINDER_CLAIM_TIMEOUT_MINUTES = int(os.getenv("MORNING_REMINDER_CLAIM_TIMEOUT_MINUTES", "15"))
 SERVICES_HINTS = [s.strip() for s in os.getenv("SERVICES_HINTS", "danışmanlık,görüşme").split(",") if s.strip()]
-DOEL_SERVICE_CATALOG = [
-    {
-        "slug": "web-tasarim",
-        "display": "Web Tasarım - KOBİ Paketi",
-        "keywords": [
-            "web tasarım", "web tasarim", "web sitesi", "website", "kurumsal site", "kurumsal web",
-            "landing page", "landing", "açılış sayfası", "acilis sayfasi", "site tasarımı", "site tasarimi",
-            "internet sitesi", "kurumsal web sitesi", "site yenileme",
-        ],
-        "price": "12.900 ₺",
-        "price_note": "tek seferlik paket fiyatı",
-        "delivery_time": "7-14 iş günü",
-        "summary": "Google uyumlu, tüm cihazlara tam uyumlu, WhatsApp butonlu, 1 yıl altyapı garantili ve otomasyon altyapısına uygun kurumsal web tasarım çözümü.",
-    },
-    {
-        "slug": "otomasyon-ai",
-        "display": "Otomasyon & Yapay Zeka Çözümleri",
-        "keywords": [
-            "otomasyon", "yapay zeka", "chatbot", "n8n", "ai", "otomasyon sistemi", "dm otomasyonu",
-            "instagram bot", "instagram dm bot", "yapay zeka bot", "randevu botu", "müşteri takibi",
-            "musteri takibi", "crm", "entegrasyon", "workflow", "iş akışı", "is akisi", "süreç otomasyonu",
-            "surec otomasyonu", "otomatik cevap", "mesaj otomasyonu", "sistem kurma",
-        ],
-        "price": "5.000 ₺",
-        "price_note": "ilk 3 ay indirimli aylık hizmet bedeli",
-        "delivery_time": "standart kurulumlarda 3-7 iş günü, özel entegrasyonlarda 1-3 hafta",
-        "summary": "Müşteri mesajlarına 7/24 yanıt, randevuları otomatik ayarlama, teklif ve fatura otomasyonu, Instagram yorumlarına otomatik cevap ve Excel kayıt akışları içerir.",
-    },
-    {
-        "slug": "performans-pazarlama",
-        "display": "Performans Pazarlama",
-        "keywords": [
-            "performans pazarlama", "reklam yönetimi", "meta reklam", "tiktok reklam", "facebook reklam",
-            "instagram reklam", "instagramdan reklam", "reklam çıkmak", "reklam cıkmak", "meta ads",
-            "facebook ads", "lead", "müşteri kazanmak", "musteri kazanmak", "potansiyel müşteri",
-            "potansiyel musteri", "dijital reklam", "kampanya yönetimi", "kampanya yonetimi", "reklam",
-        ],
-        "price": "7.500 ₺",
-        "price_note": "aylık danışmanlık bedeli, reklam bütçesi dahil değildir",
-        "summary": "Meta ve TikTok reklam yönetimi, hedef kitle ve rakip analizi, kreatif reklam tasarımları, haftalık raporlama ve optimizasyon ile yeniden pazarlama desteği sunar.",
-    },
-    {
-        "slug": "sosyal-medya-yonetimi",
-        "display": "Sosyal Medya Yönetimi",
-        "keywords": [
-            "sosyal medya", "içerik yönetimi", "icerik yonetimi", "topluluk yönetimi", "community management",
-            "sayfa yönetimi", "sayfa yonetimi", "hesap yönetimi", "hesap yonetimi", "içerik üretimi",
-            "icerik uretimi", "paylaşım planı", "paylasim plani", "reels yönetimi", "reels yonetimi",
-        ],
-        "price": "Özel teklif",
-        "price_note": "marka ihtiyacına göre belirlenir",
-        "summary": "Topluluk inşası, kriz yönetimi, içerik planlama ve markanın sesini büyüten sürdürülebilir sosyal medya yönetimi sunar.",
-    },
-    {
-        "slug": "marka-stratejisi",
-        "display": "Marka Stratejisi & Danışmanlık",
-        "keywords": [
-            "marka stratejisi", "danışmanlık", "marka danışmanlığı", "strateji", "konumlandırma",
-            "markalasma", "markalaşma", "büyüme planı", "buyume plani", "go to market",
-        ],
-        "price": "Özel teklif",
-        "price_note": "analiz kapsamına göre şekillenir",
-        "summary": "Pazar analizi, rakip zekası, marka konumlandırma ve büyüme yol haritası hazırlığı sağlar.",
-    },
-    {
-        "slug": "kreatif-produksiyon",
-        "display": "Kreatif Prodüksiyon",
-        "keywords": [
-            "kreatif prodüksiyon", "kreatif produksiyon", "video çekimi", "video cekimi", "fotoğraf çekimi",
-            "fotograf cekimi", "prodüksiyon", "produksiyon", "reels çekimi", "reels cekimi", "creative",
-        ],
-        "price": "Özel teklif",
-        "price_note": "proje kapsamına göre belirlenir",
-        "summary": "Premium estetik standartta görsel üretim, sinematik video ve dikkat durduran kreatif içerik prodüksiyonu sunar.",
-    },
-]
+DOEL_SERVICE_CATALOG = get_config().get('service_catalog', [])
 
 WORK_START = time.fromisoformat(WORKING_HOURS_START)
 WORK_END = time.fromisoformat(WORKING_HOURS_END)
@@ -6685,7 +6611,9 @@ def is_ambiguous_appointment_question(text: str) -> bool:
     except: return False
 
 def build_ambiguous_appointment_reply() -> str:
-    return "Randevu tarafında iki şekilde yardımcı olabiliriz: bizimle ön görüşme planlayabiliriz ya da işletmeniz için randevu/müşteri takip sistemi kurabiliriz. Hangisini merak ediyorsunuz?"
+    from app.main import get_config
+    labels = get_config().get('appointment_service_labels', ['randevu'])
+    return f"Tabii, yardımcı olabiliriz. {labels[0].capitalize()} planlamak için mi yazmıştınız?"
 
 def is_detailed_service_question(text: str, history: list) -> bool:
     try:
@@ -6710,40 +6638,43 @@ def is_ambiguous_appointment_question(text: str) -> bool:
     except: return False
 
 def build_ambiguous_appointment_reply() -> str:
-    return "Randevu tarafında iki şekilde yardımcı olabiliriz: bizimle ön görüşme planlayabiliriz ya da işletmeniz için randevu/müşteri takip sistemi kurabiliriz. Hangisini merak ediyorsunuz?"
+    from app.main import get_config
+    labels = get_config().get('appointment_service_labels', ['randevu'])
+    return f"Tabii, yardımcı olabiliriz. {labels[0].capitalize()} planlamak için mi yazmıştınız?"
 
 def is_service_term_clarification(text: str) -> bool:
     try:
-        from app.main import sanitize_text
+        from app.main import sanitize_text, get_config
         lowered = sanitize_text(text).lower()
         triggers = ["ne demek", "ayni sey", "aynı şey", "neyi kapsiyor", "neyi kapsıyor", 
-                    "nasil calisiyor", "nasıl çalışıyor", "farki ne", "farkı ne", "farki nedir", "nedir"]
+                    "nasil calisiyor", "nasıl çalışıyor", "farki ne", "farkı ne", "farki nedir", "nedir", "ne işe yarar", "ne ise yarar"]
         if not any(t in lowered for t in triggers):
             return False
             
-        terms = ["otomasyon", "crm", "landing", "web", "sosyal medya", "reklam", "performans"]
-        return any(term in lowered for term in terms)
+        catalog = get_config().get("service_catalog", [])
+        for svc in catalog:
+            for kw in svc.get("keywords", []):
+                kw_clean = sanitize_text(kw).lower()
+                if kw_clean in lowered:
+                    return True
+        return False
     except:
         return False
 
 def build_service_term_clarification_reply(text: str) -> str:
-    from app.main import sanitize_text
-    lowered = sanitize_text(text).lower()
-    
-    if "otomasyon" in lowered:
-        return "Otomasyon, tekrar eden işleri sistemin otomatik yapmasıdır. Örneğin gelen mesajlara yanıt verme, randevu toplama ve müşteri takibini düzenleme gibi süreçleri kolaylaştırır."
-    elif "crm" in lowered:
-        return "CRM, müşteri takip sistemi demektir. Gelen müşterileri, randevuları, konuşmaları ve süreçleri daha düzenli yönetmenizi sağlar."
-    elif "landing" in lowered or "landing page" in lowered:
-        return "Landing page, reklamdan gelen kişiyi tek bir hedefe yönlendiren özel sayfadır. Genelde WhatsApp'a yazma, form doldurma veya randevu alma gibi dönüşümler için kullanılır."
-    elif "web" in lowered and ("tasarim" in lowered or "site" in lowered):
-        return "Evet, çoğu zaman aynı anlamda kullanılır. Web tasarım, web sitesinin görünüm, yapı ve kullanıcı deneyimi tarafını ifade eder."
-    elif "sosyal" in lowered or "medya" in lowered:
-        return "Sosyal medya yönetimi, işletmenizin Instagram/Facebook gibi hesaplarında içerik üretimi, paylaşım düzeni ve marka imajını profesyonelce kurgulamayı kapsar."
-    elif "reklam" in lowered:
-        return "Performans reklamı, bütçenizi doğrudan potansiyel müşterilere ulaşacak şekilde optimize ettiğimiz ücretli sponsorlu kampanyalardır. Takipçi değil, dönüşüm/satış odaklıdır."
-        
-    return "Hizmetlerimiz temel olarak dijital görünürlüğünüzü ve müşteri çekme/yönetme süreçlerinizi iyileştirir."
+    try:
+        from app.main import sanitize_text, get_config
+        lowered = sanitize_text(text).lower()
+        catalog = get_config().get("service_catalog", [])
+        for svc in catalog:
+            for kw in svc.get("keywords", []):
+                kw_clean = sanitize_text(kw).lower()
+                if kw_clean in lowered:
+                    if "clarification" in svc:
+                        return svc["clarification"]
+        return f"Bahsettiğiniz konu {get_config().get('business_name', '')} hizmetleri kapsamındadır. Detaylı bilgiyi değerlendirebiliriz."
+    except:
+        return "Detaylı bilgiyi ön görüşmemizde birlikte değerlendirebiliriz."
 
 def is_service_overview_question(text: str) -> bool:
     lowered = sanitize_text(text).lower()
@@ -8845,9 +8776,13 @@ def build_contextual_price_reply(conversation: dict[str, Any]) -> str:
     if service_meta:
         return build_price_question_reply(service_meta, conversation)
     memory = ensure_conversation_memory(conversation)
-    if memory.get("customer_sector") or memory.get("customer_subsector") or memory.get("customer_goal"):
-        return "Fiyat seçilecek sisteme göre değişir; web/landing page, reklam ve otomasyon ayrı kapsamlarla hazırlanıyor. İşletmenize en uygun başlangıcı netleştirirsek gereksiz maliyet çıkarmadan fiyat verebiliriz."
-    return "Fiyat seçilecek hizmete göre değişir; web, reklam ve otomasyon ayrı kapsamlarla hazırlanıyor. İhtiyacınıza uygun başlangıcı netleştirirsek doğru fiyatı çıkarabiliriz."
+    if memory.get("customer_sector"):
+        pass
+    from app.main import get_config
+
+    return f"Fiyat seçilecek hizmete göre değişiyor. Detayları kısa bir {get_config().get('booking_mode', 'görüşme')}de netleştirebiliriz."
+    from app.main import get_config
+    return f"Fiyat seçilecek hizmete göre değişiyor. Detayları kısa bir {get_config().get('booking_mode', 'görüşme')}de netleştirebiliriz."
 
 
 def build_safe_reply_builder(
@@ -9084,36 +9019,20 @@ def should_use_customer_recommendation_override(
     )
 
 
-def build_business_fit_reply(
-    conversation: dict[str, Any],
-    message_text: str | None = None,
-    history: list[dict[str, Any]] | None = None,
-) -> str:
-    msg_lowered = sanitize_text(message_text or "").lower()
-    
-    if "otomasyon" in msg_lowered:
-        return "Otomasyon, gelen mesajları, randevuları ve müşteri takibini düzenlemek için işe yarar. Çok DM alıyor, talepleri kaçırıyor veya randevuları manuel takip ediyorsanız mantıklı olur; daha çok müşteri bulma hedefiniz varsa reklam/web tarafı daha öncelikli olabilir."
-
-    if "web" in msg_lowered or "site" in msg_lowered or "tasarim" in msg_lowered:
-        return "Uygun olup olmadığını netleştirmek için işletmenizin sektörü, hedefi ve web sitesinden beklentiniz önemli. Eğer amacınız güven vermek ve müşteri başvurusu almaksa web sitesi mantıklı bir başlangıç olabilir."
-        
-    if "reklam" in msg_lowered or "performans" in msg_lowered:
-        return "Performans reklamı doğrudan size müşteri getirmeye odaklanır. Satışlarınızı veya randevularınızı artırmak istiyorsanız sizin için en mantıklı adım olur."
-        
-    if "sosyal" in msg_lowered or "medya" in msg_lowered:
-        return "Sosyal medya yönetimi, markanızın daha profesyonel görünmesi, düzenli içerik paylaşması ve güven oluşturması için işe yarar. Instagram’da daha görünür olmak ve hesabı düzenli yönetmek istiyorsanız mantıklı olur; direkt müşteri kazanımı hedefleniyorsa reklamla birlikte düşünülmeli."
-        
-    if "crm" in msg_lowered:
-        return "CRM, gelen müşteri taleplerini, randevuları ve takip süreçlerini düzenlemek istiyorsanız işe yarar. Eğer müşteriler karışıyor, geri dönüşler unutuluyor veya randevuları manuel takip ediyorsanız mantıklı olur."
-
-    memory = ensure_conversation_memory(conversation)
-    if memory.get("customer_sector") or memory.get("customer_subsector") or detect_customer_subsector(message_text or "", history):
-        from app.main import recommendation_engine
-        return recommendation_engine(conversation, message_text, history)
-        
-    return "Yarar sağlayıp sağlamayacağını net söylemek için işinizi ve hedefinizi bilmem gerekir. En çok hangi süreci geliştirmek istiyorsunuz?"
-
-
+def build_business_fit_reply(conversation, message_text=None, history=None) -> str:
+    try:
+        from app.main import sanitize_text, get_config
+        catalog = get_config().get('service_catalog', [])
+        if message_text:
+            lowered = sanitize_text(message_text).lower()
+            for svc in catalog:
+                for kw in svc.get("keywords", []):
+                    kw_clean = sanitize_text(kw).lower()
+                    if kw_clean in lowered and "fit_description" in svc:
+                        return svc['fit_description']
+        return f"{get_config().get('business_name', '')} hizmetleri genel olarak hedeflerinize uygun olabilir. Detayları kısa bir görüşmede netleştirebiliriz."
+    except:
+        return "Detayları kısa bir görüşmede netleştirebiliriz."
 def is_completed_booking_closeout_message(message_text: str, conversation: dict[str, Any]) -> bool:
     if sanitize_text(conversation.get("state") or "") != "completed":
         return False
@@ -10925,9 +10844,10 @@ def apply_ai_first_quality_overrides(
 
     # 2. active booking state direct questions
     _active_state = sanitize_text(str(conversation.get("state") or ""))
-    if _active_state in ACTIVE_BOOKING_STATES and not is_general_information_request(message_text) and not is_payment_question(message_text) and not is_meeting_method_question(message_text) and "?" not in message_text and not is_invalid_name_attempt(message_text, _active_state):
+    if _active_state in ACTIVE_BOOKING_STATES and not is_general_information_request(message_text) and not is_payment_question(message_text) and not is_meeting_method_question(message_text) and "?" not in message_text and not is_invalid_name_attempt(message_text, _active_state) and not str(decision.get("intent") or "").startswith("booking_collect") and not str(decision.get("intent") or "") == "booking_confirmed":
         if _active_state == "collect_name":
-            _svc_display = display_service_name(conversation.get("service")) or "Ön görüşme"
+            from app.main import get_config
+            _svc_display = display_service_name(conversation.get("service")) or get_config().get("booking_mode", "randevu")
             decision["reply_text"] = f"{_svc_display} kaydını tamamlamak için önce adınızı ve soyadınızı yazar mısınız?"
             decision["intent"] = "booking_collect_name_reask"
             decision["booking_intent"] = True
@@ -10935,7 +10855,8 @@ def apply_ai_first_quality_overrides(
             decision["should_reply"] = True
             return decision
         if _active_state == "collect_phone" and not conversation.get("phone"):
-            decision["reply_text"] = "Ön görüşme kaydı için telefon numaranızı paylaşır mısınız?"
+            from app.main import get_config
+            decision["reply_text"] = f"{get_config().get('booking_mode', 'Randevu').capitalize()} kaydı için telefon numaranızı paylaşır mısınız?"
             decision["intent"] = "booking_collect_phone_reask"
             decision["booking_intent"] = True
             decision["missing_fields"] = ["phone"]

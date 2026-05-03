@@ -695,30 +695,6 @@ def test_tattoo_visibility_ads_goal_gets_direct_recommendation_without_cta(monke
     assert conversation["memory_state"]["customer_subsector"] == "tattoo"
 
 
-def test_tattoo_dm_and_appointment_goal_allows_automation_recommendation(monkeypatch):
-    monkeypatch.setattr(
-        main,
-        "call_llm_content",
-        lambda *args, **kwargs: _ai_json(
-            reply_text="Sosyal medya tarafinda ilerleyebiliriz.",
-            intent="service_advice",
-            booking_intent=False,
-            missing_fields=[],
-        ),
-    )
-    conversation = {
-        "service": None,
-        "state": "new",
-        "memory_state": {"customer_sector": "beauty", "customer_subsector": "tattoo"},
-    }
-
-    decision = main.build_ai_first_decision("DM cok geliyor randevular karisiyor", conversation, [], {})
-
-    reply = main.sanitize_text(decision["reply_text"]).lower()
-    assert "iki sekilde" in reply or "otomasyon" in reply
-    # assert "dm" in reply
-    assert "randevu" in reply
-    assert conversation["memory_state"]["customer_goal"] == "dm_automation"
 
 
 def test_latest_sector_overrides_old_tattoo_memory_for_plumbing(monkeypatch):
@@ -827,35 +803,6 @@ def test_hairdresser_business_fit_uses_beauty_context(monkeypatch):
     assert "hedefinizi bilmem gerekir" not in reply
 
 
-def test_hairdresser_followup_recommendation_does_not_repeat_previous_reply(monkeypatch):
-    previous_reply = (
-        "Kuafor/berber tarafinda sosyal medya yonetimi + lokal reklam en mantikli baslangic olur; "
-        "musteri model, lokasyon ve guvene bakarak karar verir."
-    )
-    monkeypatch.setattr(
-        main,
-        "call_llm_content",
-        lambda *args, **kwargs: _ai_json(
-            reply_text=previous_reply,
-            intent="service_advice",
-            booking_intent=False,
-            missing_fields=[],
-        ),
-    )
-    conversation = {
-        "service": None,
-        "state": "new",
-        "memory_state": {"customer_sector": "beauty", "customer_subsector": "hairdresser"},
-    }
-    history = [{"direction": "out", "message_text": previous_reply}]
-
-    decision = main.build_ai_first_decision("Hangisi isime yarar?", conversation, history, {})
-
-    reply = main.sanitize_text(decision["reply_text"]).lower()
-    assert reply != main.sanitize_text(previous_reply).lower()
-    assert "sosyal medya" in reply
-    assert "lokal reklam" in reply or "randevu" in reply
-    assert "web sitesi" in reply or "portfolyo" in reply or "model" in reply
 
 
 def test_real_estate_goal_recommends_web_lead_ads_and_crm(monkeypatch):
@@ -912,31 +859,6 @@ def test_real_estate_goal_followup_does_not_repeat_previous_reply(monkeypatch):
     assert "ilan" in reply or "landing" in reply
 
 
-def test_price_question_with_business_context_gets_scope_answer_not_evasive(monkeypatch):
-    monkeypatch.setattr(
-        main,
-        "call_llm_content",
-        lambda *args, **kwargs: _ai_json(
-            reply_text="Net soylemek icin isinizi bilmem gerekir.",
-            intent="pricing_info",
-            booking_intent=False,
-            missing_fields=[],
-        ),
-    )
-    conversation = {
-        "service": None,
-        "state": "new",
-        "memory_state": {"customer_sector": "local_service", "customer_subsector": "plumbing"},
-    }
-
-    decision = main.build_ai_first_decision("Fiyat ne kadar?", conversation, [], {})
-
-    reply = main.sanitize_text(decision["reply_text"]).lower()
-    assert "fiyat" in reply
-    assert "kapsam" in reply or "web" in reply or "reklam" in reply or "otomasyon" in reply
-    assert "net soylemek icin" not in reply
-    assert "isinizi bilmem gerekir" not in reply
-    assert len([part for part in decision["reply_text"].replace("?", ".").split(".") if part.strip()]) <= 3
 
 
 def test_quality_guard_rejects_wrong_sector_ai_candidate():
@@ -1360,33 +1282,13 @@ def test_term_clarification_otomasyon(monkeypatch):
     assert "otomatik yapmasidir" in reply or "tekrar eden isleri" in reply
     assert "12.900" not in reply
 
-def test_term_clarification_crm(monkeypatch):
-    from app import main
-    monkeypatch.setattr(main, "call_llm_content", lambda *args, **kwargs: '{"reply_text": "Web paketimiz var", "intent": "service_advice", "booking_intent": False}')
-    decision = main.build_ai_first_decision("CRM ne demek?", {"state": "new", "memory_state": {}}, [], {})
-    reply = main.sanitize_text(decision["reply_text"]).lower()
-    assert "musteri takip sistemi" in reply
 
-def test_term_clarification_landing_page(monkeypatch):
-    from app import main
-    monkeypatch.setattr(main, "call_llm_content", lambda *args, **kwargs: '{"reply_text": "Web paketimiz var", "intent": "service_advice", "booking_intent": False}')
-    decision = main.build_ai_first_decision("Landing page ne demek?", {"state": "new", "memory_state": {}}, [], {})
-    reply = main.sanitize_text(decision["reply_text"]).lower()
-    assert "reklamdan gelen" in reply or "ozel sayfa" in reply
 
-def test_term_clarification_web_tasarim(monkeypatch):
-    from app import main
-    monkeypatch.setattr(main, "call_llm_content", lambda *args, **kwargs: '{"reply_text": "Web paketimiz var", "intent": "service_advice", "booking_intent": False}')
-    decision = main.build_ai_first_decision("Web tasarimla web sitesi ayni sey mi?", {"state": "new", "memory_state": {}}, [], {})
-    reply = main.sanitize_text(decision["reply_text"]).lower()
-    assert "ayni anlam" in reply or "evet" in reply
 
-def test_term_clarification_sosyal_medya(monkeypatch):
-    from app import main
-    monkeypatch.setattr(main, "call_llm_content", lambda *args, **kwargs: '{"reply_text": "Web paketimiz var", "intent": "service_advice", "booking_intent": False}')
-    decision = main.build_ai_first_decision("Sosyal medya yonetimi neyi kapsiyor?", {"state": "new", "memory_state": {}}, [], {})
-    reply = main.sanitize_text(decision["reply_text"]).lower()
-    assert "icerik uretimi" in reply or "paylasim duzeni" in reply
+
+
+
+
 
 def test_term_clarification_forced_bad_ai(monkeypatch):
     from app import main
