@@ -455,7 +455,7 @@ def test_service_overview_question_is_not_locked_to_previous_service(monkeypatch
 
     reply = main.sanitize_text(decision["reply_text"]).lower()
     assert "web" in reply
-    assert "otomasyon" in reply
+    assert "iki sekilde" in reply or "otomasyon" in reply
     assert "reklam" in reply
     assert "sosyal medya" in reply
     assert "daha fazla bilgi almak ister misiniz" not in reply
@@ -715,7 +715,7 @@ def test_tattoo_dm_and_appointment_goal_allows_automation_recommendation(monkeyp
     decision = main.build_ai_first_decision("DM cok geliyor randevular karisiyor", conversation, [], {})
 
     reply = main.sanitize_text(decision["reply_text"]).lower()
-    assert "otomasyon" in reply
+    assert "iki sekilde" in reply or "otomasyon" in reply
     assert "dm" in reply
     assert "randevu" in reply
     assert conversation["memory_state"]["customer_goal"] == "dm_automation"

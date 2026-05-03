@@ -3831,7 +3831,7 @@ def build_voice_duration_placeholder_reply() -> str:
 def build_smalltalk_reply(conversation: dict[str, Any]) -> str:
     if has_resumeable_booking_context(conversation):
         return f"İyidir, teşekkür ederim. {build_booking_resume_hint(conversation)}"
-    return "İyidir, teşekkür ederim. Size nasıl yardımcı olabilirim?"
+    return "İyidir, teşekkür ederim. İşletmeniz için hangi alanda dijital destek aramıştınız?"
 
 
 def build_good_wishes_reply() -> str:
@@ -4453,7 +4453,7 @@ def build_natural_greeting_reply() -> str:
 
 
 def build_natural_smalltalk_reply() -> str:
-    return "İyiyim, teşekkür ederim. Size nasıl yardımcı olabiliriz?"
+    return "İyiyim, teşekkür ederim. İşletmenizle ilgili bir projeniz mi var, yoksa genel bilgi mi istiyorsunuz?"
 
 
 ACTIVE_BOOKING_STATES = {"collect_name", "collect_phone", "collect_date", "collect_period", "collect_time", "human_handoff"}
@@ -6653,6 +6653,32 @@ def display_service_name(value: str | None) -> str:
     return (matched or {}).get("display") or (value or "").strip()
 
 
+def is_detailed_service_question(text: str, history: list) -> bool:
+    try:
+        lowered = sanitize_text(text).lower()
+        is_expanding = any(w in lowered for w in ["bu kadar mi", "bu kadar mı", "baska", "başka", "daha detayli", "daha detaylı", "alt hizmet"])
+        if not is_expanding:
+            return False
+        recent_outbound = get_last_outbound_text(history).lower() if history else ""
+        has_recent_overview = any(w in recent_outbound for w in ["web tasarim", "reklam", "otomasyon", "sosyal medya"])
+        return has_recent_overview or "hizmet" in lowered
+    except: return False
+
+def build_detailed_service_reply() -> str:
+    return "Ana hizmetlerimiz web tasarım, sosyal medya yönetimi, performans reklamları ve otomasyon/CRM sistemleri. Bunların altında Instagram yönetimi, reklam kurulumu, müşteri takip sistemi, randevu akışı, landing page ve web sitesi gibi alt çözümler de var."
+
+def is_ambiguous_appointment_question(text: str) -> bool:
+    try:
+        lowered = sanitize_text(text).lower()
+        if "randevu" not in lowered: return False
+        if any(w in lowered for w in ["almak", "olustur", "gorusme", "ayarla", "sizinle"]): return False
+        if any(w in lowered for w in ["sistemi", "otomasyon", "entegrasyon", "kurulum"]): return False
+        return True
+    except: return False
+
+def build_ambiguous_appointment_reply() -> str:
+    return "Randevu tarafında iki şekilde yardımcı olabiliriz: bizimle ön görüşme planlayabiliriz ya da işletmeniz için randevu/müşteri takip sistemi kurabiliriz. Hangisini merak ediyorsunuz?"
+
 def is_service_overview_question(text: str) -> bool:
     lowered = sanitize_text(text).lower()
     if any(keyword in lowered for keyword in SERVICE_OVERVIEW_KEYWORDS):
@@ -7436,7 +7462,7 @@ def build_offer_hesitation_reply(conversation: dict[str, Any], history: list[dic
 
 def build_booking_resume_hint(conversation: dict[str, Any]) -> str:
     if not has_resumeable_booking_context(conversation):
-        return "Size nasıl yardımcı olabilirim?"
+        return "Hangi konuyla doğrudan ilgilenmektesiniz?"
     state = conversation.get("state", "new")
     requested_date = conversation.get("requested_date")
     service = display_service_name(conversation.get("service"))
@@ -7455,7 +7481,7 @@ def build_booking_resume_hint(conversation: dict[str, Any]) -> str:
         return "Ön görüşme kaydına daha sonra devam edebiliriz; isterseniz önce sorunuzu yanıtlayayım."
     if state == "collect_name":
         return "Ön görüşme kaydına daha sonra devam edebiliriz; isterseniz önce sorunuzu yanıtlayayım."
-    return "Size nasıl yardımcı olabilirim?"
+    return "Hangi konuyla doğrudan ilgilenmektesiniz?"
 
 
 def build_simple_greeting_reply(message_text: str | None = None) -> str:
@@ -8905,6 +8931,9 @@ def should_use_customer_recommendation_override(
     conversation: dict[str, Any],
     history: list[dict[str, Any]] | None = None,
 ) -> bool:
+    if is_ambiguous_appointment_question(message_text):
+        return False
+
     # Never override during active booking collection
     if sanitize_text(str(conversation.get("state") or "")) in ACTIVE_BOOKING_STATES:
         return False
@@ -10838,7 +10867,7 @@ def apply_ai_first_quality_overrides(
             decision["should_reply"] = True
             return decision
     if ("aleykum" in lowered or "aleyküm" in lowered) and len(sanitize_text(message_text).split()) <= 4:
-        decision["reply_text"] = "Aleyküm selam, hoş geldiniz. Size nasıl yardımcı olabilirim?"
+        decision["reply_text"] = "Aleyküm selam, hoş geldiniz. Hangi alanda işletmenizi geliştirmek istersiniz?"
         decision["intent"] = "greeting"
         decision["booking_intent"] = False
         decision["missing_fields"] = []
@@ -11028,7 +11057,7 @@ def apply_ai_first_quality_overrides(
         return decision
     if is_good_wishes_message(message_text) and len(sanitize_text(message_text).split()) <= 4:
         if is_simple_greeting(message_text):
-            decision["reply_text"] = "Merhaba, teşekkür ederiz. Size nasıl yardımcı olabiliriz?"
+            decision["reply_text"] = "Merhaba, teşekkür ederiz. Hangi hizmetimizle ilgili detay istersiniz?"
         else:
             decision["reply_text"] = build_good_wishes_reply()
         decision["intent"] = "greeting"
@@ -11206,7 +11235,7 @@ def apply_ai_first_quality_overrides(
         decision["missing_fields"] = []
         return decision
     if ("aleykum" in lowered or "aleyküm" in lowered) and len(sanitize_text(message_text).split()) <= 4:
-        decision["reply_text"] = "Aleyküm selam, hoş geldiniz. Size nasıl yardımcı olabilirim?"
+        decision["reply_text"] = "Aleyküm selam, hoş geldiniz. Hangi alanda işletmenizi geliştirmek istersiniz?"
         decision["intent"] = "greeting"
         decision["booking_intent"] = False
         decision["missing_fields"] = []
@@ -11232,7 +11261,7 @@ def build_ai_first_emergency_reply(message_text: str, conversation: dict[str, An
     if is_general_information_request(message_text):
         return build_services_overview_reply()
     if is_simple_greeting(message_text) or "aleykum" in lowered:
-        return "Merhaba, buradayım. Size nasıl yardımcı olabilirim?"
+        return "Merhaba, buradayım. Konuyu iletebilirsiniz."
     if any(token in lowered for token in ["dolandirici", "guven", "guvenilir", "sahte"]):
         return "Endişenizi anlıyorum. Süreci şeffaf şekilde anlatabilirim; isterseniz önce hizmet, fiyat ve çalışma şeklini netleştireyim."
     if any(token in lowered for token in ["fiyat", "ucret", "ne kadar", "kac para"]):
