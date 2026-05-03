@@ -10773,6 +10773,14 @@ def apply_ai_first_quality_overrides(
         decision["missing_fields"] = []
         decision["should_reply"] = True
         return decision
+    if is_company_background_question(message_text):
+        decision["reply_text"] = build_company_background_reply()
+        decision["intent"] = "company_background"
+        decision["booking_intent"] = False
+        decision["missing_fields"] = []
+        decision["should_reply"] = True
+        return decision
+
     if is_assistant_identity_question(message_text):
         decision["reply_text"] = build_assistant_identity_reply(conversation)
         decision["intent"] = "assistant_identity"
@@ -10853,6 +10861,15 @@ def apply_ai_first_quality_overrides(
         decision["missing_fields"] = []
         decision["should_reply"] = True
         return decision
+        
+    if is_company_background_question(message_text):
+        decision["reply_text"] = build_company_background_reply()
+        decision["intent"] = "company_background"
+        decision["booking_intent"] = False
+        decision["missing_fields"] = []
+        decision["should_reply"] = True
+        return decision
+
     if is_smalltalk_message(message_text):
         decision["reply_text"] = build_natural_smalltalk_reply()
         decision["intent"] = "smalltalk"
