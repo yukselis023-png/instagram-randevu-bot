@@ -10972,15 +10972,17 @@ def apply_ai_first_quality_overrides(
             decision["missing_fields"] = []
             decision["should_reply"] = True
             return decision
-        if is_payment_question(message_text):
-            decision["reply_text"] = "Görüşmede ödeme detaylarını konuşuruz; şu an için bir ön ödeme talep etmiyoruz."
-            decision["intent"] = "payment_info"
-            decision["booking_intent"] = False
-            decision["missing_fields"] = []
-            decision["should_reply"] = True
-            return decision
+
 
     # 4. direct_answers
+    if is_payment_question(message_text):
+        decision["reply_text"] = "Görüşmede ödeme detaylarını konuşuruz; şu an için bir ön ödeme talep etmiyoruz."
+        decision["intent"] = "payment_info"
+        decision["booking_intent"] = False
+        decision["missing_fields"] = []
+        decision["should_reply"] = True
+        return decision
+
     if is_ambiguous_appointment_question(message_text):
         decision["reply_text"] = build_ambiguous_appointment_reply()
         decision["intent"] = "ambiguous_appointment_disambiguation"
