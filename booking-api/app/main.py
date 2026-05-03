@@ -3912,10 +3912,14 @@ def detect_company_capability_activity(text: str) -> str | None:
         return None
     capability_verbs = [
         "musunuz", "müsünüz", "misiniz", "miyim",
+        "muydunuz", "muytunuz",  # past-tense variants: "kesiyor muydunuz?"
         "yapiyor musunuz", "yapıyor musunuz",
+        "yapiyor muydunuz", "yapıyor muydunuz",
         "satiyor musunuz", "satıyor musunuz",
+        "satiyor muydunuz", "satıyor muydunuz",
         "tamir ediyor musunuz", "kesiyor musunuz", "cekiyor musunuz", "çekiyor musunuz",
-        "hizmeti veriyor musunuz",
+        "kesiyor muydunuz", "cekiyor muydunuz", "çekiyor muydunuz",
+        "hizmeti veriyor musunuz", "hizmeti veriyor muydunuz",
     ]
     if not any(verb in compact for verb in capability_verbs):
         return None
@@ -3963,7 +3967,7 @@ def is_company_capability_question(text: str) -> bool:
         return False
     if is_user_correction_message(text) and detect_company_capability_activity(text):
         return True
-    if "?" not in text and not any(token in lowered for token in ["musunuz", "misiniz", "müsünüz", "yapiyor musunuz", "yapıyor musunuz"]):
+    if "?" not in text and not any(token in lowered for token in ["musunuz", "misiniz", "müsünüz", "muydunuz", "yapiyor musunuz", "yapıyor musunuz"]):
         return False
     return detect_company_capability_activity(text) is not None
 
