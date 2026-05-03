@@ -5707,6 +5707,8 @@ def confirmed_booking_should_take_over_message(message_text: str, conversation: 
         return False
     if is_meeting_method_question(message_text) or is_phone_reason_question(message_text):
         return False
+    if is_payment_question(message_text):
+        return False
     if is_service_information_request(message_text) or is_general_information_request(message_text):
         return False
     if wants_new_booking_after_confirmation(message_text):
@@ -7127,6 +7129,25 @@ def is_meeting_clarification_question(text: str) -> bool:
         "nereden görüşeceğiz",
     ]
     return any(phrase in lowered for phrase in phrases)
+
+
+def is_payment_question(text: str) -> bool:
+    """Detect questions about payment method, invoice, pricing structure after booking."""
+    lowered = sanitize_text(text).lower()
+    payment_phrases = [
+        "odeme nasil", "ödeme nasıl",
+        "nasil odeme", "nasıl ödeme",
+        "odeme yapiliyor", "ödeme yapılıyor",
+        "odeme yontemi", "ödeme yöntemi",
+        "fatura", "invoice",
+        "banka transferi", "havale", "eft",
+        "kredi karti", "kredi kartı",
+        "nakit mi", "kart mi", "kart mı",
+        "pesin mi", "peşin mi",
+        "odeme sekli", "ödeme şekli",
+        "nasil oduyorsunuz", "nasıl ödüyorsunuz",
+    ]
+    return any(phrase in lowered for phrase in payment_phrases)
 
 
 def is_meeting_method_question(text: str) -> bool:
@@ -10743,6 +10764,29 @@ def apply_ai_first_quality_overrides(
         decision["missing_fields"] = []
         decision["should_reply"] = True
         return decision
+    # post-booking: randevu onaylandıktan sonra gelen tekrar onay / tarih tekrarı
+    _conv_state = sanitize_text(str(conversation.get("state") or ""))
+    _apt_status = sanitize_text(str(conversation.get("appointment_status") or ""))
+    if _apt_status == "confirmed" or _conv_state == "completed":
+        _apt_date = conversation.get("requested_date") or conversation.get("appointment_date", "")
+        _apt_time = conversation.get("requested_time") or conversation.get("appointment_time", "")
+        # M17: repeated date/time confirmation after booking already made
+        if (extract_date(message_text) or extract_time(message_text) or has_date_cue(message_text)) and not wants_new_booking_after_confirmation(message_text):
+            teyit = f"Randevunuz kayıtlı: {_apt_date} saat {_apt_time}. Görüşmede bekliyoruz."
+            decision["reply_text"] = teyit
+            decision["intent"] = "booking_confirmed_ack"
+            decision["booking_intent"] = False
+            decision["missing_fields"] = []
+            decision["should_reply"] = True
+            return decision
+        # M18: payment question after booking
+        if is_payment_question(message_text):
+            decision["reply_text"] = "Görüşmede ödeme detaylarını konuşuruz; şu an için bir ön ödeme talep etmiyoruz."
+            decision["intent"] = "payment_info"
+            decision["booking_intent"] = False
+            decision["missing_fields"] = []
+            decision["should_reply"] = True
+            return decision
     if ("aleykum" in lowered or "aleyküm" in lowered) and len(sanitize_text(message_text).split()) <= 4:
         decision["reply_text"] = "Aleyküm selam, hoş geldiniz. Size nasıl yardımcı olabilirim?"
         decision["intent"] = "greeting"
@@ -10815,7 +10859,8 @@ def apply_ai_first_quality_overrides(
         decision["missing_fields"] = []
         decision["should_reply"] = True
         return decision
-    if direct_service_meta and is_bare_service_interest_message(message_text, direct_service_meta) and not is_assistant_identity_question(message_text):
+    _active_state = sanitize_text(str(conversation.get("state") or ""))
+    if direct_service_meta and is_bare_service_interest_message(message_text, direct_service_meta) and not is_assistant_identity_question(message_text) and _active_state not in ACTIVE_BOOKING_STATES:
         decision["reply_text"] = build_short_service_interest_reply(direct_service_meta)
         decision["intent"] = "service_info"
         decision["booking_intent"] = False
@@ -11302,6 +11347,8 @@ def apply_ai_first_decision_to_conversation(
             and not is_closeout_message(message_text)
             and not is_trust_or_scam_question(message_text)
             and not is_angry_complaint_message(message_text)
+            and not is_payment_question(message_text)
+            and not is_general_information_request(message_text)
         ):
             memory = ensure_conversation_memory(conversation)
             memory["open_loop"] = active_state
