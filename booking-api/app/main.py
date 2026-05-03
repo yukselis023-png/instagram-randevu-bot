@@ -11323,21 +11323,23 @@ def build_ai_first_decision(
         decision["intent"] = "recovered_low_quality_reply"
         decision["fallback_used"] = True
     if should_suppress_ai_booking_collection(message_text, decision, conversation, llm_data):
-        decision["booking_intent"] = False
-        decision["missing_fields"] = []
-        if reply_requests_booking_details(decision.get("reply_text")):
-            service_name = decision.get("extracted_service") or pick_service(message_text, conversation.get("service"))
-            service_meta = match_service_catalog(service_name, service_name) if service_name else None
-            if service_meta:
-                decision["reply_text"] = build_ai_first_service_information_reply(service_meta, conversation)
-                decision["intent"] = "service_info"
-                decision["extracted_service"] = service_meta.get("display")
-            else:
-                decision["reply_text"] = build_ai_first_emergency_reply(message_text, conversation)
-                decision["intent"] = "booking_suppressed_info"
-        if should_replace_collection_reply_with_clarification(message_text, decision, conversation):
-            decision["reply_text"] = build_contextual_clarification_reply(conversation, message_text)
-            decision["intent"] = "clarification"
+        # Do NOT suppress explicitly triggered collect_name/phone re-asks from active booking states
+        if decision.get("intent") not in {"booking_collect_name_reask", "booking_collect_phone_reask"}:
+            decision["booking_intent"] = False
+            decision["missing_fields"] = []
+            if reply_requests_booking_details(decision.get("reply_text")):
+                service_name = decision.get("extracted_service") or pick_service(message_text, conversation.get("service"))
+                service_meta = match_service_catalog(service_name, service_name) if service_name else None
+                if service_meta:
+                    decision["reply_text"] = build_ai_first_service_information_reply(service_meta, conversation)
+                    decision["intent"] = "service_info"
+                    decision["extracted_service"] = service_meta.get("display")
+                else:
+                    decision["reply_text"] = build_ai_first_emergency_reply(message_text, conversation)
+                    decision["intent"] = "booking_suppressed_info"
+            if should_replace_collection_reply_with_clarification(message_text, decision, conversation):
+                decision["reply_text"] = build_contextual_clarification_reply(conversation, message_text)
+                decision["intent"] = "clarification"
     decision = enforce_ai_first_booking_order(decision, conversation, message_text)
     return decision
 
