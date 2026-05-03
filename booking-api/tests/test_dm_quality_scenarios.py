@@ -1181,6 +1181,38 @@ def test_company_capability_question_general_patterns_do_not_update_sector_memor
         assert conversation["memory_state"].get("customer_subsector") is None
 
 
+def test_company_capability_role_questions_do_not_become_user_identity(monkeypatch):
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text="Bu sektore uygun reklam ve otomasyon sistemi kurabiliriz.",
+            intent="service_advice",
+            booking_intent=False,
+            missing_fields=[],
+        ),
+    )
+    cases = [
+        ("Disci misiniz?", ["dis"]),
+        ("Tesisatci misiniz?", ["tesisat"]),
+        ("Emlakci misiniz?", ["emlak"]),
+        ("Restoran misiniz?", ["restoran"]),
+        ("Koltuk yikiyor musunuz?", ["koltuk", "yikama"]),
+        ("Oto yikama yapiyor musunuz?", ["oto", "yikama"]),
+    ]
+
+    for message, expected_terms in cases:
+        conversation = {"service": None, "state": "new", "memory_state": {}}
+        decision = main.build_ai_first_decision(message, conversation, [], {})
+
+        reply = main.sanitize_text(decision["reply_text"]).lower()
+        assert "hayir" in reply
+        assert any(term in reply for term in expected_terms)
+        assert "reklam ve otomasyon sistemi" not in reply
+        assert conversation["memory_state"].get("customer_sector") is None
+        assert conversation["memory_state"].get("customer_subsector") is None
+
+
 def test_user_correction_company_capability_runs_before_recommendation(monkeypatch):
     monkeypatch.setattr(
         main,
@@ -1205,6 +1237,31 @@ def test_user_correction_company_capability_runs_before_recommendation(monkeypat
     assert "sac kesimi" in reply or "sac kes" in reply
     assert "lokal reklam" not in reply
     assert "kuafor/berber tarafinda" not in reply
+
+
+def test_user_correction_starting_with_ben_still_answers_company_capability(monkeypatch):
+    monkeypatch.setattr(
+        main,
+        "call_llm_content",
+        lambda *args, **kwargs: _ai_json(
+            reply_text="Emlak tarafinda web/landing page + lead reklam en dogru baslangic olur.",
+            intent="service_advice",
+            booking_intent=False,
+            missing_fields=[],
+        ),
+    )
+    conversation = {
+        "service": None,
+        "state": "new",
+        "memory_state": {"customer_sector": "real_estate", "customer_subsector": "real_estate"},
+    }
+
+    decision = main.build_ai_first_decision("Ben size sordum ev satiyor musunuz?", conversation, [], {})
+
+    reply = main.sanitize_text(decision["reply_text"]).lower()
+    assert "hayir" in reply
+    assert "ev" in reply or "emlak" in reply
+    assert "lead reklam" not in reply
 
 
 def test_user_business_identity_hairdresser_still_triggers_recommendation(monkeypatch):

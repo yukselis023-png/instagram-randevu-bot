@@ -3920,6 +3920,18 @@ def detect_company_capability_activity(text: str) -> str | None:
     if not any(verb in compact for verb in capability_verbs):
         return None
 
+    role_question_map = [
+        (["disci misiniz", "dişçi misiniz", "dis hekimi misiniz", "diş hekimi misiniz", "dentist misiniz"], "dis hekimligi"),
+        (["tesisatci misiniz", "tesisatçı mısınız", "muslukcu musunuz", "muslukçu musunuz"], "musluk veya tesisat tamiri"),
+        (["emlakci misiniz", "emlakçı mısınız", "gayrimenkulcu musunuz", "gayrimenkulcü müsünüz"], "ev veya emlak satisi"),
+        (["restoran misiniz", "kafe misiniz", "lokanta misiniz"], "restoran veya kafe isletmeciligi"),
+        (["koltuk yikiyor", "koltuk yıkıyor", "koltuk yikama", "koltuk yıkama"], "koltuk yikama"),
+        (["oto yikama", "oto yıkama", "araba yikiyor", "araba yıkıyor"], "oto yikama"),
+    ]
+    for needles, activity in role_question_map:
+        if any(needle in compact for needle in needles):
+            return activity
+
     activity_map = [
         (["sac kes", "saç kes", "sac kesimi", "saç kesimi"], "sac kesimi"),
         (["kuafor musunuz", "kuaför müsünüz", "kuafor hizmet", "kuaför hizmet"], "kuafor hizmeti"),
@@ -8402,6 +8414,15 @@ def format_company_capability_activity(activity: str) -> str:
         "dis cekimi": "diş çekimi",
         "urun satisi": "ürün satışı",
     }
+    labels.update(
+        {
+            "dis hekimligi": "diş hekimliği",
+            "musluk veya tesisat tamiri": "musluk veya tesisat tamiri",
+            "restoran veya kafe isletmeciligi": "restoran veya kafe işletmeciliği",
+            "koltuk yikama": "koltuk yıkama",
+            "oto yikama": "oto yıkama",
+        }
+    )
     return labels.get(normalized, activity)
 
 
