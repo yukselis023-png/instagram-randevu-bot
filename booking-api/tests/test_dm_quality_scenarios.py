@@ -456,7 +456,7 @@ def test_service_overview_question_is_not_locked_to_previous_service(monkeypatch
     reply = main.sanitize_text(decision["reply_text"]).lower()
     assert "web" in reply
     assert "iki sekilde" in reply or "otomasyon" in reply
-    assert "reklam" in reply
+    assert "performans" in reply
     assert "sosyal medya" in reply
     assert "daha fazla bilgi almak ister misiniz" not in reply
 

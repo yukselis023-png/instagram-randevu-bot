@@ -5640,11 +5640,6 @@ def confirmed_booking_should_take_over_message(message_text: str, conversation: 
     lowered = sanitize_text(message_text).lower()
     if is_service_term_clarification(message_text):
         return False
-        decision["intent"] = "service_term_clarification"
-        decision["booking_intent"] = False
-        decision["missing_fields"] = []
-        decision["should_reply"] = True
-        return decision
 
     if is_assistant_identity_question(message_text):
         return False
@@ -6599,7 +6594,7 @@ def is_detailed_service_question(text: str, history: list) -> bool:
     except: return False
 
 def build_detailed_service_reply() -> str:
-    return "Ana hizmetlerimiz web tasarım, sosyal medya yönetimi, performans reklamları ve otomasyon/CRM sistemleri. Bunların altında Instagram yönetimi, reklam kurulumu, müşteri takip sistemi, randevu akışı, landing page ve web sitesi gibi alt çözümler de var."
+    return f"{get_config().get('business_name', 'İşletme')} olarak ana hizmetlerimiz: {', '.join([s.get('display', '') for s in get_config().get('service_catalog', [])])}"
 
 def is_ambiguous_appointment_question(text: str) -> bool:
     try:
@@ -6625,7 +6620,7 @@ def is_detailed_service_question(text: str, history: list) -> bool:
     except: return False
 
 def build_detailed_service_reply() -> str:
-    return "Ana hizmetlerimiz web tasarım, sosyal medya yönetimi, performans reklamları ve otomasyon/CRM sistemleri. Bunların altında Instagram yönetimi, reklam kurulumu, müşteri takip sistemi, randevu akışı, landing page ve web sitesi gibi alt çözümler de var."
+    return f"{get_config().get('business_name', 'İşletme')} olarak ana hizmetlerimiz: {', '.join([s.get('display', '') for s in get_config().get('service_catalog', [])])}"
 
 def is_ambiguous_appointment_question(text: str) -> bool:
     try:
@@ -6644,6 +6639,9 @@ def build_ambiguous_appointment_reply() -> str:
 
 def is_service_term_clarification(text: str) -> bool:
     try:
+        if is_price_question(text):
+            return False
+            
         from app.main import sanitize_text, get_config
         lowered = sanitize_text(text).lower()
         triggers = ["ne demek", "ayni sey", "aynı şey", "neyi kapsiyor", "neyi kapsıyor", 
@@ -6883,12 +6881,20 @@ def is_invalid_service_candidate(text: str | None) -> bool:
     return len(cleaned.split()) <= 3
 
 
-def build_services_overview_reply() -> str:
-    return (
-        "Web tasarım, otomasyon & yapay zeka, performans reklamları ve sosyal medya yönetimi tarafında destek veriyoruz. "
-        "İşletmenizin sektörünü ve hedefini yazarsanız en mantıklı başlangıcı net önerebilirim."
-    )
-
+def build_services_overview_reply(history: list[dict[str, Any]] | None = None) -> str:
+    from app.main import get_config
+    conf = get_config()
+    bname = conf.get("business_name", "İşletmemiz")
+    btype = conf.get("business_type", "hizmet platformu")
+    katalog = conf.get("service_catalog", [])
+    if not katalog:
+        return f"{bname} olarak çeşitli hizmetlerimiz bulunmaktadır. Hangi alanda destek arıyorsunuz?"
+    
+    hizmet_isimleri = ", ".join([s.get("display", "") for s in katalog])
+    hizmet_detaylari = " ".join([f"({s.get('display')}: {s.get('summary', '')})" for s in katalog])
+    
+    # Kaskad/aşırı uzatmamak için kısa
+    return f"{bname} olarak ana hizmetlerimiz: {hizmet_isimleri}. Eğer bunlardan biri ilginizi çekiyorsa detaylarını aktarabilirim."
 
 def build_detailed_services_overview_reply() -> str:
     return (
@@ -8018,11 +8024,6 @@ def maybe_build_information_reply(message_text: str, llm_data: dict[str, Any], m
         }
     if is_service_term_clarification(message_text):
         return False
-        decision["intent"] = "service_term_clarification"
-        decision["booking_intent"] = False
-        decision["missing_fields"] = []
-        decision["should_reply"] = True
-        return decision
 
     if is_assistant_identity_question(message_text):
         return {
@@ -8108,6 +8109,7 @@ def maybe_build_information_reply(message_text: str, llm_data: dict[str, Any], m
             "set_service": conversation.get("service"),
             "clear_booking": True,
         }
+
     if is_price_question(message_text):
         if matched_service:
             return {
@@ -8683,6 +8685,7 @@ def conversation_stage_manager(
         return "human_handoff"
     if state in {"collect_name", "collect_phone", "collect_date", "collect_period", "collect_time"}:
         return "booking"
+
     if is_price_question(message_text):
         return "pricing"
     if match_objection_type(message_text) or is_angry_complaint_message(message_text):
@@ -8795,11 +8798,6 @@ def build_safe_reply_builder(
         return build_company_capability_reply(message_text)
     if is_service_term_clarification(message_text):
         return False
-        decision["intent"] = "service_term_clarification"
-        decision["booking_intent"] = False
-        decision["missing_fields"] = []
-        decision["should_reply"] = True
-        return decision
 
     if is_assistant_identity_question(message_text):
         return build_assistant_identity_reply(conversation)
@@ -8807,6 +8805,7 @@ def build_safe_reply_builder(
         return "Buradayım, yazabilirsiniz."
     if is_real_estate_off_topic_question(message_text):
         return build_real_estate_off_topic_reply()
+
     if is_price_question(message_text):
         return build_contextual_price_reply(conversation)
     if (
@@ -8826,6 +8825,8 @@ def count_reply_sentences(reply_text: str | None) -> int:
     cleaned = re.sub(r"\s+", " ", str(reply_text or "")).strip()
     if not cleaned:
         return 0
+    # Remove numbers with dots so they don't count as sentences (e.g. 12.900)
+    cleaned = re.sub(r"\d+\.\d+", "NUM", cleaned)
     parts = [part.strip() for part in re.split(r"[.!]+", cleaned) if part.strip()]
     return len(parts) or 1
 
@@ -9080,7 +9081,9 @@ def build_generic_ai_draft_reply(message_text: str, conversation: dict[str, Any]
     if service:
         return f"{service} tarafında yardımcı olabilirim. Sorunuzu netleştirirseniz size en pratik yolu söyleyeyim."
     if "?" in lowered:
-        return "Sorunuzu doğrudan cevaplayayım; bildiğim kısmı net aktarırım, emin olmadığım yerde de uydurmadan belirtirim."
+        from app.main import get_config
+        conf = get_config()
+        return f"Ben dijital asistanım, {conf.get('human_contact_name', 'yetkili')} değilim. İsterseniz mesajınızı ekibe iletebilirim veya {conf.get('booking_mode', 'randevu')} oluşturabiliriz."
     return "Anladım. Buradan mesajınızı değerlendirip size en uygun cevabı vermeye çalışacağım."
 
 
@@ -9529,7 +9532,7 @@ def build_emergency_reply(message_text: str, conversation: dict[str, Any], decis
             return build_detailed_services_overview_reply()
         return build_services_overview_reply()
     if is_simple_greeting(message_text):
-        return "Merhaba, yardımcı olayım. Web tasarım, otomasyon, reklam veya sosyal medya tarafında hangi konuyla ilgileniyorsunuz?"
+        return f"Merhaba, yardımcı olayım. {get_config().get('booking_mode', 'randevu')} işleminiz için hangi hizmetle ilgilendiğinizi belirtebilir misiniz?"
     if ensure_conversation_memory(conversation).get("offer_status") == "declined" and (is_closeout_message(message_text) or is_low_signal_message(message_text)):
         return "Tabii, acelesi yok. Aklınıza takılan bir şey olursa ya da ilerleyen günlerde bakmak isterseniz buradayım."
     if conversation.get("service"):
@@ -9902,6 +9905,7 @@ def infer_user_need(message_text: str, conversation: dict[str, Any], history: li
         return "booking akışında bir sonraki adıma geçmek"
     if state == "collect_phone" and extract_phone(message_text):
         return "iletişim bilgisini tamamlayıp devam etmek"
+
     if is_price_question(message_text):
         return "net fiyat bilgisini almak"
     if is_business_need_analysis_message(message_text):
@@ -10943,6 +10947,29 @@ def apply_ai_first_quality_overrides(
         decision["should_reply"] = True
         return decision
 
+
+    if is_price_question(message_text):
+        lowered = message_text.lower()
+        found_service = None
+        from app.main import get_config
+        for s in get_config().get("service_catalog", []):
+            if any(kw.lower() in lowered for kw in s.get("keywords", [])):
+                found_service = s
+                break
+        
+        if found_service and "price" in found_service:
+            dummy_conv = conversation.copy() if conversation else {}
+            dummy_conv["service"] = found_service["display"]
+            decision["reply_text"] = build_contextual_price_reply(dummy_conv)
+        else:
+            decision["reply_text"] = build_contextual_price_reply(conversation)
+            
+        decision["intent"] = "price_question"
+        decision["booking_intent"] = False
+        decision["missing_fields"] = []
+        decision["should_reply"] = True
+        return decision
+
     if is_service_term_clarification(message_text):
         decision["reply_text"] = build_service_term_clarification_reply(message_text)
         decision["intent"] = "service_term_clarification"
@@ -11323,7 +11350,7 @@ def build_ai_first_emergency_reply(message_text: str, conversation: dict[str, An
     if any(token in lowered for token in ["dolandirici", "guven", "guvenilir", "sahte"]):
         return "Endişenizi anlıyorum. Süreci şeffaf şekilde anlatabilirim; isterseniz önce hizmet, fiyat ve çalışma şeklini netleştireyim."
     if any(token in lowered for token in ["fiyat", "ucret", "ne kadar", "kac para"]):
-        return "Fiyat hizmete ve kapsama göre değişir. Web tasarım, otomasyon, reklam veya sosyal medya tarafında hangisini merak ettiğinizi yazarsanız net bilgi vereyim."
+        return "Fiyat hizmete ve kapsama göre değişir. Hangi hizmeti merak ettiğinizi yazarsanız net bilgi vereyim."
     if any(token in lowered for token in ["teslim", "sure", "kac gun", "hafta"]):
         service = display_service_name(conversation.get("service"))
         if service:
@@ -11345,7 +11372,7 @@ def build_ai_first_emergency_reply(message_text: str, conversation: dict[str, An
         if service_meta and service_meta.get("slug") == "otomasyon-ai":
             return f"{service} tarafında DM, randevu ve müşteri takibini tek akışta toparlayabiliriz. İsterseniz kısa bir ön görüşmeyle işletmenizde hangi kısmın otomatikleşeceğini netleştirelim."
         return f"{service} tarafında ihtiyacınıza göre net ilerleyebiliriz. İsterseniz işletmenizde en çok hangi süreci toparlamak istediğinizi yazın, ona göre öneri yapayım."
-    return "Buradayım. Web, otomasyon, reklam veya sosyal medya tarafında neyi merak ettiğinizi yazarsanız net şekilde cevaplayayım."
+    return f"Buradayım. Hangi hizmetimizle ({', '.join([s.get('display', '') for s in get_config().get('service_catalog', [])])}) ilgilendiğinizi yazarsanız net şekilde yardımcı olayım."
 
 
 def build_ai_first_decision(
