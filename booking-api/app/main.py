@@ -10854,8 +10854,7 @@ def apply_ai_first_quality_overrides(
     # M13 FIX: active booking collection must NOT be interrupted by business-context overrides.
     # If we are waiting for name or phone, re-ask immediately instead of pivoting to recommendation.
     if _active_state in ACTIVE_BOOKING_STATES and not is_general_information_request(message_text) and not is_payment_question(message_text) and not is_meeting_method_question(message_text) and "?" not in message_text and not is_invalid_name_attempt(message_text, _active_state):
-        if _active_state == "collect_name" and not conversation.get("full_name"):
-            _booking_label = get_booking_label(conversation)
+        if _active_state == "collect_name":
             _svc_display = display_service_name(conversation.get("service")) or "ön görüşme"
             decision["reply_text"] = f"{_svc_display} kaydını tamamlamak için önce adınızı ve soyadınızı yazar mısınız?"
             decision["intent"] = "booking_collect_name_reask"
