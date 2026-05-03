@@ -10850,11 +10850,32 @@ def apply_ai_first_quality_overrides(
         decision["missing_fields"] = []
         decision["should_reply"] = True
         return decision
+    _active_state = sanitize_text(str(conversation.get("state") or ""))
+    # M13 FIX: active booking collection must NOT be interrupted by business-context overrides.
+    # If we are waiting for name or phone, re-ask immediately instead of pivoting to recommendation.
+    if _active_state in ACTIVE_BOOKING_STATES and not is_general_information_request(message_text) and not is_payment_question(message_text) and not is_meeting_method_question(message_text) and "?" not in message_text and not is_invalid_name_attempt(message_text, _active_state):
+        if _active_state == "collect_name" and not conversation.get("full_name"):
+            _booking_label = get_booking_label(conversation)
+            _svc_display = display_service_name(conversation.get("service")) or "ön görüşme"
+            decision["reply_text"] = f"{_svc_display} kaydını tamamlamak için önce adınızı ve soyadınızı yazar mısınız?"
+            decision["intent"] = "booking_collect_name_reask"
+            decision["booking_intent"] = True
+            decision["missing_fields"] = ["full_name"]
+            decision["should_reply"] = True
+            return decision
+        if _active_state == "collect_phone" and not conversation.get("phone"):
+            decision["reply_text"] = "Ön görüşme kaydı için telefon numaranızı paylaşır mısınız?"
+            decision["intent"] = "booking_collect_phone_reask"
+            decision["booking_intent"] = True
+            decision["missing_fields"] = ["phone"]
+            decision["should_reply"] = True
+            return decision
     explicit_business_context = bool(detect_customer_subsector(message_text) or detect_business_sector(message_text))
     if (
         explicit_business_context
         and (is_service_overview_question(message_text) or is_general_information_request(message_text))
         and not is_simple_greeting(message_text)
+        and _active_state not in ACTIVE_BOOKING_STATES
     ):
         decision["reply_text"] = recommendation_engine(conversation, message_text, history)
         decision["intent"] = "business_context_overview"
@@ -10868,6 +10889,7 @@ def apply_ai_first_quality_overrides(
         and not is_general_information_request(message_text)
         and not is_simple_greeting(message_text)
         and not (known_service_meta and known_service_meta.get("slug") == "web-tasarim")
+        and _active_state not in ACTIVE_BOOKING_STATES
     ):
         decision["reply_text"] = recommendation_engine(conversation, message_text, history)
         decision["intent"] = "business_context_intro"
@@ -10875,7 +10897,6 @@ def apply_ai_first_quality_overrides(
         decision["missing_fields"] = []
         decision["should_reply"] = True
         return decision
-    _active_state = sanitize_text(str(conversation.get("state") or ""))
     if direct_service_meta and is_bare_service_interest_message(message_text, direct_service_meta) and not is_assistant_identity_question(message_text) and _active_state not in ACTIVE_BOOKING_STATES:
         decision["reply_text"] = build_short_service_interest_reply(direct_service_meta)
         decision["intent"] = "service_info"
