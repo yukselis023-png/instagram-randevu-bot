@@ -5713,7 +5713,7 @@ def build_post_confirmation_followup_reply(conversation: dict[str, Any], message
 def confirmed_booking_should_take_over_message(message_text: str, conversation: dict[str, Any]) -> bool:
     lowered = sanitize_text(message_text).lower()
     if is_service_term_clarification(message_text):
-        decision["reply_text"] = build_service_term_clarification_reply(message_text)
+        return False
         decision["intent"] = "service_term_clarification"
         decision["booking_intent"] = False
         decision["missing_fields"] = []
@@ -8087,7 +8087,7 @@ def maybe_build_information_reply(message_text: str, llm_data: dict[str, Any], m
             "set_service": conversation.get("service"),
         }
     if is_service_term_clarification(message_text):
-        decision["reply_text"] = build_service_term_clarification_reply(message_text)
+        return False
         decision["intent"] = "service_term_clarification"
         decision["booking_intent"] = False
         decision["missing_fields"] = []
@@ -8860,7 +8860,7 @@ def build_safe_reply_builder(
     if is_company_capability_question(message_text) or (is_user_correction_message(message_text) and detect_company_capability_activity(message_text)):
         return build_company_capability_reply(message_text)
     if is_service_term_clarification(message_text):
-        decision["reply_text"] = build_service_term_clarification_reply(message_text)
+        return False
         decision["intent"] = "service_term_clarification"
         decision["booking_intent"] = False
         decision["missing_fields"] = []
@@ -9102,10 +9102,10 @@ def build_business_fit_reply(
         return "Performans reklamı doğrudan size müşteri getirmeye odaklanır. Satışlarınızı veya randevularınızı artırmak istiyorsanız sizin için en mantıklı adım olur."
         
     if "sosyal" in msg_lowered or "medya" in msg_lowered:
-        return "Sosyal medya yönetimi, dijital vizyonunuzu profesyonel göstermek için gereklidir ancak doğrudan sıcak müşteri artışı istiyorsanız reklamlar daha hızlı sonuç verir."
+        return "Sosyal medya yönetimi, markanızın daha profesyonel görünmesi, düzenli içerik paylaşması ve güven oluşturması için işe yarar. Instagram’da daha görünür olmak ve hesabı düzenli yönetmek istiyorsanız mantıklı olur; direkt müşteri kazanımı hedefleniyorsa reklamla birlikte düşünülmeli."
         
     if "crm" in msg_lowered:
-        return "CRM sistemi, verilerinizi kaybolmadan tek noktadan takip etmeye yarar. Birden fazla personelle çalışıyor veya çok randevu alıyorsanız mutlaka işinize yarar."
+        return "CRM, gelen müşteri taleplerini, randevuları ve takip süreçlerini düzenlemek istiyorsanız işe yarar. Eğer müşteriler karışıyor, geri dönüşler unutuluyor veya randevuları manuel takip ediyorsanız mantıklı olur."
 
     memory = ensure_conversation_memory(conversation)
     if memory.get("customer_sector") or memory.get("customer_subsector") or detect_customer_subsector(message_text or "", history):
@@ -11025,6 +11025,11 @@ def apply_ai_first_quality_overrides(
 
     if is_service_term_clarification(message_text):
         decision["reply_text"] = build_service_term_clarification_reply(message_text)
+        decision["intent"] = "service_term_clarification"
+        decision["booking_intent"] = False
+        decision["missing_fields"] = []
+        decision["should_reply"] = True
+        return decision
         decision["intent"] = "service_term_clarification"
         decision["booking_intent"] = False
         decision["missing_fields"] = []

@@ -1397,3 +1397,25 @@ def test_term_clarification_forced_bad_ai(monkeypatch):
     assert guarded["passed"] is True
     assert "otomatik yapmasidir" in reply or "tekrar" in reply
     assert "12.900" not in reply
+
+def test_crm_business_fit_specifics():
+    from app.main import build_ai_first_decision
+    conversation = {
+        "state": "new",
+        "memory_state": {"customer_sector": "avukat"} # adding random sector
+    }
+    decision = build_ai_first_decision("CRM işime yarar mı?", conversation.copy(), [], {})
+    reply = decision.get("reply_text")
+    assert "CRM, gelen müşteri taleplerini" in reply
+    assert "reklam en mantıklı başlangıç olur" not in reply
+
+def test_social_media_business_fit_specifics():
+    from app.main import build_ai_first_decision
+    conversation = {
+        "state": "new",
+        "memory_state": {"customer_sector": "avukat"}
+    }
+    decision = build_ai_first_decision("Sosyal medya yönetimi işime yarar mı?", conversation.copy(), [], {})
+    reply = decision.get("reply_text")
+    assert "Sosyal medya yönetimi, markanızın" in reply
+    assert "reklam en mantıklı başlangıç olur" not in reply
