@@ -6716,13 +6716,12 @@ def is_service_term_clarification(text: str) -> bool:
     try:
         from app.main import sanitize_text
         lowered = sanitize_text(text).lower()
-        triggers = ["ne demek", "ayni sey mi", "aynı şey mi", "neyi kapsiyor", "neyi kapsıyor", 
+        triggers = ["ne demek", "ayni sey", "aynı şey", "neyi kapsiyor", "neyi kapsıyor", 
                     "nasil calisiyor", "nasıl çalışıyor", "farki ne", "farkı ne", "farki nedir", "nedir"]
         if not any(t in lowered for t in triggers):
             return False
             
-        terms = ["otomasyon", "crm", "landing", "web tasarim", "web sitesi", "website", 
-                 "sosyal medya", "reklam", "performans"]
+        terms = ["otomasyon", "crm", "landing", "web", "sosyal medya", "reklam", "performans"]
         return any(term in lowered for term in terms)
     except:
         return False
@@ -13822,3 +13821,45 @@ def build_normalized(conversation: dict[str, Any]) -> dict[str, Any]:
         "preferred_period": conversation.get("preferred_period"),
         "memory_state": memory,
     }
+
+import logging
+logger = logging.getLogger(__name__)
+
+def __log_instagram_debug_trace(
+    user_message: str,
+    memory_before: dict,
+    memory_after: dict,
+    conversation_id: str,
+    sender_id: str,
+    channel: str,
+    decision: dict,
+    reply_text: str
+):
+    try:
+        detect_intent = decision.get("intent", "unknown")
+        ai_candidate = decision.get("ai_draft", "N/A")  # we may not have this here but we log what we have
+        
+        log_block = f"""
+============== INSTAGRAM DM DEBUG TRACE ==============
+deploy_commit: 9b96231
+source: {channel}
+inbound_endpoint: /webhook
+sender_id: {sender_id}
+conversation_id: {conversation_id}
+user_message: {user_message}
+normalized_message: {sanitize_text(user_message).lower()}
+detected_intent: {detect_intent}
+selected_route: direct_answer/{detect_intent}
+memory_before: {memory_before}
+memory_after: {memory_after}
+ai_candidate_reply: {decision.get("original_ai_reply", "None")}
+final_reply: {reply_text}
+outbound_reply: {reply_text}
+outbound_channel: {channel}
+======================================================
+"""
+        print(log_block)
+        logger.warning(log_block)
+    except Exception as e:
+        print("Log error:", e)
+
