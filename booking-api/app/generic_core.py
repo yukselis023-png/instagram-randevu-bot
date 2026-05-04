@@ -196,7 +196,7 @@ def call_llm_json(system_prompt: str, user_text: str) -> dict:
     import requests, os
     llm_url = os.getenv("LLM_BASE_URL", "https://api.groq.com/openai/v1")
     llm_key = os.getenv("LLM_API_KEY", "")
-    llm_model = os.getenv("LLM_MODEL", "llama-3.3-70b-versatile")
+    llm_model = os.getenv("LLM_MODEL", "llama3-8b-8192")
     
     if not llm_key:
         from app.main import LLM_BASE_URL, LLM_API_KEY, LLM_MODEL

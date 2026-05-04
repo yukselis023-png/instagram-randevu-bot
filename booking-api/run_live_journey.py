@@ -40,6 +40,6 @@ for idx, text in enumerate(messages, 1):
     except Exception as e:
         print(f"[ERROR] BAĞLANTI HATASI: {e}")
     
-    time.sleep(1.5)
+    time.sleep(3.5)
 
 print("\n--- TEST TAMAMLANDI ---")
