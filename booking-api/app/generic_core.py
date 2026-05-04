@@ -2,6 +2,8 @@ import os
 import json
 import re
 import datetime
+import requests
+import os
 import logging
 import time as time_module
 from typing import Any, Tuple, Optional
@@ -190,6 +192,36 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
         )
 
 
+def call_llm_json(system_prompt: str, user_text: str) -> dict:
+    import requests, os
+    llm_url = os.getenv("LLM_BASE_URL", "https://api.groq.com/openai/v1")
+    llm_key = os.getenv("LLM_API_KEY", "")
+    llm_model = os.getenv("LLM_MODEL", "llama-3.3-70b-versatile")
+    
+    if not llm_key:
+        from app.main import LLM_BASE_URL, LLM_API_KEY, LLM_MODEL
+        llm_url = LLM_BASE_URL
+        llm_key = LLM_API_KEY
+        llm_model = LLM_MODEL
+
+    headers = {"Authorization": f"Bearer {llm_key}", "Content-Type": "application/json"}
+    payload = {
+        "model": llm_model,
+        "response_format": {"type": "json_object"},
+        "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_text}],
+        "temperature": 0.0,
+        "max_tokens": 1000
+    }
+    
+    try:
+        resp = requests.post(f"{llm_url}/chat/completions", headers=headers, json=payload, timeout=20)
+        resp.raise_for_status()
+        content = resp.json()["choices"][0]["message"]["content"]
+        return json.loads(content)
+    except Exception as e:
+        raise ValueError(f"LLM JSON Error: {e}")
+
+
 def invoke_generic_llm(message_text: str, conversation: dict, memory: dict, history: list[dict]) -> dict:
     cfg = get_config()
     business_context = json.dumps(cfg, ensure_ascii=False)
@@ -236,20 +268,7 @@ Müşterinin yeni mesajını incele. Oku ve aşağıdaki JSON formatına SIKI SI
 }}"""
 
     try:
-        content = call_llm_content(
-            messages=[{"role":"system","content":system_prompt}, {"role":"user","content":message_text}],
-            max_tokens=1000,
-            temperature=0.0
-        )
-        if not content:
-            raise ValueError("No content returned from LLM")
-            
-        match = re.search(r'\{.*\}', content, re.DOTALL)
-        if match:
-            json_str = match.group(0)
-            return json.loads(json_str)
-        else:
-            raise ValueError("No JSON found in response")
+        return call_llm_json(system_prompt, message_text)
     except Exception as e:
         logger.error(f"Generic engine LLM Error: {e}")
         return {
