@@ -55,12 +55,12 @@ APPOINTMENT_LOOKAHEAD_DAYS = int(os.getenv("APPOINTMENT_LOOKAHEAD_DAYS", "30"))
 AI_FIRST_BOOKING_SLOT_LIMIT = int(os.getenv("AI_FIRST_BOOKING_SLOT_LIMIT", "4"))
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://api.groq.com/openai/v1").rstrip("/")
 LLM_API_KEY = os.getenv("LLM_API_KEY", "").strip()
-LLM_MODEL = os.getenv("LLM_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct")
+LLM_MODEL = os.getenv("LLM_MODEL", "llama-3.3-70b-versatile")
 LLM_FALLBACK_MODEL = os.getenv("LLM_FALLBACK_MODEL", "llama-3.1-8b-instant")
 LLM_EXTRACT_TIMEOUT_SECONDS = float(os.getenv("LLM_EXTRACT_TIMEOUT_SECONDS", "6"))
 LLM_REPLY_POLISH_TIMEOUT_SECONDS = float(os.getenv("LLM_REPLY_POLISH_TIMEOUT_SECONDS", "8"))
 LLM_REPLY_MICRO_MODEL = os.getenv("LLM_REPLY_MICRO_MODEL", "llama-3.1-8b-instant").strip() or LLM_MODEL
-LLM_REPLY_ADVISORY_MODEL = os.getenv("LLM_REPLY_ADVISORY_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct").strip() or LLM_MODEL
+LLM_REPLY_ADVISORY_MODEL = os.getenv("LLM_REPLY_ADVISORY_MODEL", "llama-3.3-70b-versatile").strip() or LLM_MODEL
 LLM_REPLY_QUALITY_MODEL = (
     os.getenv("LLM_REPLY_QUALITY_MODEL")
     or os.getenv("LLM_QUALITY_MODEL")
@@ -9397,7 +9397,7 @@ def build_recent_history_lines(history: list[dict[str, Any]] | None, limit: int)
 def get_ai_compose_profile(decision_label: str | None, conversation: dict[str, Any]) -> dict[str, Any]:
     label = sanitize_text(decision_label or "").lower()
     customer_message = conversation.get("last_customer_message") or ""
-    reply_model = LLM_MODEL or "meta-llama/llama-4-scout-17b-16e-instruct"
+    reply_model = LLM_MODEL or "llama-3.3-70b-versatile"
     micro_model = LLM_REPLY_MICRO_MODEL or reply_model
     advisory_model = LLM_REPLY_ADVISORY_MODEL or reply_model
     fallback_model = LLM_FALLBACK_MODEL or micro_model
