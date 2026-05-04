@@ -1,6 +1,7 @@
 import os
 import json
 import re
+import datetime
 import logging
 import time as time_module
 from typing import Any, Tuple, Optional
@@ -112,7 +113,12 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
             memory["requested_service"] = extracted["requested_service"]
             decision_path.append("extracted:service")
         if extracted.get("requested_date"):
-            conversation["requested_date"] = extracted["requested_date"]
+            try:
+                # Basic validation using datetime
+                datetime.datetime.strptime(extracted["requested_date"], "%Y-%m-%d")
+                conversation["requested_date"] = extracted["requested_date"]
+            except Exception:
+                pass
             decision_path.append("extracted:date")
         if extracted.get("requested_time"):
             conversation["requested_time"] = extracted["requested_time"]
@@ -194,7 +200,8 @@ def invoke_generic_llm(message_text: str, conversation: dict, memory: dict, hist
     if not conversation.get("lead_name"): missing.append("İsim Soyisim")
     if not conversation.get("requested_date") or not conversation.get("requested_time"): missing.append("Tarih ve Saat")
     
-    system_prompt = f"""Sen {cfg.get('business_name')} firmasının dijital asistanısın. Müşterilerle doğal, insansı ve yardımcı bir dilde Türkçe konuş.
+    today = datetime.date.today().strftime('%Y-%m-%d')
+    system_prompt = f"""Sen {cfg.get('business_name')} firmasının dijital asistanısın. Müşterilerle doğal, insansı ve yardımcı bir dilde Türkçe konuş. BUGÜNÜN TARİHİ: {today}. İstenen tarihi YYYY-MM-DD hesapla. Müşterilerle doğal, insansı ve yardımcı bir dilde Türkçe konuş.
 Senin GÖREVİN:
 1. Önce müşterinin sorduğu soruyu net, doğru ve doğrudan Business bilgisine dayanarak yanıtla. Bilmediğin bilgiyi asla uydurma.
 2. Soru cevaplandıktan sonra, eğer bir hizmete ilgi gösteriyorsa VEYA doğrudan randevu/ön görüşme almak istiyorsa, onu Booking flow'a (randevu flow) yönlendir.
