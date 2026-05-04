@@ -108,6 +108,17 @@ MORNING_REMINDER_START = time.fromisoformat(MORNING_REMINDER_WINDOW_START)
 MORNING_REMINDER_END = time.fromisoformat(MORNING_REMINDER_WINDOW_END)
 
 app = FastAPI(title="Instagram Booking API", version="1.0.0")
+@app.get("/api/debug-state/{sender_id}")
+def debug_state(sender_id: str):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM conversation_state_v2 WHERE sender_id = %s", (sender_id,))
+            row = cur.fetchone()
+            if not row: return {"error": "Not found"}
+            from app.main import serialize_row
+            data = serialize_row(row)
+            return {"state": data}
+
 ALLOWED_ORIGINS = [
     origin.strip()
     for origin in os.getenv(
