@@ -224,7 +224,7 @@ Müşterinin yeni mesajını incele. Oku ve aşağıdaki JSON formatına SIKI SI
 }}"""
 
     try:
-        content = call_llm_content(system_prompt=system_prompt, user_prompt=message_text, is_json=True)
+        content = call_llm_content([{"role":"system","content":system_prompt}, {"role":"user","content":message_text}], is_json=True)
         return json.loads(content) if isinstance(content, str) else content
     except Exception as e:
         logger.error(f"Generic engine LLM Error: {e}")
