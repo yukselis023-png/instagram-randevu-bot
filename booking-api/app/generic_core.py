@@ -15,7 +15,7 @@ from app.main import (
     schedule_customer_automation_events, sanitize_text, extract_inbound_message_id, extract_inbound_platform,
     build_inbound_dedupe_key, elapsed_ms, queue_crm_sync, get_config
 )
-from shared.genai import call_llm_json
+from app.main import call_llm_content
 
 logger = logging.getLogger(__name__)
 
@@ -159,7 +159,8 @@ Provide your response strictly in the following JSON format:
 }}
 """
     try:
-        result = call_llm_json(prompt)
+        content = call_llm_content(system_prompt=prompt, user_prompt=message_text, is_json=True)
+        result = json.loads(content) if isinstance(content, str) else content
     except Exception as e:
         logger.error(f"Generic engine LLM error: {e}")
         return cfg.get("fallback_reply", "Şu an sistemimde bir yoğunluk var, detayları ön görüşmede netleştirelim."), ["error:fallback"]
@@ -168,11 +169,10 @@ Provide your response strictly in the following JSON format:
     reply = result.get("reply_text", "")
     
     # Deterministic Actions based on extract
-    memory = ensure_conversation_memory(conversation)
     if result.get("extracted_lead_name"):
-        memory["customer_name"] = result["extracted_lead_name"]
+        conversation["lead_name"] = result["extracted_lead_name"]
     if result.get("extracted_phone"):
-        memory["customer_phone"] = result["extracted_phone"]
+        conversation["phone"] = result["extracted_phone"]
         
     # VERY Simple guard
     if "12.900" not in reply and "price_question" in intent and "web" in message_text.lower() and cfg.get("business_type") == "agency":
