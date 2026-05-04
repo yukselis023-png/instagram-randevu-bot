@@ -232,12 +232,12 @@ Müşterinin yeni mesajını incele. Oku ve aşağıdaki JSON formatına SIKI SI
         if not content:
             raise ValueError("No content returned from LLM")
             
-        if "```json" in content:
-            content = content.split("```json")[1].split("```")[0].strip()
-        elif "```" in content:
-            content = content.split("```")[1].strip()
-            
-        return json.loads(content)
+        match = re.search(r'\{.*\}', content, re.DOTALL)
+        if match:
+            json_str = match.group(0)
+            return json.loads(json_str)
+        else:
+            raise ValueError("No JSON found in response")
     except Exception as e:
         logger.error(f"Generic engine LLM Error: {e}")
         return {
