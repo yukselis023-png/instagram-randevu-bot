@@ -2204,7 +2204,7 @@ def preview_campaign_audience(
 @app.post("/api/process-instagram-message", response_model=ProcessResult)
 def process_instagram_message(payload: IncomingMessage, background_tasks: BackgroundTasks) -> ProcessResult:
     import os
-    if os.getenv("CHATBOT_ENGINE") == "generic":
+    if os.getenv("CHATBOT_ENGINE", "generic") == "generic":
         from app.generic_core import process_instagram_message_generic
         return process_instagram_message_generic(payload, background_tasks)
 
