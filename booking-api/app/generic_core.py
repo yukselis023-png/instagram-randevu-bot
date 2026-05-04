@@ -193,11 +193,10 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
 
 
 def call_llm_json(system_prompt: str, user_text: str) -> dict:
-    import requests, os
+    import requests, os, json, re
     llm_url = os.getenv("LLM_BASE_URL", "https://api.groq.com/openai/v1")
     llm_key = os.getenv("LLM_API_KEY", "")
-    llm_model = os.getenv("LLM_MODEL", "llama3-8b-8192")
-    
+    llm_model = os.getenv("LLM_MODEL", "llama-3.3-70b-versatile")
     if not llm_key:
         from app.main import LLM_BASE_URL, LLM_API_KEY, LLM_MODEL
         llm_url = LLM_BASE_URL
@@ -207,20 +206,20 @@ def call_llm_json(system_prompt: str, user_text: str) -> dict:
     headers = {"Authorization": f"Bearer {llm_key}", "Content-Type": "application/json"}
     payload = {
         "model": llm_model,
-        "response_format": {"type": "json_object"},
         "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_text}],
         "temperature": 0.0,
         "max_tokens": 1000
     }
-    
     try:
-        resp = requests.post(f"{llm_url}/chat/completions", headers=headers, json=payload, timeout=20)
+        resp = requests.post(f"{llm_url}/chat/completions", headers=headers, json=payload, timeout=30)
         resp.raise_for_status()
         content = resp.json()["choices"][0]["message"]["content"]
+        match = re.search(r'\{.*\}', content, re.DOTALL)
+        if match:
+            return json.loads(match.group(0))
         return json.loads(content)
     except Exception as e:
-        raise ValueError(f"LLM JSON Error: {e}")
-
+        raise ValueError(f"LLM JSON Error: {e} - content: {content if 'content' in locals() else 'None'}")
 
 def invoke_generic_llm(message_text: str, conversation: dict, memory: dict, history: list[dict]) -> dict:
     cfg = get_config()
