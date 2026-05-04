@@ -224,8 +224,20 @@ Müşterinin yeni mesajını incele. Oku ve aşağıdaki JSON formatına SIKI SI
 }}"""
 
     try:
-        content = call_llm_content([{"role":"system","content":system_prompt}, {"role":"user","content":message_text}], is_json=True)
-        return json.loads(content) if isinstance(content, str) else content
+        content = call_llm_content(
+            messages=[{"role":"system","content":system_prompt}, {"role":"user","content":message_text}],
+            max_tokens=1000,
+            temperature=0.0
+        )
+        if not content:
+            raise ValueError("No content returned from LLM")
+            
+        if "```json" in content:
+            content = content.split("```json")[1].split("```")[0].strip()
+        elif "```" in content:
+            content = content.split("```")[1].strip()
+            
+        return json.loads(content)
     except Exception as e:
         logger.error(f"Generic engine LLM Error: {e}")
         return {
