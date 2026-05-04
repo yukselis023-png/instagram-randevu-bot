@@ -230,7 +230,7 @@ Müşterinin yeni mesajını incele. Oku ve aşağıdaki JSON formatına SIKI SI
         logger.error(f"Generic engine LLM Error: {e}")
         return {
             "intent": "fallback",
-            "reply_text": cfg.get("fallback_reply", str(e)),
+            "reply_text": cfg.get("fallback_reply", "Şu an cevap veremiyorum, lütfen daha sonra tekrar yazın."),
             "extracted_entities": {},
             "requires_human": False
         }
