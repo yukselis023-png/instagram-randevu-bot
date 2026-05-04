@@ -121,7 +121,11 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
                 pass
             decision_path.append("extracted:date")
         if extracted.get("requested_time"):
-            conversation["requested_time"] = extracted["requested_time"]
+            try:
+                datetime.datetime.strptime(extracted["requested_time"], "%H:%M")
+                conversation["requested_time"] = extracted["requested_time"]
+            except Exception:
+                pass
             decision_path.append("extracted:time")
         if extracted.get("customer_goal"):
             memory["customer_goal"] = extracted["customer_goal"]
