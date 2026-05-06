@@ -2,10 +2,12 @@ import pytest
 import copy
 from app import main
 import json
+from pathlib import Path
 
-with open("app/config/doel.json", "r", encoding="utf-8") as f: DOEL_CONF = json.load(f)
-with open("app/config/beauty.json", "r", encoding="utf-8") as f: BEAUTY_CONF = json.load(f)
-with open("app/config/dental.json", "r", encoding="utf-8") as f: DENTAL_CONF = json.load(f)
+CONFIG_DIR = Path(__file__).resolve().parents[1] / "app" / "config"
+with open(CONFIG_DIR / "doel.json", "r", encoding="utf-8") as f: DOEL_CONF = json.load(f)
+with open(CONFIG_DIR / "beauty.json", "r", encoding="utf-8") as f: BEAUTY_CONF = json.load(f)
+with open(CONFIG_DIR / "dental.json", "r", encoding="utf-8") as f: DENTAL_CONF = json.load(f)
 
 @pytest.fixture
 def override_config(monkeypatch):

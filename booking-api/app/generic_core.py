@@ -21,7 +21,7 @@ from app.main import (
     is_company_capability_question, build_company_capability_reply, is_simple_greeting,
     is_business_fit_question, recommendation_engine, extract_name, extract_phone,
     is_invalid_phone_attempt, extract_date, extract_time_for_state, extract_time, create_appointment,
-    build_confirmation_message
+    build_confirmation_message, try_reschedule_confirmed_appointment
 )
 
 logger = logging.getLogger(__name__)
@@ -164,6 +164,132 @@ def extract_generic_datetime_time(message_text: str) -> str | None:
     return None
 
 
+def is_confirmed_generic_appointment(conversation: dict[str, Any]) -> bool:
+    return bool(
+        conversation.get("appointment_id")
+        or conversation.get("appointment_status") == "confirmed"
+        or conversation.get("state") == "completed"
+    )
+
+
+def existing_generic_appointment_id(conversation: dict[str, Any]) -> int | None:
+    try:
+        return int(conversation.get("appointment_id")) if conversation.get("appointment_id") else None
+    except Exception:
+        return None
+
+
+def is_explicit_reschedule_request(message_text: str) -> bool:
+    lowered = sanitize_text(message_text or "").lower()
+    subject = any(token in lowered for token in ["randevu", "gorusme", "görüşme", "on gorusme", "ön görüşme", "saat"])
+    action = any(token in lowered for token in ["degistir", "değiştir", "guncelle", "güncelle", "yap", "kaydir", "kaydır", "cek", "çek"])
+    return subject and action
+
+
+def is_reschedule_confirmation_acceptance(message_text: str) -> bool:
+    lowered = sanitize_text(message_text or "").lower().strip()
+    return lowered in {"evet", "onayliyorum", "onaylıyorum", "tamam", "olur", "aynen"}
+
+
+def detect_reschedule_candidate(message_text: str, extracted: dict[str, Any]) -> tuple[str | None, str | None]:
+    detected_date = extract_date(message_text) or extracted.get("requested_date")
+    detected_time = (
+        extract_time_for_state(message_text, "collect_datetime")
+        or extract_time(message_text)
+        or extract_generic_datetime_time(message_text)
+        or extracted.get("requested_time")
+    )
+    return detected_date, detected_time
+
+
+def append_reschedule_handoff_note(conversation: dict[str, Any], requested_date: str | None, requested_time: str | None) -> None:
+    note = "müşteri saat değişikliği istedi"
+    if requested_date or requested_time:
+        note = f"{note}: {requested_date or conversation.get('requested_date') or '-'} {requested_time or conversation.get('requested_time') or '-'}"
+    current = sanitize_text(conversation.get("notes") or "")
+    conversation["notes"] = f"{current}\n{note}".strip() if current else note
+    conversation["assigned_human"] = True
+    memory = ensure_conversation_memory(conversation)
+    memory["pending_reschedule_request"] = {"requested_date": requested_date, "requested_time": requested_time, "note": note}
+    memory["open_loop"] = "handoff"
+    conversation["memory_state"] = memory
+
+
+def build_reschedule_confirmation_question(conversation: dict[str, Any], requested_date: str | None, requested_time: str | None) -> str:
+    target_date = requested_date or conversation.get("requested_date")
+    target_time = requested_time or conversation.get("requested_time")
+    if requested_date and requested_time:
+        return f"Mevcut ön görüşmenizi {target_date} saat {target_time} olarak değiştirmek istediğinizi onaylıyor musunuz?"
+    if requested_time:
+        return f"Mevcut ön görüşme saatinizi {target_time} olarak değiştirmek istediğinizi onaylıyor musunuz?"
+    return "Mevcut ön görüşme tarihinizi değiştirmek istediğinizi onaylıyor musunuz?"
+
+
+def handle_confirmed_generic_reschedule(
+    conn: Any,
+    conversation: dict[str, Any],
+    memory: dict[str, Any],
+    message_text: str,
+    extracted: dict[str, Any],
+    username: str | None,
+) -> dict[str, Any] | None:
+    if not is_confirmed_generic_appointment(conversation):
+        return None
+
+    existing_id = existing_generic_appointment_id(conversation)
+    pending_confirm = memory.get("open_loop") == "generic_reschedule_confirmation_pending"
+    if pending_confirm and is_reschedule_confirmation_acceptance(message_text):
+        requested_date = memory.get("reschedule_requested_date") or conversation.get("requested_date")
+        requested_time = memory.get("reschedule_requested_time") or conversation.get("requested_time")
+        update_text = f"randevuyu {requested_date or ''} {requested_time or ''} yap".strip()
+        try:
+            updated, reply, label = try_reschedule_confirmed_appointment(conn, conversation, update_text, username)
+        except Exception:
+            updated, reply, label = False, "", None
+        if updated:
+            return {"handled": True, "reply_text": reply, "handoff": False, "appointment_id": existing_id, "decision_label": label or "appointment_rescheduled"}
+        append_reschedule_handoff_note(conversation, requested_date, requested_time)
+        return {
+            "handled": True,
+            "reply_text": "Saat değişikliği talebinizi ekibe iletmek üzere not aldım. Mevcut randevu kaydınız korunuyor.",
+            "handoff": True,
+            "appointment_id": existing_id,
+            "decision_label": "appointment_reschedule_handoff",
+        }
+
+    requested_date, requested_time = detect_reschedule_candidate(message_text, extracted)
+    if not requested_date and not requested_time:
+        return None
+
+    if is_explicit_reschedule_request(message_text):
+        try:
+            updated, reply, label = try_reschedule_confirmed_appointment(conn, conversation, message_text, username)
+        except Exception:
+            updated, reply, label = False, "", None
+        if updated:
+            return {"handled": True, "reply_text": reply, "handoff": False, "appointment_id": existing_id, "decision_label": label or "appointment_rescheduled"}
+        append_reschedule_handoff_note(conversation, requested_date, requested_time)
+        return {
+            "handled": True,
+            "reply_text": "Mevcut randevu kaydınızı koruyorum; saat değişikliği talebinizi ekibe iletmek üzere not aldım.",
+            "handoff": True,
+            "appointment_id": existing_id,
+            "decision_label": "appointment_reschedule_handoff",
+        }
+
+    memory["reschedule_requested_date"] = requested_date or conversation.get("requested_date")
+    memory["reschedule_requested_time"] = requested_time or conversation.get("requested_time")
+    memory["open_loop"] = "generic_reschedule_confirmation_pending"
+    conversation["memory_state"] = memory
+    return {
+        "handled": True,
+        "reply_text": build_reschedule_confirmation_question(conversation, requested_date, requested_time),
+        "handoff": False,
+        "appointment_id": existing_id,
+        "decision_label": "appointment_reschedule_confirm_required",
+    }
+
+
 def build_active_booking_prompt_reply(conversation: dict[str, Any], memory: dict[str, Any]) -> str | None:
     state = conversation.get("state")
     service = service_reply_phrase(known_requested_service(conversation, memory))
@@ -260,6 +386,32 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
             reply_text = recommendation_engine(conversation, message_text, recent_history)
             decision_path.append("reply:business_fit")
             deterministic_reply = True
+
+        post_confirmation = handle_confirmed_generic_reschedule(conn, conversation, memory, message_text, extracted, payload.instagram_username)
+        if post_confirmation:
+            reply_text = post_confirmation["reply_text"]
+            handoff = bool(post_confirmation.get("handoff"))
+            decision_path.append(str(post_confirmation.get("decision_label") or "appointment_reschedule_followup"))
+            update_conversation_memory_after_bot_reply(conversation, reply_text, "|".join(decision_path))
+            upsert_conversation(conn, conversation)
+            crm_customer = upsert_customer_from_conversation(conn, conversation)
+            if crm_customer:
+                schedule_customer_automation_events(conn, int(crm_customer["id"]), crm_customer.get("sector", ""))
+            save_message_log(conn, payload.sender_id, "out", reply_text, {"type": "reply", "decision_path": decision_path})
+            metrics["total_ms"] = elapsed_ms(request_started_at)
+            queue_crm_sync(background_tasks, conversation, post_confirmation.get("appointment_id"), metrics)
+            return ProcessResult(
+                sender_id=payload.sender_id,
+                should_reply=True,
+                reply_text=reply_text,
+                handoff=handoff,
+                conversation_state=conversation.get("state", "new"),
+                appointment_created=False,
+                appointment_id=post_confirmation.get("appointment_id"),
+                normalized=build_normalized(conversation),
+                metrics=metrics,
+                decision_path=decision_path,
+            )
 
         # 2. STATE & CRM DETERMINISTIC LAYER
         handoff = False

@@ -450,6 +450,175 @@ def test_generic_completed_booking_creates_appointment(monkeypatch):
     assert created["conversation"]["requested_time"] == "18:00"
 
 
+def test_generic_after_confirmed_time_only_asks_confirmation_without_creating(monkeypatch):
+    os.environ["CHATBOT_ENGINE"] = "generic"
+    create_calls = []
+    llm_result = {
+        "intent": "booking_request",
+        "reply_text": "Saatinizi güncelliyorum.",
+        "extracted_entities": {"requested_time": "13:00"},
+        "requires_human": False,
+    }
+    conversation = {
+        "sender_id": "generic-post-confirm-time-only-test",
+        "state": "completed",
+        "appointment_status": "confirmed",
+        "appointment_id": 77,
+        "full_name": "Berkay Elbir",
+        "lead_name": "Berkay Elbir",
+        "phone": "+905539088638",
+        "service": "Otomasyon",
+        "requested_date": "2026-05-07",
+        "requested_time": "18:00",
+        "memory_state": {"requested_service": "Otomasyon"},
+    }
+    monkeypatch.setattr(gc, "create_appointment", lambda *args, **kwargs: create_calls.append(args) or (999, 0))
+
+    result, conversation = run_generic_message(
+        monkeypatch,
+        "13:00 olsun",
+        llm_result,
+        {"business_name": "DOEL Digital", "service_catalog": [{"display": "Otomasyon", "name": "Otomasyon"}]},
+        conversation,
+    )
+
+    assert create_calls == []
+    assert result.appointment_created is False
+    assert result.appointment_id == 77
+    assert conversation.get("requested_time") == "18:00"
+    assert conversation["memory_state"]["reschedule_requested_time"] == "13:00"
+    assert "onay" in gc.sanitize_text(result.reply_text).lower()
+
+
+def test_generic_after_confirmed_explicit_time_change_updates_without_creating(monkeypatch):
+    os.environ["CHATBOT_ENGINE"] = "generic"
+    create_calls = []
+    update_calls = []
+
+    def fake_update(_conn, conversation, message_text, username=None):
+        update_calls.append((message_text, username))
+        conversation["requested_time"] = "13:00"
+        conversation["appointment_status"] = "confirmed"
+        conversation["state"] = "completed"
+        return True, "07.05.2026 saat 13:00 için ön görüşme kaydınız güncellendi.", "appointment_rescheduled"
+
+    llm_result = {
+        "intent": "booking_request",
+        "reply_text": "Saatinizi güncelliyorum.",
+        "extracted_entities": {"requested_time": "13:00"},
+        "requires_human": False,
+    }
+    conversation = {
+        "sender_id": "generic-post-confirm-explicit-update-test",
+        "state": "completed",
+        "appointment_status": "confirmed",
+        "appointment_id": 77,
+        "full_name": "Berkay Elbir",
+        "lead_name": "Berkay Elbir",
+        "phone": "+905539088638",
+        "service": "Otomasyon",
+        "requested_date": "2026-05-07",
+        "requested_time": "18:00",
+        "memory_state": {"requested_service": "Otomasyon"},
+    }
+    monkeypatch.setattr(gc, "create_appointment", lambda *args, **kwargs: create_calls.append(args) or (999, 0))
+    monkeypatch.setattr(gc, "try_reschedule_confirmed_appointment", fake_update)
+
+    result, conversation = run_generic_message(
+        monkeypatch,
+        "randevuyu 13:00 yap",
+        llm_result,
+        {"business_name": "DOEL Digital", "service_catalog": [{"display": "Otomasyon", "name": "Otomasyon"}]},
+        conversation,
+    )
+
+    assert create_calls == []
+    assert len(update_calls) == 1
+    assert result.appointment_created is False
+    assert result.appointment_id == 77
+    assert conversation.get("requested_time") == "13:00"
+    assert "güncellendi" in result.reply_text
+
+
+def test_generic_after_confirmed_new_datetime_does_not_create_second_appointment(monkeypatch):
+    os.environ["CHATBOT_ENGINE"] = "generic"
+    create_calls = []
+    llm_result = {
+        "intent": "booking_request",
+        "reply_text": "Yeni randevu açıyorum.",
+        "extracted_entities": {"requested_date": "2026-05-07", "requested_time": "15:00"},
+        "requires_human": False,
+    }
+    conversation = {
+        "sender_id": "generic-post-confirm-new-datetime-test",
+        "state": "completed",
+        "appointment_status": "confirmed",
+        "appointment_id": 77,
+        "full_name": "Berkay Elbir",
+        "lead_name": "Berkay Elbir",
+        "phone": "+905539088638",
+        "service": "Otomasyon",
+        "requested_date": "2026-05-07",
+        "requested_time": "18:00",
+        "memory_state": {"requested_service": "Otomasyon"},
+    }
+    monkeypatch.setattr(gc, "create_appointment", lambda *args, **kwargs: create_calls.append(args) or (999, 0))
+
+    result, conversation = run_generic_message(
+        monkeypatch,
+        "Yarın 15:00",
+        llm_result,
+        {"business_name": "DOEL Digital", "service_catalog": [{"display": "Otomasyon", "name": "Otomasyon"}]},
+        conversation,
+    )
+
+    assert create_calls == []
+    assert result.appointment_created is False
+    assert result.appointment_id == 77
+    assert conversation.get("requested_time") == "18:00"
+    assert conversation["memory_state"]["reschedule_requested_time"] == "15:00"
+    assert "onay" in gc.sanitize_text(result.reply_text).lower()
+
+
+def test_generic_after_confirmed_payment_question_does_not_reenter_slot_flow(monkeypatch):
+    os.environ["CHATBOT_ENGINE"] = "generic"
+    create_calls = []
+    llm_result = {
+        "intent": "direct_answer",
+        "reply_text": "Ödeme banka havalesi veya online ödeme ile yapılabilir.",
+        "extracted_entities": {},
+        "requires_human": False,
+    }
+    conversation = {
+        "sender_id": "generic-post-confirm-payment-test",
+        "state": "completed",
+        "appointment_status": "confirmed",
+        "appointment_id": 77,
+        "full_name": "Berkay Elbir",
+        "lead_name": "Berkay Elbir",
+        "phone": "+905539088638",
+        "service": "Otomasyon",
+        "requested_date": "2026-05-07",
+        "requested_time": "18:00",
+        "memory_state": {"requested_service": "Otomasyon"},
+    }
+    monkeypatch.setattr(gc, "create_appointment", lambda *args, **kwargs: create_calls.append(args) or (999, 0))
+
+    result, conversation = run_generic_message(
+        monkeypatch,
+        "Ödeme nasıl yapılıyor?",
+        llm_result,
+        {"business_name": "DOEL Digital", "service_catalog": [{"display": "Otomasyon", "name": "Otomasyon"}]},
+        conversation,
+    )
+
+    assert create_calls == []
+    assert result.appointment_created is False
+    assert conversation.get("state") == "completed"
+    assert conversation.get("requested_time") == "18:00"
+    assert "odeme" in gc.sanitize_text(result.reply_text).lower()
+
+
 def test_generic_flow_does_not_repeat_greeting_for_business_identity_fit(monkeypatch):
     os.environ["CHATBOT_ENGINE"] = "generic"
     replies = []
