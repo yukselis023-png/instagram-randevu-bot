@@ -3824,7 +3824,7 @@ def contains_business_keyword(text: str, keywords: list[str]) -> bool:
         if not normalized_keyword:
             continue
         keyword_pattern = r"\s+".join(re.escape(part) for part in normalized_keyword.split())
-        if re.search(rf"(?<![0-9a-z_]){keyword_pattern}(?![0-9a-z_])", lowered):
+        if re.search(rf"(?<![0-9a-z_]){keyword_pattern}[a-z_]{{0,8}}(?![0-9a-z_])", lowered):
             return True
     return False
 
@@ -3957,24 +3957,32 @@ def build_referral_intent_reply() -> str:
 
 def is_user_business_identity_message(text: str) -> bool:
     lowered = sanitize_text(text).lower()
-    identity_cues = [
-        "ben ",
-        "benim ",
-        "isletmem var",
-        "işletmem var",
-        "dukkanim var",
-        "dükkanım var",
-        "salonum var",
-        "kafem var",
-        "restoranim var",
-        "restoranım var",
-        "olarak calisiyorum",
-        "olarak çalışıyorum",
-        "sektorundeyim",
-        "sektöründeyim",
-    ]
-    if any(cue in lowered for cue in identity_cues):
-        return bool(
+    
+    has_identity = False
+    if re.search(r"\b(ben|benim)\b", lowered):
+        has_identity = True
+    else:
+        identity_cues = [
+            "isletmem var",
+            "işletmem var",
+            "dukkanim var",
+            "dükkanım var",
+            "salonum var",
+            "kafem var",
+            "restoranim var",
+            "restoranım var",
+            "olarak calisiyorum",
+            "olarak çalışıyorum",
+            "sektorundeyim",
+            "sektöründeyim",
+        ]
+        if any(cue in lowered for cue in identity_cues):
+            has_identity = True
+            
+    if not has_identity:
+        return False
+        
+    return bool(
             contains_business_keyword(lowered, BEAUTY_BUSINESS_KEYWORDS)
             or contains_business_keyword(lowered, REAL_ESTATE_BUSINESS_KEYWORDS)
             or contains_business_keyword(lowered, TATTOO_SUBSECTOR_KEYWORDS)

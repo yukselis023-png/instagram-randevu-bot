@@ -222,6 +222,15 @@ def build_generic_business_context(message_text: str, cfg: dict[str, Any]) -> st
     context = dict(cfg or {})
     if not is_company_capability_question(message_text):
         context.pop("unavailable_services", None)
+        
+    from app.main import is_user_business_identity_message
+    if is_user_business_identity_message(message_text):
+        context["instruction_override"] = (
+            "Kullanıcı kendi işletme sektörünü söylüyor, SAKIN 'bu hizmeti vermiyoruz' "
+            "veya '... dışında' şeklinde cevap verme! Kullanıcının sektörüne (sosyal medya yönetimi, "
+            "web sitesi, randevu otomasyonu vb. ile) nasıl yardımcı olabileceğini teklif et."
+        )
+
     return json.dumps(context, ensure_ascii=False)
 
 
@@ -763,6 +772,9 @@ def invoke_generic_llm(message_text: str, conversation: dict, memory: dict, hist
     
     today = datetime.date.today().strftime('%Y-%m-%d')
     system_prompt = f"""Sen {cfg.get('business_name')} firmasının Instagram DM asistanısın. Türkçe, doğal ve kısa yaz. BUGÜNÜN TARİHİ: {today}. Tarih gerekiyorsa YYYY-MM-DD hesapla.
+
+BUSINESS CONTEXT:
+{business_context}
 
 KONUŞMA STİLİ:
 - En son müşteri mesajını merkeze al; önce o mesaja doğrudan cevap ver.

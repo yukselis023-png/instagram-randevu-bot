@@ -1064,3 +1064,35 @@ def test_generic_flow_does_not_repeat_greeting_for_business_identity_fit(monkeyp
     assert "uzmanlik alanimiz disinda" not in second_reply
     assert gc.reply_question_count(second.reply_text) <= 1
     assert gc.reply_sentence_count(second.reply_text) <= 3
+
+def test_user_business_identity_handling_with_llm():
+    from app.main import is_user_business_identity_message, is_company_capability_question
+    from app.generic_core import build_generic_business_context
+    import json
+    
+    # Message A
+    msg_a = "Ben dövmeciyim, sitenizi gördüm merak edip yazdım"
+    assert is_user_business_identity_message(msg_a) is True
+    assert is_company_capability_question(msg_a) is False
+    
+    ctx_a_str = build_generic_business_context(msg_a, {"business_name": "DOEL", "unavailable_services": {"dovmecilik": "dövme"}})
+    ctx_a = json.loads(ctx_a_str)
+    assert "unavailable_services" not in ctx_a, "should be popped because it's not a capability question"
+    assert "instruction_override" in ctx_a, "should have the explicit instruction override"
+    assert "SAKIN" in ctx_a["instruction_override"]
+
+    # Message A variant with suffix
+    msg_a2 = "Dövmeciyim ben, sitenizi gördüm"
+    assert is_user_business_identity_message(msg_a2) is True
+    assert is_company_capability_question(msg_a2) is False
+
+    # Message B
+    msg_b = "Siz dövme yapıyor musunuz?"
+    assert is_user_business_identity_message(msg_b) is False
+    assert is_company_capability_question(msg_b) is True
+
+    ctx_b_str = build_generic_business_context(msg_b, {"business_name": "DOEL", "unavailable_services": {"dovmecilik": "dövme"}})
+    ctx_b = json.loads(ctx_b_str)
+    assert "unavailable_services" in ctx_b, "should keep unavailable_services because it is a capability question"
+    assert "instruction_override" not in ctx_b
+
