@@ -20,7 +20,7 @@ from app.main import (
     build_inbound_dedupe_key, elapsed_ms, queue_crm_sync, get_config, call_llm_content,
     is_company_capability_question, build_company_capability_reply, is_simple_greeting,
     is_business_fit_question, recommendation_engine, extract_name, extract_phone,
-    is_invalid_phone_attempt, extract_date, extract_time_for_state, create_appointment,
+    is_invalid_phone_attempt, extract_date, extract_time_for_state, extract_time, create_appointment,
     build_confirmation_message
 )
 
@@ -147,6 +147,23 @@ def is_llm_error_reply(reply_text: str | None) -> bool:
     return lowered.startswith("error:") or "llm json error" in lowered or "too many requests" in lowered
 
 
+def extract_generic_datetime_time(message_text: str) -> str | None:
+    lowered = sanitize_text(message_text or "").lower()
+    match = re.search(r"\b(akşam|aksam|sabah|öğlen|oglen)?\s*(\d{1,2})(?::(\d{2}))?\b", lowered)
+    if not match:
+        return None
+    period, hour_text, minute_text = match.groups()
+    hour = int(hour_text)
+    minute = int(minute_text or "0")
+    if period in {"akşam", "aksam"} and 1 <= hour <= 11:
+        hour += 12
+    if period in {"öğlen", "oglen"} and hour == 12:
+        hour = 12
+    if 0 <= hour <= 23 and 0 <= minute <= 59:
+        return f"{hour:02d}:{minute:02d}"
+    return None
+
+
 def build_active_booking_prompt_reply(conversation: dict[str, Any], memory: dict[str, Any]) -> str | None:
     state = conversation.get("state")
     service = service_reply_phrase(known_requested_service(conversation, memory))
@@ -255,11 +272,13 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
 
         # Sync deterministic entities immediately. Booking fields must not depend only on LLM extraction.
         state_before_entities = conversation.get("state", "new")
-        name_candidate = extracted.get("lead_name") or extract_name(message_text, state_before_entities)
+        deterministic_name = extract_name(message_text, state_before_entities)
+        llm_name = extracted.get("lead_name") if state_before_entities == "collect_name" or not conversation.get("full_name") else None
+        name_candidate = deterministic_name or llm_name
         if name_candidate:
             conversation["lead_name"] = name_candidate
             conversation["full_name"] = name_candidate
-            decision_path.append("extracted:name" if extracted.get("lead_name") else "detected:name")
+            decision_path.append("detected:name" if deterministic_name else "extracted:name")
         phone_candidate = extract_phone(message_text) or extract_phone(str(extracted.get("phone") or ""))
         invalid_phone_attempt = is_invalid_phone_attempt(message_text, state_before_entities)
         if phone_candidate:
@@ -283,7 +302,7 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
                 decision_path.append("detected:date" if direct_date else "extracted:date")
             except Exception:
                 pass
-        direct_time = extract_time_for_state(message_text, state_before_entities)
+        direct_time = extract_time_for_state(message_text, state_before_entities) or extract_time(message_text) or extract_generic_datetime_time(message_text)
         time_candidate = direct_time or extracted.get("requested_time")
         if time_candidate:
             try:

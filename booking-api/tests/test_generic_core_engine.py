@@ -376,6 +376,36 @@ def test_generic_collect_phone_rejects_short_phone(monkeypatch):
     assert "telefon" in gc.sanitize_text(result.reply_text).lower()
 
 
+def test_generic_collect_phone_does_not_overwrite_existing_name_from_llm(monkeypatch):
+    os.environ["CHATBOT_ENGINE"] = "generic"
+    llm_result = {
+        "intent": "direct_answer",
+        "reply_text": "Teşekkür ederim.",
+        "extracted_entities": {"lead_name": "Berkay"},
+        "requires_human": False,
+    }
+    conversation = {
+        "sender_id": "generic-name-overwrite-test",
+        "state": "collect_phone",
+        "full_name": "Berkay Elbir",
+        "lead_name": "Berkay Elbir",
+        "service": "Otomasyon",
+        "memory_state": {"requested_service": "Otomasyon"},
+    }
+
+    result, conversation = run_generic_message(
+        monkeypatch,
+        "055555",
+        llm_result,
+        {"business_name": "DOEL Digital", "service_catalog": [{"display": "Otomasyon", "name": "Otomasyon"}]},
+        conversation,
+    )
+
+    assert conversation.get("full_name") == "Berkay Elbir"
+    assert conversation.get("state") == "collect_phone"
+    assert "telefon" in gc.sanitize_text(result.reply_text).lower()
+
+
 def test_generic_completed_booking_creates_appointment(monkeypatch):
     os.environ["CHATBOT_ENGINE"] = "generic"
     created = {}
@@ -404,7 +434,7 @@ def test_generic_completed_booking_creates_appointment(monkeypatch):
 
     result, conversation = run_generic_message(
         monkeypatch,
-        "Yarın 13:00",
+        "Yarın akşam 6",
         llm_result,
         {"business_name": "DOEL Digital", "service_catalog": [{"display": "Otomasyon", "name": "Otomasyon"}]},
         conversation,
@@ -416,7 +446,7 @@ def test_generic_completed_booking_creates_appointment(monkeypatch):
     assert "kaydınız oluşturuldu" in result.reply_text.lower()
     assert "Ad Soyad: Berkay Elbir" in result.reply_text
     assert created["conversation"]["full_name"] == "Berkay Elbir"
-    assert created["conversation"]["requested_time"] == "13:00"
+    assert created["conversation"]["requested_time"] == "18:00"
 
 
 def test_generic_flow_does_not_repeat_greeting_for_business_identity_fit(monkeypatch):
