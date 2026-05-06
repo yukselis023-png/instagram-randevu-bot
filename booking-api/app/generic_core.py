@@ -263,7 +263,8 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
 
         # 2. STATE & CRM DETERMINISTIC LAYER
         handoff = False
-        if not deterministic_reply and intent == "human_handoff":
+        active_booking_state = str(conversation.get("state") or "").startswith("collect_")
+        if not deterministic_reply and not active_booking_state and intent == "human_handoff":
             decision_path.append("action:handoff")
             conversation["state"] = "human_handoff"
             conversation["assigned_human"] = True

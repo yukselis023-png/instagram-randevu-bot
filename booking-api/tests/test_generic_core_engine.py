@@ -349,8 +349,8 @@ def test_generic_collect_name_detects_plain_name_and_asks_phone(monkeypatch):
 def test_generic_collect_phone_rejects_short_phone(monkeypatch):
     os.environ["CHATBOT_ENGINE"] = "generic"
     llm_result = {
-        "intent": "direct_answer",
-        "reply_text": "Teşekkür ederim.",
+        "intent": "human_handoff",
+        "reply_text": "İsterseniz mesajınızı ekibe iletebilirim.",
         "extracted_entities": {"phone": "055555"},
         "requires_human": False,
     }
@@ -371,6 +371,7 @@ def test_generic_collect_phone_rejects_short_phone(monkeypatch):
         conversation,
     )
 
+    assert result.handoff is False
     assert conversation.get("phone") is None
     assert conversation.get("state") == "collect_phone"
     assert "telefon" in gc.sanitize_text(result.reply_text).lower()
