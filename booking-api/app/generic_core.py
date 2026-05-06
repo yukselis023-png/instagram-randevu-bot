@@ -19,7 +19,8 @@ from app.main import (
     schedule_customer_automation_events, sanitize_text, extract_inbound_message_id, extract_inbound_platform,
     build_inbound_dedupe_key, elapsed_ms, queue_crm_sync, get_config, call_llm_content,
     is_company_capability_question, build_company_capability_reply, is_simple_greeting,
-    is_business_fit_question, recommendation_engine
+    is_business_fit_question, recommendation_engine, extract_name, extract_phone,
+    is_invalid_phone_attempt, extract_date, extract_time_for_state, create_appointment
 )
 
 logger = logging.getLogger(__name__)
@@ -251,13 +252,18 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
             conversation["appointment_status"] = "handoff"
             handoff = True
 
-        # Sync deterministic entities immediately
-        if extracted.get("lead_name"):
-            conversation["lead_name"] = extracted["lead_name"]
-            decision_path.append("extracted:name")
-        if extracted.get("phone"):
-            conversation["phone"] = extracted["phone"]
-            decision_path.append("extracted:phone")
+        # Sync deterministic entities immediately. Booking fields must not depend only on LLM extraction.
+        state_before_entities = conversation.get("state", "new")
+        name_candidate = extracted.get("lead_name") or extract_name(message_text, state_before_entities)
+        if name_candidate:
+            conversation["lead_name"] = name_candidate
+            conversation["full_name"] = name_candidate
+            decision_path.append("extracted:name" if extracted.get("lead_name") else "detected:name")
+        phone_candidate = extract_phone(message_text) or extract_phone(str(extracted.get("phone") or ""))
+        invalid_phone_attempt = is_invalid_phone_attempt(message_text, state_before_entities)
+        if phone_candidate:
+            conversation["phone"] = phone_candidate
+            decision_path.append("detected:phone" if extract_phone(message_text) else "extracted:phone")
         detected_service = extracted.get("requested_service") or detect_requested_service_from_text(message_text, get_config())
         if detected_service:
             remember_requested_service(conversation, memory, detected_service)
@@ -266,21 +272,25 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
             carried_service = remember_requested_service(conversation, memory, known_requested_service(conversation, memory))
             if carried_service:
                 decision_path.append("carried:service")
-        if extracted.get("requested_date"):
+        direct_date = extract_date(message_text)
+        llm_date = extracted.get("requested_date")
+        date_candidate = direct_date or llm_date
+        if date_candidate and (direct_date or not conversation.get("requested_date")):
             try:
-                # Basic validation using datetime
-                datetime.datetime.strptime(extracted["requested_date"], "%Y-%m-%d")
-                conversation["requested_date"] = extracted["requested_date"]
+                datetime.datetime.strptime(date_candidate, "%Y-%m-%d")
+                conversation["requested_date"] = date_candidate
+                decision_path.append("detected:date" if direct_date else "extracted:date")
             except Exception:
                 pass
-            decision_path.append("extracted:date")
-        if extracted.get("requested_time"):
+        direct_time = extract_time_for_state(message_text, state_before_entities)
+        time_candidate = direct_time or extracted.get("requested_time")
+        if time_candidate:
             try:
-                datetime.datetime.strptime(extracted["requested_time"], "%H:%M")
-                conversation["requested_time"] = extracted["requested_time"]
+                datetime.datetime.strptime(time_candidate, "%H:%M")
+                conversation["requested_time"] = time_candidate
+                decision_path.append("detected:time" if direct_time else "extracted:time")
             except Exception:
                 pass
-            decision_path.append("extracted:time")
         if extracted.get("customer_goal"):
             memory["customer_goal"] = extracted["customer_goal"]
 
@@ -288,34 +298,38 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
 
         # 3. BOOKING FINITE STATE MACHINE (Only if booking intent or inside active flow)
         appointment_created = False
+        appointment_id = None
         curr_state = conversation.get("state", "new")
+        state_changed_by_fsm = False
+        invalid_phone_prompt = False
         
         if not handoff and (booking_opt_in or intent in ["booking_request", "active_booking"] or curr_state.startswith("collect_")):
             carried_service = remember_requested_service(conversation, memory, known_requested_service(conversation, memory))
             has_service = bool(carried_service)
             has_phone = bool(conversation.get("phone"))
-            has_name = bool(conversation.get("lead_name"))
+            has_name = bool(conversation.get("full_name") or conversation.get("lead_name"))
             has_date = bool(conversation.get("requested_date"))
             has_time = bool(conversation.get("requested_time"))
 
-            # Progress the booking funnel deterministically
-            if not has_service:
+            previous_state = conversation.get("state", "new")
+            if invalid_phone_attempt and not has_phone:
+                conversation["state"] = "collect_phone"
+                invalid_phone_prompt = True
+            elif not has_service:
                 conversation["state"] = "collect_service"
-            elif booking_opt_in and not has_name:
-                conversation["state"] = "collect_name"
-            elif booking_opt_in and not has_phone:
-                conversation["state"] = "collect_phone"
-            elif not has_phone:
-                conversation["state"] = "collect_phone"
             elif not has_name:
                 conversation["state"] = "collect_name"
+            elif not has_phone:
+                conversation["state"] = "collect_phone"
             elif not has_date or not has_time:
                 conversation["state"] = "collect_datetime"
             else:
                 conversation["state"] = "completed"
                 conversation["appointment_status"] = "confirmed"
                 appointment_created = True
+                appointment_id, _live_crm_ms = create_appointment(conn, conversation, payload.instagram_username)
                 decision_path.append("action:appointment_confirmed")
+            state_changed_by_fsm = conversation.get("state") != previous_state
 
         service_for_booking = known_requested_service(conversation, memory)
         if (
@@ -325,11 +339,11 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
         ):
             reply_text = build_service_carryover_booking_reply(service_for_booking, conversation.get("state"))
             decision_path.append("fsm:service_carryover_booking")
-        elif curr_state.startswith("collect_") and is_llm_error_reply(reply_text):
+        elif (curr_state.startswith("collect_") and (is_llm_error_reply(reply_text) or state_changed_by_fsm or invalid_phone_prompt)):
             active_prompt = build_active_booking_prompt_reply(conversation, memory)
             if active_prompt:
                 reply_text = active_prompt
-                decision_path.append("fsm:active_booking_error_fallback")
+                decision_path.append("fsm:active_booking_prompt")
 
         # 4. FINAL QUALITY GUARD (Post FSM Check)
         reply_text, guard_label = generic_quality_guard(reply_text, extracted, memory, get_config(), message_text)
@@ -356,7 +370,7 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
             handoff=handoff,
             conversation_state=conversation.get("state", "new"),
             appointment_created=appointment_created,
-            appointment_id=None,
+            appointment_id=appointment_id,
             normalized=build_normalized(conversation),
             metrics=metrics,
             decision_path=decision_path,

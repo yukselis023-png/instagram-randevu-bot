@@ -76,7 +76,7 @@ def test_generic_doel_booking_crm(monkeypatch):
     )
 
     assert conversation.get("lead_name") == "Remzi"
-    assert conversation.get("phone") == "05554443322"
+    assert conversation.get("phone") == "+905554443322"
     assert "Numaranızı aldım" in result.reply_text
 
 
@@ -316,6 +316,105 @@ def test_generic_collect_phone_llm_error_keeps_fsm_prompt(monkeypatch):
     assert "ERROR" not in result.reply_text
     assert "429" not in result.reply_text
     assert "telefon" in gc.sanitize_text(result.reply_text).lower()
+
+
+def test_generic_collect_name_detects_plain_name_and_asks_phone(monkeypatch):
+    os.environ["CHATBOT_ENGINE"] = "generic"
+    llm_result = {
+        "intent": "direct_answer",
+        "reply_text": "Teşekkür ederim.",
+        "extracted_entities": {},
+        "requires_human": False,
+    }
+    conversation = {
+        "sender_id": "generic-name-detect-test",
+        "state": "collect_name",
+        "service": "Otomasyon",
+        "memory_state": {"requested_service": "Otomasyon"},
+    }
+
+    result, conversation = run_generic_message(
+        monkeypatch,
+        "Berkay Elbir",
+        llm_result,
+        {"business_name": "DOEL Digital", "service_catalog": [{"display": "Otomasyon", "name": "Otomasyon"}]},
+        conversation,
+    )
+
+    assert conversation.get("full_name") == "Berkay Elbir"
+    assert conversation.get("state") == "collect_phone"
+    assert "telefon" in gc.sanitize_text(result.reply_text).lower()
+
+
+def test_generic_collect_phone_rejects_short_phone(monkeypatch):
+    os.environ["CHATBOT_ENGINE"] = "generic"
+    llm_result = {
+        "intent": "direct_answer",
+        "reply_text": "Teşekkür ederim.",
+        "extracted_entities": {"phone": "055555"},
+        "requires_human": False,
+    }
+    conversation = {
+        "sender_id": "generic-invalid-phone-test",
+        "state": "collect_phone",
+        "full_name": "Berkay Elbir",
+        "lead_name": "Berkay Elbir",
+        "service": "Otomasyon",
+        "memory_state": {"requested_service": "Otomasyon"},
+    }
+
+    result, conversation = run_generic_message(
+        monkeypatch,
+        "055555",
+        llm_result,
+        {"business_name": "DOEL Digital", "service_catalog": [{"display": "Otomasyon", "name": "Otomasyon"}]},
+        conversation,
+    )
+
+    assert conversation.get("phone") is None
+    assert conversation.get("state") == "collect_phone"
+    assert "telefon" in gc.sanitize_text(result.reply_text).lower()
+
+
+def test_generic_completed_booking_creates_appointment(monkeypatch):
+    os.environ["CHATBOT_ENGINE"] = "generic"
+    created = {}
+
+    def fake_create_appointment(_conn, conversation, username):
+        created["conversation"] = dict(conversation)
+        created["username"] = username
+        return 123, 0
+
+    llm_result = {
+        "intent": "active_booking",
+        "reply_text": "Uygun saati aldım.",
+        "extracted_entities": {},
+        "requires_human": False,
+    }
+    conversation = {
+        "sender_id": "generic-complete-booking-test",
+        "state": "collect_datetime",
+        "full_name": "Berkay Elbir",
+        "lead_name": "Berkay Elbir",
+        "phone": "+905539088638",
+        "service": "Otomasyon",
+        "memory_state": {"requested_service": "Otomasyon"},
+    }
+    monkeypatch.setattr(gc, "create_appointment", fake_create_appointment)
+
+    result, conversation = run_generic_message(
+        monkeypatch,
+        "Yarın 13:00",
+        llm_result,
+        {"business_name": "DOEL Digital", "service_catalog": [{"display": "Otomasyon", "name": "Otomasyon"}]},
+        conversation,
+    )
+
+    assert result.appointment_created is True
+    assert result.appointment_id == 123
+    assert conversation.get("state") == "completed"
+    assert created["conversation"]["full_name"] == "Berkay Elbir"
+    assert created["conversation"]["requested_time"] == "13:00"
 
 
 def test_generic_flow_does_not_repeat_greeting_for_business_identity_fit(monkeypatch):
