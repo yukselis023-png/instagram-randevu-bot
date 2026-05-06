@@ -18,7 +18,7 @@ from app.main import (
     update_conversation_memory_after_bot_reply, upsert_conversation, upsert_customer_from_conversation,
     schedule_customer_automation_events, sanitize_text, extract_inbound_message_id, extract_inbound_platform,
     build_inbound_dedupe_key, elapsed_ms, queue_crm_sync, get_config, call_llm_content,
-    is_company_capability_question
+    is_company_capability_question, build_company_capability_reply, is_simple_greeting
 )
 
 logger = logging.getLogger(__name__)
@@ -119,6 +119,19 @@ def build_generic_business_context(message_text: str, cfg: dict[str, Any]) -> st
     return json.dumps(context, ensure_ascii=False)
 
 
+def strip_leading_greeting_for_non_greeting(message_text: str, reply_text: str | None) -> str:
+    reply = reply_text or ""
+    if not sanitize_text(reply) or is_simple_greeting(message_text):
+        return reply
+    lowered = sanitize_text(reply).lower()
+    for prefix in ("merhaba,", "merhaba.", "merhaba ", "selam,", "selam.", "selam "):
+        if lowered.startswith(prefix):
+            stripped = reply[len(prefix):].strip()
+            if stripped:
+                return stripped[:1].upper() + stripped[1:]
+    return reply
+
+
 def build_service_carryover_booking_reply(service_label: str | None, state: str | None) -> str:
     service = service_reply_phrase(service_label)
     if state == "collect_phone":
@@ -199,6 +212,9 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
 
         decision_path = [f"generic_intent:{intent}"]
         booking_opt_in = is_booking_opt_in(message_text, intent)
+        if is_company_capability_question(message_text):
+            reply_text = build_company_capability_reply(message_text)
+            decision_path.append("reply:company_capability")
 
         # 2. STATE & CRM DETERMINISTIC LAYER
         handoff = False
@@ -285,7 +301,7 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
             decision_path.append("fsm:service_carryover_booking")
 
         # 4. FINAL QUALITY GUARD (Post FSM Check)
-        reply_text, guard_label = generic_quality_guard(reply_text, extracted, memory, get_config())
+        reply_text, guard_label = generic_quality_guard(reply_text, extracted, memory, get_config(), message_text)
         if guard_label:
             decision_path.append(f"guard:{guard_label}")
 
@@ -420,7 +436,7 @@ Müşterinin yeni mesajını incele. Oku ve aşağıdaki JSON formatına SIKI SI
             "requires_human": False
         }
 
-def generic_quality_guard(reply: str, extracted: dict, memory: dict, cfg: dict) -> Tuple[str, Optional[str]]:
+def generic_quality_guard(reply: str, extracted: dict, memory: dict, cfg: dict, message_text: str | None = None) -> Tuple[str, Optional[str]]:
     # 1. Config Service Matching
     if extracted.get("requested_service"):
         valid_services = [s.get("name", "").lower() for s in cfg.get("service_catalog", [])] + [s.get("display", "").lower() for s in cfg.get("service_catalog", [])]
@@ -435,5 +451,9 @@ def generic_quality_guard(reply: str, extracted: dict, memory: dict, cfg: dict) 
     # 2. Prevent Booking confirmed without real fields locally
     if "Kaydınız oluşturuldu" in reply and (not memory.get("customer_phone") or not memory.get("requested_service")):
         return "İşlemlerinize devam edebilmem için lütfen bilgileri eksiksiz tamamlayalım.", "prevent_premature_confirm"
+
+    cleaned_reply = strip_leading_greeting_for_non_greeting(message_text or "", reply)
+    if cleaned_reply != reply:
+        return cleaned_reply, "strip_repeated_greeting"
         
     return reply, None

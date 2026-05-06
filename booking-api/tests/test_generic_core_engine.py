@@ -89,7 +89,7 @@ def test_generic_business_identity_fit_prompt_hides_unavailable_services(monkeyp
         if "unavailable_services" in system_prompt or "cilt bakımı" in system_prompt or "doktor muayenesi" in system_prompt:
             reply = "Merhaba, dövme bizim uzmanlık alanımız dışında. Lazer, cilt bakımı, emlak ve doktor muayenesi de bize uygun değil. Ön görüşme yapalım."
         else:
-            reply = "Dövmeciler için sosyal medya, reklam ve portfolyo odaklı web çözümleri uygun olabilir. Önceliğiniz görünürlük mü, randevu talebi mi?"
+            reply = "Merhaba, dövmeciler için sosyal medya, reklam ve portfolyo odaklı web çözümleri uygun olabilir. Önceliğiniz görünürlük mü, randevu talebi mi?"
         return {
             "intent": "direct_answer",
             "reply_text": reply,
@@ -122,7 +122,8 @@ def test_generic_business_identity_fit_prompt_hides_unavailable_services(monkeyp
         BackgroundTasks(),
     )
 
-    reply = result.reply_text.lower()
+    assert gc.sanitize_text(result.reply_text).startswith("Dovmeciler")
+    reply = gc.sanitize_text(result.reply_text).lower()
     assert not reply.startswith("merhaba")
     assert "uzmanlık alanımız dışında" not in reply
     assert "lazer" not in reply
@@ -141,7 +142,7 @@ def test_generic_capability_question_keeps_unavailable_services_context(monkeypa
 
     def fake_llm(system_prompt, user_text):
         captured["system_prompt"] = system_prompt
-        reply = "Hayır, dövme hizmeti vermiyoruz; dijital hizmetler sunuyoruz."
+        reply = "Hayır, dövme hizmeti vermiyoruz."
         return {
             "intent": "direct_answer",
             "reply_text": reply,
@@ -174,7 +175,10 @@ def test_generic_capability_question_keeps_unavailable_services_context(monkeypa
         BackgroundTasks(),
     )
 
-    assert "dövme hizmeti vermiyoruz" in result.reply_text.lower()
+    reply = gc.sanitize_text(result.reply_text).lower()
+    assert "dovme" in reply
+    assert "yapmiyoruz" in reply or "vermiyoruz" in reply
+    assert "dijital" in reply or "web sitesi" in reply
     assert "dövme" in captured["system_prompt"]
 
 
@@ -226,8 +230,9 @@ def test_generic_flow_does_not_repeat_greeting_for_business_identity_fit(monkeyp
     )
 
     assert first.reply_text
-    assert not second.reply_text.lower().startswith("merhaba")
-    assert "dövmeciler" in second.reply_text.lower()
-    assert "uzmanlık alanımız dışında" not in second.reply_text.lower()
+    second_reply = gc.sanitize_text(second.reply_text).lower()
+    assert not second_reply.startswith("merhaba")
+    assert "dovmeciler" in second_reply
+    assert "uzmanlik alanimiz disinda" not in second_reply
     assert gc.reply_question_count(second.reply_text) <= 1
     assert gc.reply_sentence_count(second.reply_text) <= 3
