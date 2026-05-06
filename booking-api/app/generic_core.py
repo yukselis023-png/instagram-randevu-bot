@@ -21,7 +21,7 @@ from app.main import (
     is_company_capability_question, build_company_capability_reply, is_simple_greeting,
     is_business_fit_question, recommendation_engine, extract_name, extract_phone,
     is_invalid_phone_attempt, extract_date, extract_time_for_state, extract_time, create_appointment,
-    build_confirmation_message, try_reschedule_confirmed_appointment
+    build_confirmation_message, try_reschedule_confirmed_appointment, find_active_appointment_for_user
 )
 
 logger = logging.getLogger(__name__)
@@ -172,11 +172,25 @@ def is_confirmed_generic_appointment(conversation: dict[str, Any]) -> bool:
     )
 
 
-def existing_generic_appointment_id(conversation: dict[str, Any]) -> int | None:
+def existing_generic_appointment_id(conversation: dict[str, Any], conn: Any | None = None) -> int | None:
     try:
-        return int(conversation.get("appointment_id")) if conversation.get("appointment_id") else None
+        if conversation.get("appointment_id"):
+            return int(conversation.get("appointment_id"))
     except Exception:
-        return None
+        pass
+    if conn is not None and conversation.get("instagram_user_id"):
+        try:
+            appointment = find_active_appointment_for_user(
+                conn,
+                conversation.get("instagram_user_id"),
+                preferred_date=conversation.get("requested_date"),
+                preferred_time=conversation.get("requested_time"),
+            )
+            if appointment and appointment.get("id"):
+                return int(appointment["id"])
+        except Exception:
+            return None
+    return None
 
 
 def is_explicit_reschedule_request(message_text: str) -> bool:
@@ -236,7 +250,7 @@ def handle_confirmed_generic_reschedule(
     if not is_confirmed_generic_appointment(conversation):
         return None
 
-    existing_id = existing_generic_appointment_id(conversation)
+    existing_id = existing_generic_appointment_id(conversation, conn)
     pending_confirm = memory.get("open_loop") == "generic_reschedule_confirmation_pending"
     if pending_confirm and is_reschedule_confirmation_acceptance(message_text):
         requested_date = memory.get("reschedule_requested_date") or conversation.get("requested_date")
@@ -501,6 +515,7 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
                 conversation["appointment_status"] = "confirmed"
                 appointment_created = True
                 appointment_id, _live_crm_ms = create_appointment(conn, conversation, payload.instagram_username)
+                conversation["appointment_id"] = appointment_id
                 decision_path.append("action:appointment_confirmed")
             state_changed_by_fsm = conversation.get("state") != previous_state
 
