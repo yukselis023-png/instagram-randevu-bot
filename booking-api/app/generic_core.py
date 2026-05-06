@@ -17,7 +17,8 @@ from app.main import (
     should_reset_stale_conversation, reset_conversation_for_restart, build_normalized,
     update_conversation_memory_after_bot_reply, upsert_conversation, upsert_customer_from_conversation,
     schedule_customer_automation_events, sanitize_text, extract_inbound_message_id, extract_inbound_platform,
-    build_inbound_dedupe_key, elapsed_ms, queue_crm_sync, get_config, call_llm_content
+    build_inbound_dedupe_key, elapsed_ms, queue_crm_sync, get_config, call_llm_content,
+    is_company_capability_question
 )
 
 logger = logging.getLogger(__name__)
@@ -96,6 +97,26 @@ def service_reply_phrase(service_label: str | None) -> str:
 def reply_repeats_service_question(reply_text: str | None) -> bool:
     lowered = sanitize_text(reply_text or "").lower()
     return any(fragment in lowered for fragment in SERVICE_REPEAT_QUESTION_FRAGMENTS)
+
+
+def reply_question_count(reply_text: str | None) -> int:
+    return sanitize_text(reply_text or "").count("?")
+
+
+def reply_sentence_count(reply_text: str | None) -> int:
+    text = sanitize_text(reply_text or "").strip()
+    if not text:
+        return 0
+    endings = {".", "?", "!"}
+    count = sum(1 for char in text if char in endings)
+    return count or 1
+
+
+def build_generic_business_context(message_text: str, cfg: dict[str, Any]) -> str:
+    context = dict(cfg or {})
+    if not is_company_capability_question(message_text):
+        context.pop("unavailable_services", None)
+    return json.dumps(context, ensure_ascii=False)
 
 
 def build_service_carryover_booking_reply(service_label: str | None, state: str | None) -> str:
@@ -335,7 +356,7 @@ def call_llm_json(system_prompt: str, user_text: str) -> dict:
 
 def invoke_generic_llm(message_text: str, conversation: dict, memory: dict, history: list[dict]) -> dict:
     cfg = get_config()
-    business_context = json.dumps(cfg, ensure_ascii=False)
+    business_context = build_generic_business_context(message_text, cfg)
     
     # Minimize context parsing, formatting user messages
     recent = "\\n".join([f"{msg.get('direction', 'IN').upper()}: {msg.get('message_text', '')}" for msg in history[-10:]])
@@ -348,13 +369,22 @@ def invoke_generic_llm(message_text: str, conversation: dict, memory: dict, hist
     if not conversation.get("requested_date") or not conversation.get("requested_time"): missing.append("Tarih ve Saat")
     
     today = datetime.date.today().strftime('%Y-%m-%d')
-    system_prompt = f"""Sen {cfg.get('business_name')} firmasının dijital asistanısın. Müşterilerle doğal, insansı ve yardımcı bir dilde Türkçe konuş. BUGÜNÜN TARİHİ: {today}. İstenen tarihi YYYY-MM-DD hesapla. Müşterilerle doğal, insansı ve yardımcı bir dilde Türkçe konuş.
-Senin GÖREVİN:
-1. Önce müşterinin sorduğu soruyu net, doğru ve doğrudan Business bilgisine dayanarak yanıtla. Bilmediğin bilgiyi asla uydurma.
-2. Soru cevaplandıktan sonra, eğer bir hizmete ilgi gösteriyorsa VEYA doğrudan randevu/ön görüşme almak istiyorsa, onu Booking flow'a (randevu flow) yönlendir.
-3. Rakamları uydurma! Fiyat, saat veya hizmet config'de yoksa söyleme!
+    system_prompt = f"""Sen {cfg.get('business_name')} firmasının Instagram DM asistanısın. Türkçe, doğal ve kısa yaz. BUGÜNÜN TARİHİ: {today}. Tarih gerekiyorsa YYYY-MM-DD hesapla.
 
-Kritik Kural = Birisi 'randevu almak istiyorum' derse, randevu akışına gir ve missing fields arrayinden BİRİNCİ sırada eksik olanı GÜZEL bir dille sor. Hepsini aynı anda sorma!
+KONUŞMA STİLİ:
+- En son müşteri mesajını merkeze al; önce o mesaja doğrudan cevap ver.
+- Önceki konuşmada zaten selamlaştıysanız tekrar "Merhaba/Selam" ile başlama.
+- Instagram DM gibi kısa yaz: çoğu cevap 1-2 kısa cümle olsun.
+- En fazla 1 net soru sor; birden fazla eksik bilgiyi aynı anda sorma.
+- Müşteri açıkça istemedikçe randevu, ön görüşme, telefon veya tarih/saat isteme; booking akışını zorlama.
+- Genel kurumsal tanıtım, hizmet kataloğu dökümü ve alakasız çapraz satış yapma.
+- Sadece Business Context'teki bilgiye dayan; fiyat, süre, hizmet veya müsaitlik uydurma.
+- Business Context'teki sunulmayan hizmetler bilgisini sadece kullanıcı doğrudan "siz X yapıyor musunuz/veriyor musunuz?" diye sorarsa kullan; müşteri kendi sektörünü söylüyorsa bu listeyi dışlama cevabına çevirme.
+- Kullanıcı fiyat sorarsa ilgili hizmet biliniyorsa fiyatı doğrudan söyle; bilinmiyorsa tek soru ile hangi hizmet olduğunu sor.
+- Kullanıcı küçük sohbet veya selam yazdıysa satışa geçmeden kısa ve insani cevap ver.
+- Kullanıcı açıkça randevu/ön görüşme/planlama isterse randevu akışına gir ve aşağıdaki eksik alanlardan sadece ilkini sor.
+
+RANDEVU AKIŞI:
 Eğer son konuşmada veya hafızada bir hizmet zaten biliniyorsa (requested_service / selected_service / service_interest), booking opt-in geldiğinde bu hizmeti kullan; "hangi hizmeti araştırıyorsunuz?" diye tekrar sorma.
 Şu an randevu için eksik olan kritik bilgiler: {', '.join(missing) if missing else 'YOK. Randevu Onaylanabilir.'}
 
