@@ -20,7 +20,8 @@ from app.main import (
     build_inbound_dedupe_key, elapsed_ms, queue_crm_sync, get_config, call_llm_content,
     is_company_capability_question, build_company_capability_reply, is_simple_greeting,
     is_business_fit_question, recommendation_engine, extract_name, extract_phone,
-    is_invalid_phone_attempt, extract_date, extract_time_for_state, create_appointment
+    is_invalid_phone_attempt, extract_date, extract_time_for_state, create_appointment,
+    build_confirmation_message
 )
 
 logger = logging.getLogger(__name__)
@@ -332,7 +333,10 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
             state_changed_by_fsm = conversation.get("state") != previous_state
 
         service_for_booking = known_requested_service(conversation, memory)
-        if (
+        if appointment_created:
+            reply_text = build_confirmation_message(conversation)
+            decision_path.append("fsm:confirmation_reply")
+        elif (
             booking_opt_in
             and service_for_booking
             and conversation.get("state") in {"collect_name", "collect_phone"}

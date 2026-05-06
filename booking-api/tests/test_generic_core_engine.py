@@ -413,6 +413,8 @@ def test_generic_completed_booking_creates_appointment(monkeypatch):
     assert result.appointment_created is True
     assert result.appointment_id == 123
     assert conversation.get("state") == "completed"
+    assert "kaydınız oluşturuldu" in result.reply_text.lower()
+    assert "Ad Soyad: Berkay Elbir" in result.reply_text
     assert created["conversation"]["full_name"] == "Berkay Elbir"
     assert created["conversation"]["requested_time"] == "13:00"
 
