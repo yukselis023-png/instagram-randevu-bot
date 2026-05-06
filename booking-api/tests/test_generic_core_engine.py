@@ -753,6 +753,52 @@ def test_generic_completed_followup_questions_use_safe_replies_and_keep_state(mo
     assert "ben arayacagim" not in replies[1]
 
 
+def test_generic_completed_pending_reschedule_location_question_does_not_repeat_confirmation(monkeypatch):
+    os.environ["CHATBOT_ENGINE"] = "generic"
+    create_calls = []
+    llm_result = {
+        "intent": "service_question",
+        "reply_text": "Görüşme online yapılacak.",
+        "extracted_entities": {"requested_date": "2026-05-07", "requested_time": "13:00"},
+        "requires_human": False,
+    }
+    conversation = {
+        "sender_id": "generic-pending-reschedule-location-test",
+        "state": "completed",
+        "appointment_status": "confirmed",
+        "appointment_id": 77,
+        "full_name": "Berkay Elbir",
+        "lead_name": "Berkay Elbir",
+        "phone": "+905539088638",
+        "service": "Otomasyon",
+        "requested_date": "2026-05-07",
+        "requested_time": "18:00",
+        "memory_state": {
+            "requested_service": "Otomasyon",
+            "open_loop": "generic_reschedule_confirmation_pending",
+            "reschedule_requested_date": "2026-05-07",
+            "reschedule_requested_time": "13:00",
+        },
+    }
+    monkeypatch.setattr(gc, "create_appointment", lambda *args, **kwargs: create_calls.append(args) or (999, 0))
+
+    result, conversation = run_generic_message(
+        monkeypatch,
+        "Görüşme nereden olacak?",
+        llm_result,
+        {"business_name": "DOEL Digital", "service_catalog": [{"display": "Otomasyon", "name": "Otomasyon"}]},
+        conversation,
+    )
+
+    reply = gc.sanitize_text(result.reply_text).lower()
+    assert create_calls == []
+    assert result.appointment_created is False
+    assert result.appointment_id is None
+    assert conversation.get("state") == "completed"
+    assert "onay" not in reply
+    assert "online" in reply or "video" in reply
+
+
 def test_generic_after_confirmed_payment_question_does_not_reenter_slot_flow(monkeypatch):
     os.environ["CHATBOT_ENGINE"] = "generic"
     create_calls = []

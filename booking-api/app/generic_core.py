@@ -166,6 +166,8 @@ def build_completed_followup_reply(message_text: str, cfg: dict[str, Any]) -> tu
     contact_name = sanitize_text(cfg.get("human_contact_name") or "Berkay")
     if "odeme" in lowered or "ödeme" in lowered:
         return "Ödeme detayı ön görüşmede netleşir; uygun olursa havale/EFT veya online ödeme seçenekleri paylaşılır.", "completed_payment_reply"
+    if "nereden" in lowered or "online" in lowered or "video" in lowered:
+        return "Görüşme online olarak yapılır; ekibimiz uygun bağlantı veya iletişim bilgisini paylaşır.", "completed_location_reply"
     if "berkay" in lowered and any(token in lowered for token in ("arar", "arayacak", "donus", "dönüş", "gorusecek", "görüşecek")):
         return f"Evet, ekibimiz veya {contact_name} Bey uygunluk durumuna göre sizinle dönüş yapacak.", "completed_contact_reply"
     if any(token in lowered for token in ("tesekkur", "teşekkür", "sagol", "sağol", "tamam")):
@@ -282,12 +284,11 @@ def is_reschedule_confirmation_acceptance(message_text: str) -> bool:
 
 
 def detect_reschedule_candidate(message_text: str, extracted: dict[str, Any]) -> tuple[str | None, str | None]:
-    detected_date = extract_date(message_text) or extracted.get("requested_date")
+    detected_date = extract_date(message_text)
     detected_time = (
         extract_time_for_state(message_text, "collect_datetime")
         or extract_time(message_text)
         or extract_generic_datetime_time(message_text)
-        or extracted.get("requested_time")
     )
     return detected_date, detected_time
 
@@ -560,7 +561,7 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
             if carried_service:
                 decision_path.append("carried:service")
         direct_date = extract_date(message_text)
-        llm_date = extracted.get("requested_date")
+        llm_date = None if state_before_entities == "completed" else extracted.get("requested_date")
         date_candidate = direct_date or llm_date
         if date_candidate and (direct_date or not conversation.get("requested_date")):
             try:
@@ -570,7 +571,8 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
             except Exception:
                 pass
         direct_time = extract_time_for_state(message_text, state_before_entities) or extract_time(message_text) or extract_generic_datetime_time(message_text)
-        time_candidate = direct_time or extracted.get("requested_time")
+        llm_time = None if state_before_entities == "completed" else extracted.get("requested_time")
+        time_candidate = direct_time or llm_time
         if time_candidate:
             try:
                 datetime.datetime.strptime(time_candidate, "%H:%M")
