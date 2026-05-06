@@ -8539,6 +8539,8 @@ def format_company_capability_activity(activity: str) -> str:
         "ev veya emlak satisi": "ev veya emlak satışı",
         "dis cekimi": "diş çekimi",
         "urun satisi": "ürün satışı",
+        "dovme hizmeti": "dövme hizmeti",
+        "dovme": "dövme",
     }
     labels.update(
         {

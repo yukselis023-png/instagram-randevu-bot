@@ -122,8 +122,9 @@ def test_generic_business_identity_fit_prompt_hides_unavailable_services(monkeyp
         BackgroundTasks(),
     )
 
-    assert gc.sanitize_text(result.reply_text).startswith("Dovmeciler")
     reply = gc.sanitize_text(result.reply_text).lower()
+    assert "dovme" in reply
+    assert any(token in reply for token in ["sosyal medya", "reklam", "web", "portfolyo"])
     assert not reply.startswith("merhaba")
     assert "uzmanlık alanımız dışında" not in reply
     assert "lazer" not in reply
@@ -232,7 +233,8 @@ def test_generic_flow_does_not_repeat_greeting_for_business_identity_fit(monkeyp
     assert first.reply_text
     second_reply = gc.sanitize_text(second.reply_text).lower()
     assert not second_reply.startswith("merhaba")
-    assert "dovmeciler" in second_reply
+    assert "dovme" in second_reply
+    assert any(token in second_reply for token in ["sosyal medya", "reklam", "web", "portfolyo"])
     assert "uzmanlik alanimiz disinda" not in second_reply
     assert gc.reply_question_count(second.reply_text) <= 1
     assert gc.reply_sentence_count(second.reply_text) <= 3

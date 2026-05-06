@@ -18,7 +18,8 @@ from app.main import (
     update_conversation_memory_after_bot_reply, upsert_conversation, upsert_customer_from_conversation,
     schedule_customer_automation_events, sanitize_text, extract_inbound_message_id, extract_inbound_platform,
     build_inbound_dedupe_key, elapsed_ms, queue_crm_sync, get_config, call_llm_content,
-    is_company_capability_question, build_company_capability_reply, is_simple_greeting
+    is_company_capability_question, build_company_capability_reply, is_simple_greeting,
+    is_business_fit_question, recommendation_engine
 )
 
 logger = logging.getLogger(__name__)
@@ -215,6 +216,9 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
         if is_company_capability_question(message_text):
             reply_text = build_company_capability_reply(message_text)
             decision_path.append("reply:company_capability")
+        elif is_business_fit_question(message_text):
+            reply_text = recommendation_engine(conversation, message_text, recent_history)
+            decision_path.append("reply:business_fit")
 
         # 2. STATE & CRM DETERMINISTIC LAYER
         handoff = False
