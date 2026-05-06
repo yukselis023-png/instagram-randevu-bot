@@ -259,7 +259,6 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
             booking_opt_in
             and service_for_booking
             and conversation.get("state") in {"collect_name", "collect_phone"}
-            and (intent == "booking_request" or reply_repeats_service_question(reply_text))
         ):
             reply_text = build_service_carryover_booking_reply(service_for_booking, conversation.get("state"))
             decision_path.append("fsm:service_carryover_booking")

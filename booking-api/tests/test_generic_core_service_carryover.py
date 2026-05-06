@@ -45,8 +45,8 @@ def test_booking_opt_in_uses_previous_requested_service_and_asks_for_name(monkey
             }
         if "görüşelim" in lowered or "goruselim" in lowered:
             return {
-                "intent": "booking_request",
-                "reply_text": "Görüşelim, hangi hizmeti araştırıyorsunuz? Veya isim soyisim alabilir miyim?",
+                "intent": "active_booking",
+                "reply_text": "Görüşme randevu almak için gerekli bilgileri toplamak isterim. İsminiz ve soyisminiz nedir?",
                 "extracted_entities": {},
                 "requires_human": False,
             }
@@ -89,6 +89,8 @@ def test_booking_opt_in_uses_previous_requested_service_and_asks_for_name(monkey
     assert final_memory["requested_service"] == "Otomasyon"
     assert final_conversation["state"] == "collect_name"
     assert "hangi hizmet" not in final_reply
+    assert "otomasyon" in final_reply
+    assert "ön görüşme" in final_reply
     assert "ad" in final_reply and "soyad" in final_reply
 
 
