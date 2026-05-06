@@ -60,7 +60,7 @@ LLM_FALLBACK_MODEL = os.getenv("LLM_FALLBACK_MODEL", "llama-3.1-8b-instant")
 LLM_EXTRACT_TIMEOUT_SECONDS = float(os.getenv("LLM_EXTRACT_TIMEOUT_SECONDS", "6"))
 LLM_REPLY_POLISH_TIMEOUT_SECONDS = float(os.getenv("LLM_REPLY_POLISH_TIMEOUT_SECONDS", "8"))
 LLM_REPLY_MICRO_MODEL = os.getenv("LLM_REPLY_MICRO_MODEL", "llama-3.1-8b-instant").strip() or LLM_MODEL
-LLM_REPLY_ADVISORY_MODEL = os.getenv("LLM_REPLY_ADVISORY_MODEL", "llama-3.3-70b-versatile").strip() or LLM_MODEL
+LLM_REPLY_ADVISORY_MODEL = os.getenv("LLM_REPLY_ADVISORY_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct").strip() or LLM_MODEL
 LLM_REPLY_QUALITY_MODEL = (
     os.getenv("LLM_REPLY_QUALITY_MODEL")
     or os.getenv("LLM_QUALITY_MODEL")
@@ -523,6 +523,9 @@ CONFIRMATION_ACCEPTANCE_MESSAGES = {
 }
 CONVERSATION_MEMORY_DEFAULTS = {
     "customer_goal": None,
+    "requested_service": None,
+    "selected_service": None,
+    "service_interest": None,
     "customer_sector": None,
     "customer_subsector": None,
     "pain_points": [],

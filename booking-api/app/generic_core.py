@@ -22,6 +22,70 @@ from app.main import (
 
 logger = logging.getLogger(__name__)
 
+BOOKING_OPT_IN_PHRASES = (
+    "olur görüşelim",
+    "olur goruselim",
+    "görüşelim",
+    "goruselim",
+    "randevu alalım",
+    "randevu alalim",
+    "ön görüşme",
+    "on gorusme",
+)
+
+SERVICE_REPEAT_QUESTION_FRAGMENTS = (
+    "hangi hizmet",
+    "hizmeti araştırıyorsunuz",
+    "hizmeti arastiriyorsunuz",
+    "hangi konuda bilgi",
+)
+
+
+def is_booking_opt_in(message_text: str, intent: str | None) -> bool:
+    lowered = sanitize_text(message_text or "").lower()
+    return intent == "booking_request" or any(phrase in lowered for phrase in BOOKING_OPT_IN_PHRASES)
+
+
+def known_requested_service(conversation: dict[str, Any], memory: dict[str, Any]) -> str | None:
+    for key in ("requested_service", "selected_service", "service_interest"):
+        value = sanitize_text(memory.get(key) or "")
+        if value:
+            return value
+    value = sanitize_text(conversation.get("service") or "")
+    return value or None
+
+
+def remember_requested_service(conversation: dict[str, Any], memory: dict[str, Any], service_label: str | None) -> str | None:
+    clean = sanitize_text(service_label or "")
+    if not clean:
+        return None
+    memory["requested_service"] = clean
+    memory["selected_service"] = clean
+    memory["service_interest"] = clean
+    if not sanitize_text(conversation.get("service") or ""):
+        conversation["service"] = clean
+    return clean
+
+
+def service_reply_phrase(service_label: str | None) -> str:
+    lowered = sanitize_text(service_label or "").lower()
+    if "otomasyon" in lowered:
+        return "otomasyon"
+    return lowered or "bu hizmet"
+
+
+def reply_repeats_service_question(reply_text: str | None) -> bool:
+    lowered = sanitize_text(reply_text or "").lower()
+    return any(fragment in lowered for fragment in SERVICE_REPEAT_QUESTION_FRAGMENTS)
+
+
+def build_service_carryover_booking_reply(service_label: str | None, state: str | None) -> str:
+    service = service_reply_phrase(service_label)
+    if state == "collect_phone":
+        return f"Harika, {service} için ön görüşme oluşturalım. Telefon numaranızı alabilir miyim?"
+    return f"Harika, {service} için ön görüşme oluşturalım. Ad soyadınızı alabilir miyim?"
+
+
 def process_instagram_message_generic(payload: IncomingMessage, background_tasks: BackgroundTasks) -> ProcessResult:
     request_started_at = time_module.perf_counter()
     metrics = {
@@ -94,6 +158,7 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
         extracted = result_dict.get("extracted_entities", {})
 
         decision_path = [f"generic_intent:{intent}"]
+        booking_opt_in = is_booking_opt_in(message_text, intent)
 
         # 2. STATE & CRM DETERMINISTIC LAYER
         handoff = False
@@ -112,8 +177,12 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
             conversation["phone"] = extracted["phone"]
             decision_path.append("extracted:phone")
         if extracted.get("requested_service"):
-            memory["requested_service"] = extracted["requested_service"]
+            remember_requested_service(conversation, memory, extracted["requested_service"])
             decision_path.append("extracted:service")
+        elif booking_opt_in:
+            carried_service = remember_requested_service(conversation, memory, known_requested_service(conversation, memory))
+            if carried_service:
+                decision_path.append("carried:service")
         if extracted.get("requested_date"):
             try:
                 # Basic validation using datetime
@@ -139,7 +208,8 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
         curr_state = conversation.get("state", "new")
         
         if not handoff and (intent in ["booking_request", "active_booking"] or curr_state.startswith("collect_")):
-            has_service = bool(memory.get("requested_service"))
+            carried_service = remember_requested_service(conversation, memory, known_requested_service(conversation, memory))
+            has_service = bool(carried_service)
             has_phone = bool(conversation.get("phone"))
             has_name = bool(conversation.get("lead_name"))
             has_date = bool(conversation.get("requested_date"))
@@ -148,6 +218,10 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
             # Progress the booking funnel deterministically
             if not has_service:
                 conversation["state"] = "collect_service"
+            elif booking_opt_in and not has_name:
+                conversation["state"] = "collect_name"
+            elif booking_opt_in and not has_phone:
+                conversation["state"] = "collect_phone"
             elif not has_phone:
                 conversation["state"] = "collect_phone"
             elif not has_name:
@@ -159,6 +233,16 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
                 conversation["appointment_status"] = "confirmed"
                 appointment_created = True
                 decision_path.append("action:appointment_confirmed")
+
+        service_for_booking = known_requested_service(conversation, memory)
+        if (
+            booking_opt_in
+            and service_for_booking
+            and conversation.get("state") in {"collect_name", "collect_phone"}
+            and (intent == "booking_request" or reply_repeats_service_question(reply_text))
+        ):
+            reply_text = build_service_carryover_booking_reply(service_for_booking, conversation.get("state"))
+            decision_path.append("fsm:service_carryover_booking")
 
         # 4. FINAL QUALITY GUARD (Post FSM Check)
         reply_text, guard_label = generic_quality_guard(reply_text, extracted, memory, get_config())
@@ -230,9 +314,9 @@ def invoke_generic_llm(message_text: str, conversation: dict, memory: dict, hist
     
     # Exposing missing booking fields to explicitly direct the AI on what to ask if it proceeds to 'active_booking'
     missing = []
-    if not memory.get("requested_service"): missing.append("Hizmet Türü")
-    if not conversation.get("phone"): missing.append("Telefon Numarası")
+    if not known_requested_service(conversation, memory): missing.append("Hizmet Türü")
     if not conversation.get("lead_name"): missing.append("İsim Soyisim")
+    if not conversation.get("phone"): missing.append("Telefon Numarası")
     if not conversation.get("requested_date") or not conversation.get("requested_time"): missing.append("Tarih ve Saat")
     
     today = datetime.date.today().strftime('%Y-%m-%d')
@@ -243,6 +327,7 @@ Senin GÖREVİN:
 3. Rakamları uydurma! Fiyat, saat veya hizmet config'de yoksa söyleme!
 
 Kritik Kural = Birisi 'randevu almak istiyorum' derse, randevu akışına gir ve missing fields arrayinden BİRİNCİ sırada eksik olanı GÜZEL bir dille sor. Hepsini aynı anda sorma!
+Eğer son konuşmada veya hafızada bir hizmet zaten biliniyorsa (requested_service / selected_service / service_interest), booking opt-in geldiğinde bu hizmeti kullan; "hangi hizmeti araştırıyorsunuz?" diye tekrar sorma.
 Şu an randevu için eksik olan kritik bilgiler: {', '.join(missing) if missing else 'YOK. Randevu Onaylanabilir.'}
 
 İŞLETME BİLGİSİ (Business Context):
@@ -282,8 +367,9 @@ def generic_quality_guard(reply: str, extracted: dict, memory: dict, cfg: dict) 
     if extracted.get("requested_service"):
         valid_services = [s.get("name", "").lower() for s in cfg.get("service_catalog", [])] + [s.get("display", "").lower() for s in cfg.get("service_catalog", [])]
         matched = False
+        requested_service = extracted["requested_service"].lower()
         for svc in valid_services:
-            if svc and svc in extracted["requested_service"].lower():
+            if svc and (svc in requested_service or requested_service in svc):
                 matched = True
         if not matched:
             extracted["requested_service"] = None
