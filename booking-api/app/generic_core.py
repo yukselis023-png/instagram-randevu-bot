@@ -244,7 +244,7 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
 
         # 2. STATE & CRM DETERMINISTIC LAYER
         handoff = False
-        if not deterministic_reply and (intent == "human_handoff" or result_dict.get("requires_human")):
+        if not deterministic_reply and intent == "human_handoff":
             decision_path.append("action:handoff")
             conversation["state"] = "human_handoff"
             conversation["assigned_human"] = True

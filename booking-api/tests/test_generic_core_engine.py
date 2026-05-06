@@ -213,6 +213,63 @@ def test_generic_business_fit_does_not_handoff_when_llm_requires_human(monkeypat
     assert "reply:business_fit" in result.decision_path
 
 
+def test_generic_service_question_requires_human_does_not_enter_handoff(monkeypatch):
+    os.environ["CHATBOT_ENGINE"] = "generic"
+    llm_result = {
+        "intent": "service_question",
+        "reply_text": "Ön görüşmede ihtiyacınızı netleştiririz.",
+        "extracted_entities": {},
+        "requires_human": True,
+    }
+    conversation = {
+        "sender_id": "generic-service-question-no-handoff-test",
+        "state": "new",
+        "service": "Otomasyon",
+        "memory_state": {"requested_service": "Otomasyon"},
+    }
+
+    result, conversation = run_generic_message(
+        monkeypatch,
+        "Peki ön görüşmede ne konuşacağız?",
+        llm_result,
+        {"business_name": "DOEL Digital", "service_catalog": [{"display": "Otomasyon", "name": "Otomasyon"}]},
+        conversation,
+    )
+
+    assert result.handoff is False
+    assert conversation.get("state") != "human_handoff"
+    assert "action:handoff" not in result.decision_path
+
+
+def test_generic_booking_request_requires_human_still_runs_fsm(monkeypatch):
+    os.environ["CHATBOT_ENGINE"] = "generic"
+    llm_result = {
+        "intent": "booking_request",
+        "reply_text": "Ön görüşme için bilgilerinizi alayım.",
+        "extracted_entities": {},
+        "requires_human": True,
+    }
+    conversation = {
+        "sender_id": "generic-booking-requires-human-fsm-test",
+        "state": "new",
+        "service": "Otomasyon",
+        "memory_state": {"requested_service": "Otomasyon"},
+    }
+
+    result, conversation = run_generic_message(
+        monkeypatch,
+        "Tamam mantıklı, görüşelim",
+        llm_result,
+        {"business_name": "DOEL Digital", "service_catalog": [{"display": "Otomasyon", "name": "Otomasyon"}]},
+        conversation,
+    )
+
+    assert result.handoff is False
+    assert conversation.get("state") == "collect_name"
+    assert "action:handoff" not in result.decision_path
+    assert "fsm:service_carryover_booking" in result.decision_path
+
+
 def test_generic_llm_error_reply_never_leaks_to_customer(monkeypatch):
     os.environ["CHATBOT_ENGINE"] = "generic"
 
