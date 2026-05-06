@@ -55,6 +55,25 @@ def known_requested_service(conversation: dict[str, Any], memory: dict[str, Any]
     return value or None
 
 
+def detect_requested_service_from_text(message_text: str, cfg: dict[str, Any]) -> str | None:
+    lowered = sanitize_text(message_text or "").lower()
+    if not lowered:
+        return None
+    for service in cfg.get("service_catalog", []) or []:
+        if not isinstance(service, dict):
+            continue
+        display = sanitize_text(service.get("display") or service.get("name") or "")
+        candidates = [display, service.get("name"), service.get("slug")]
+        candidates.extend(service.get("keywords") or [])
+        for candidate in candidates:
+            clean = sanitize_text(str(candidate or "")).lower()
+            if clean and clean in lowered:
+                if clean == "otomasyon" or "otomasyon" in clean:
+                    return "Otomasyon"
+                return display or sanitize_text(str(candidate or ""))
+    return None
+
+
 def remember_requested_service(conversation: dict[str, Any], memory: dict[str, Any], service_label: str | None) -> str | None:
     clean = sanitize_text(service_label or "")
     if not clean:
@@ -176,9 +195,10 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
         if extracted.get("phone"):
             conversation["phone"] = extracted["phone"]
             decision_path.append("extracted:phone")
-        if extracted.get("requested_service"):
-            remember_requested_service(conversation, memory, extracted["requested_service"])
-            decision_path.append("extracted:service")
+        detected_service = extracted.get("requested_service") or detect_requested_service_from_text(message_text, get_config())
+        if detected_service:
+            remember_requested_service(conversation, memory, detected_service)
+            decision_path.append("extracted:service" if extracted.get("requested_service") else "detected:service")
         elif booking_opt_in:
             carried_service = remember_requested_service(conversation, memory, known_requested_service(conversation, memory))
             if carried_service:
@@ -301,6 +321,14 @@ def call_llm_json(system_prompt: str, user_text: str) -> dict:
         match = re.search(r'\{.*\}', content, re.DOTALL)
         if match:
             return json.loads(match.group(0))
+        clean_content = sanitize_text(content)
+        if clean_content:
+            return {
+                "intent": "direct_answer",
+                "reply_text": clean_content,
+                "extracted_entities": {},
+                "requires_human": False,
+            }
         return json.loads(content)
     except Exception as e:
         raise ValueError(f"LLM JSON Error: {e} - content: {content if 'content' in locals() else 'None'}")

@@ -33,7 +33,7 @@ def test_booking_opt_in_uses_previous_requested_service_and_asks_for_name(monkey
             return {
                 "intent": "service_question",
                 "reply_text": "Otomasyon, DM ve randevu süreçlerini otomatikleştirmek için uygundur.",
-                "extracted_entities": {"requested_service": "Otomasyon"},
+                "extracted_entities": {"customer_goal": "DM yanıtlarını hızlandırmak"},
                 "requires_human": False,
             }
         if "ne kadar" in lowered:
@@ -90,3 +90,29 @@ def test_booking_opt_in_uses_previous_requested_service_and_asks_for_name(monkey
     assert final_conversation["state"] == "collect_name"
     assert "hangi hizmet" not in final_reply
     assert "ad" in final_reply and "soyad" in final_reply
+
+
+def test_call_llm_json_wraps_plain_text_when_provider_ignores_json(monkeypatch):
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": "Otomasyon, DM ve randevu süreçlerinizi hızlandırır. İsterseniz ön görüşme planlayabiliriz."
+                        }
+                    }
+                ]
+            }
+
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setattr(gc.requests, "post", lambda *args, **kwargs: FakeResponse())
+
+    result = gc.call_llm_json("JSON dön", "Otomasyon işime yarar mı?")
+
+    assert result["intent"] == "direct_answer"
+    assert "Otomasyon" in result["reply_text"]
+    assert result["extracted_entities"] == {}
