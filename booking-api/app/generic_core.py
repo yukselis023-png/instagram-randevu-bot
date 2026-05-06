@@ -227,7 +227,7 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
         appointment_created = False
         curr_state = conversation.get("state", "new")
         
-        if not handoff and (intent in ["booking_request", "active_booking"] or curr_state.startswith("collect_")):
+        if not handoff and (booking_opt_in or intent in ["booking_request", "active_booking"] or curr_state.startswith("collect_")):
             carried_service = remember_requested_service(conversation, memory, known_requested_service(conversation, memory))
             has_service = bool(carried_service)
             has_phone = bool(conversation.get("phone"))
@@ -322,6 +322,7 @@ def call_llm_json(system_prompt: str, user_text: str) -> dict:
             return json.loads(match.group(0))
         clean_content = sanitize_text(content)
         if clean_content:
+            logger.warning("generic_core_llm_non_json_response using direct_answer fallback")
             return {
                 "intent": "direct_answer",
                 "reply_text": clean_content,

@@ -1,7 +1,15 @@
+import pytest
 from fastapi import BackgroundTasks
 
 import app.generic_core as gc
 from app.main import IncomingMessage
+
+
+@pytest.mark.parametrize("memory_key", ["requested_service", "selected_service", "service_interest"])
+def test_known_requested_service_reads_service_aliases(memory_key):
+    memory = {memory_key: "Otomasyon"}
+
+    assert gc.known_requested_service({}, memory) == "Otomasyon"
 
 
 def test_booking_opt_in_uses_previous_requested_service_and_asks_for_name(monkeypatch):
@@ -45,7 +53,7 @@ def test_booking_opt_in_uses_previous_requested_service_and_asks_for_name(monkey
             }
         if "görüşelim" in lowered or "goruselim" in lowered:
             return {
-                "intent": "active_booking",
+                "intent": "service_question",
                 "reply_text": "Görüşme randevu almak için gerekli bilgileri toplamak isterim. İsminiz ve soyisminiz nedir?",
                 "extracted_entities": {},
                 "requires_human": False,
