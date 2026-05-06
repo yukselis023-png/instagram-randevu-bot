@@ -78,6 +78,31 @@ def is_booking_opt_in(message_text: str, intent: str | None) -> bool:
     return intent == "booking_request" or any(phrase in lowered for phrase in BOOKING_OPT_IN_PHRASES)
 
 
+def active_state_relevance(message_text: str, state: str | None, cfg: dict[str, Any]) -> tuple[bool, str | None]:
+    if state == "collect_name":
+        if is_booking_acknowledgement_message(message_text):
+            return True, "name_ack"
+        return bool(extract_name(message_text, "collect_name")), "name" if extract_name(message_text, "collect_name") else None
+    if state == "collect_phone":
+        if extract_phone(message_text):
+            return True, "phone"
+        if is_invalid_phone_attempt(message_text, state):
+            return True, "invalid_phone"
+        return False, None
+    if state == "collect_datetime":
+        has_datetime = bool(
+            extract_date(message_text)
+            or extract_time_for_state(message_text, "collect_datetime")
+            or extract_time(message_text)
+            or extract_generic_datetime_time(message_text)
+        )
+        return has_datetime, "datetime" if has_datetime else None
+    if state == "collect_service":
+        has_service = bool(detect_requested_service_from_text(message_text, cfg))
+        return has_service, "service" if has_service else None
+    return True, None
+
+
 def known_requested_service(conversation: dict[str, Any], memory: dict[str, Any]) -> str | None:
     for key in ("requested_service", "selected_service", "service_interest"):
         value = sanitize_text(memory.get(key) or "")
@@ -422,6 +447,8 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
     
     with get_conn() as conn:
         conversation = get_or_create_conversation(conn, payload.sender_id, payload.instagram_username)
+        if conversation.get("lead_name") and not conversation.get("full_name"):
+            conversation["full_name"] = conversation.get("lead_name")
         sanitize_conversation_state(conversation)
         memory = ensure_conversation_memory(conversation)
         sync_conversation_memory_summary(conversation)
@@ -452,7 +479,7 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
                 decision_path=["duplicate_ignored"]
             )
 
-        if should_reset_stale_conversation(conversation, message_text):
+        if should_reset_stale_conversation(conversation, message_text) and not str(conversation.get("state") or "").startswith("collect_"):
             reset_conversation_for_restart(conversation, clear_identity=True)
             memory = ensure_conversation_memory(conversation)
             
@@ -461,6 +488,7 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
 
         # 1. CORE LLM & INTENT RECOGNITION
         result_dict = invoke_generic_llm(message_text, conversation, memory, recent_history)
+        cfg = get_config()
         
         intent = result_dict.get("intent", "fallback")
         reply_text = result_dict.get("reply_text", "Anlaşıldı.")
@@ -480,7 +508,7 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
             decision_path.append("reply:preconsultation_explanation")
             deterministic_reply = True
         elif is_price_question(message_text):
-            price_reply = build_service_price_reply(get_config(), known_requested_service(conversation, memory), memory)
+            price_reply = build_service_price_reply(cfg, known_requested_service(conversation, memory), memory)
             if price_reply:
                 reply_text = price_reply
                 intent = "direct_answer"
@@ -492,7 +520,7 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
             decision_path.append("reply:business_fit")
             deterministic_reply = True
 
-        completed_followup_reply, completed_followup_label = build_completed_followup_reply(message_text, get_config()) if is_confirmed_generic_appointment(conversation) else (None, None)
+        completed_followup_reply, completed_followup_label = build_completed_followup_reply(message_text, cfg) if is_confirmed_generic_appointment(conversation) else (None, None)
         if completed_followup_reply:
             reply_text = completed_followup_reply
             intent = "direct_answer"
@@ -538,8 +566,12 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
 
         # Sync deterministic entities immediately. Booking fields must not depend only on LLM extraction.
         state_before_entities = conversation.get("state", "new")
-        deterministic_name = extract_name(message_text, state_before_entities)
-        llm_name = extracted.get("lead_name") if state_before_entities == "collect_name" or not conversation.get("full_name") else None
+        active_state_is_relevant, active_state_label = active_state_relevance(message_text, state_before_entities, cfg)
+        suppress_active_field_updates = str(state_before_entities or "").startswith("collect_") and not active_state_is_relevant
+        if suppress_active_field_updates:
+            decision_path.append("fsm:state_irrelevant_skipped")
+        deterministic_name = None if suppress_active_field_updates else extract_name(message_text, state_before_entities)
+        llm_name = None if suppress_active_field_updates else (extracted.get("lead_name") if state_before_entities == "collect_name" or not conversation.get("full_name") else None)
         name_candidate = deterministic_name or llm_name
         if is_booking_acknowledgement_message(message_text):
             name_candidate = None
@@ -547,12 +579,18 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
             conversation["lead_name"] = name_candidate
             conversation["full_name"] = name_candidate
             decision_path.append("detected:name" if deterministic_name else "extracted:name")
-        phone_candidate = extract_phone(message_text) or extract_phone(str(extracted.get("phone") or ""))
-        invalid_phone_attempt = is_invalid_phone_attempt(message_text, state_before_entities)
+        direct_phone_candidate = extract_phone(message_text)
+        if suppress_active_field_updates:
+            phone_candidate = None
+        elif state_before_entities == "collect_phone":
+            phone_candidate = direct_phone_candidate
+        else:
+            phone_candidate = direct_phone_candidate or extract_phone(str(extracted.get("phone") or ""))
+        invalid_phone_attempt = (not suppress_active_field_updates) and is_invalid_phone_attempt(message_text, state_before_entities)
         if phone_candidate:
             conversation["phone"] = phone_candidate
             decision_path.append("detected:phone" if extract_phone(message_text) else "extracted:phone")
-        detected_service = extracted.get("requested_service") or detect_requested_service_from_text(message_text, get_config())
+        detected_service = extracted.get("requested_service") or detect_requested_service_from_text(message_text, cfg)
         if detected_service:
             remember_requested_service(conversation, memory, detected_service)
             decision_path.append("extracted:service" if extracted.get("requested_service") else "detected:service")
@@ -560,8 +598,8 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
             carried_service = remember_requested_service(conversation, memory, known_requested_service(conversation, memory))
             if carried_service:
                 decision_path.append("carried:service")
-        direct_date = extract_date(message_text)
-        llm_date = None if state_before_entities == "completed" else extracted.get("requested_date")
+        direct_date = None if suppress_active_field_updates else extract_date(message_text)
+        llm_date = None if state_before_entities in {"completed", "collect_datetime"} or suppress_active_field_updates else extracted.get("requested_date")
         date_candidate = direct_date or llm_date
         if date_candidate and (direct_date or not conversation.get("requested_date")):
             try:
@@ -570,8 +608,8 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
                 decision_path.append("detected:date" if direct_date else "extracted:date")
             except Exception:
                 pass
-        direct_time = extract_time_for_state(message_text, state_before_entities) or extract_time(message_text) or extract_generic_datetime_time(message_text)
-        llm_time = None if state_before_entities == "completed" else extracted.get("requested_time")
+        direct_time = None if suppress_active_field_updates else (extract_time_for_state(message_text, state_before_entities) or extract_time(message_text) or extract_generic_datetime_time(message_text))
+        llm_time = None if state_before_entities in {"completed", "collect_datetime"} or suppress_active_field_updates else extracted.get("requested_time")
         time_candidate = direct_time or llm_time
         if time_candidate:
             try:
@@ -592,7 +630,8 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
         state_changed_by_fsm = False
         invalid_phone_prompt = False
         
-        if not handoff and (booking_opt_in or intent in ["booking_request", "active_booking"] or curr_state.startswith("collect_")):
+        active_fsm_applies = curr_state.startswith("collect_") and active_state_is_relevant
+        if not handoff and (booking_opt_in or intent in ["booking_request", "active_booking"] or active_fsm_applies):
             carried_service = remember_requested_service(conversation, memory, known_requested_service(conversation, memory))
             has_service = bool(carried_service)
             has_phone = bool(conversation.get("phone"))
@@ -632,14 +671,14 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
         ):
             reply_text = build_service_carryover_booking_reply(service_for_booking, conversation.get("state"))
             decision_path.append("fsm:service_carryover_booking")
-        elif (curr_state.startswith("collect_") and (is_llm_error_reply(reply_text) or state_changed_by_fsm or invalid_phone_prompt)):
+        elif (curr_state.startswith("collect_") and active_state_is_relevant and (is_llm_error_reply(reply_text) or state_changed_by_fsm or invalid_phone_prompt or active_state_label == "name_ack")):
             active_prompt = build_active_booking_prompt_reply(conversation, memory)
             if active_prompt:
                 reply_text = active_prompt
                 decision_path.append("fsm:active_booking_prompt")
 
         # 4. FINAL QUALITY GUARD (Post FSM Check)
-        reply_text, guard_label = generic_quality_guard(reply_text, extracted, memory, get_config(), message_text)
+        reply_text, guard_label = generic_quality_guard(reply_text, extracted, memory, cfg, message_text)
         if guard_label:
             decision_path.append(f"guard:{guard_label}")
 

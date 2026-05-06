@@ -753,6 +753,177 @@ def test_generic_completed_followup_questions_use_safe_replies_and_keep_state(mo
     assert "ben arayacagim" not in replies[1]
 
 
+def test_generic_collect_phone_irrelevant_message_does_not_prompt_or_write_phone(monkeypatch):
+    os.environ["CHATBOT_ENGINE"] = "generic"
+    llm_result = {
+        "intent": "direct_answer",
+        "reply_text": "Kolay gelsin, buradayım. Nasıl yardımcı olabilirim?",
+        "extracted_entities": {"lead_name": "Berkay"},
+        "requires_human": False,
+    }
+    conversation = {
+        "sender_id": "generic-stale-phone-irrelevant-test",
+        "state": "collect_phone",
+        "full_name": "Eski Müşteri",
+        "lead_name": "Eski Müşteri",
+        "service": "Otomasyon",
+        "memory_state": {"requested_service": "Otomasyon"},
+    }
+
+    result, conversation = run_generic_message(
+        monkeypatch,
+        "Kolay gelsin Berkay bey",
+        llm_result,
+        {"business_name": "DOEL Digital", "service_catalog": [{"display": "Otomasyon", "name": "Otomasyon"}]},
+        conversation,
+    )
+
+    reply = gc.sanitize_text(result.reply_text).lower()
+    assert conversation.get("state") == "collect_phone"
+    assert conversation.get("phone") is None
+    assert conversation.get("full_name") == "Eski Müşteri"
+    assert result.appointment_created is False
+    assert "telefon" not in reply
+    assert "kolay gelsin" in reply or "yardimci" in reply
+
+
+def test_generic_collect_datetime_irrelevant_message_does_not_prompt_or_create(monkeypatch):
+    os.environ["CHATBOT_ENGINE"] = "generic"
+    create_calls = []
+    llm_result = {
+        "intent": "direct_answer",
+        "reply_text": "Kolay gelsin, buradayım. Nasıl yardımcı olabilirim?",
+        "extracted_entities": {"requested_date": "2026-05-07", "requested_time": "13:00"},
+        "requires_human": False,
+    }
+    conversation = {
+        "sender_id": "generic-stale-datetime-irrelevant-test",
+        "state": "collect_datetime",
+        "full_name": "Berkay Elbir",
+        "lead_name": "Berkay Elbir",
+        "phone": "+905539088638",
+        "service": "Otomasyon",
+        "memory_state": {"requested_service": "Otomasyon"},
+    }
+    monkeypatch.setattr(gc, "create_appointment", lambda *args, **kwargs: create_calls.append(args) or (999, 0))
+
+    result, conversation = run_generic_message(
+        monkeypatch,
+        "Kolay gelsin Berkay bey",
+        llm_result,
+        {"business_name": "DOEL Digital", "service_catalog": [{"display": "Otomasyon", "name": "Otomasyon"}]},
+        conversation,
+    )
+
+    reply = gc.sanitize_text(result.reply_text).lower()
+    assert create_calls == []
+    assert result.appointment_created is False
+    assert conversation.get("state") == "collect_datetime"
+    assert conversation.get("requested_date") is None
+    assert conversation.get("requested_time") is None
+    assert "saat" not in reply
+    assert "kolay gelsin" in reply or "yardimci" in reply
+
+
+def test_generic_collect_phone_valid_phone_progresses(monkeypatch):
+    os.environ["CHATBOT_ENGINE"] = "generic"
+    llm_result = {
+        "intent": "fallback",
+        "reply_text": "Şu an yanıtı netleştiremedim; mesajınızı aldım, birazdan devam edelim.",
+        "extracted_entities": {},
+        "requires_human": False,
+    }
+    conversation = {
+        "sender_id": "generic-phone-relevant-test",
+        "state": "collect_phone",
+        "full_name": "Berkay Elbir",
+        "lead_name": "Berkay Elbir",
+        "service": "Otomasyon",
+        "memory_state": {"requested_service": "Otomasyon"},
+    }
+
+    result, conversation = run_generic_message(
+        monkeypatch,
+        "05539088638",
+        llm_result,
+        {"business_name": "DOEL Digital", "service_catalog": [{"display": "Otomasyon", "name": "Otomasyon"}]},
+        conversation,
+    )
+
+    assert conversation.get("phone") == "+905539088638"
+    assert conversation.get("state") == "collect_datetime"
+    assert "saat" in gc.sanitize_text(result.reply_text).lower()
+
+
+def test_generic_collect_datetime_valid_datetime_progresses_to_appointment(monkeypatch):
+    os.environ["CHATBOT_ENGINE"] = "generic"
+    create_calls = []
+
+    def fake_create(_conn, conversation, username):
+        create_calls.append(dict(conversation))
+        return 123, 0
+
+    llm_result = {
+        "intent": "fallback",
+        "reply_text": "Şu an yanıtı netleştiremedim; mesajınızı aldım, birazdan devam edelim.",
+        "extracted_entities": {},
+        "requires_human": False,
+    }
+    conversation = {
+        "sender_id": "generic-datetime-relevant-test",
+        "state": "collect_datetime",
+        "full_name": "Berkay Elbir",
+        "lead_name": "Berkay Elbir",
+        "phone": "+905539088638",
+        "service": "Otomasyon",
+        "memory_state": {"requested_service": "Otomasyon"},
+    }
+    monkeypatch.setattr(gc, "create_appointment", fake_create)
+
+    result, conversation = run_generic_message(
+        monkeypatch,
+        "yarın 13:00",
+        llm_result,
+        {"business_name": "DOEL Digital", "service_catalog": [{"display": "Otomasyon", "name": "Otomasyon"}]},
+        conversation,
+    )
+
+    assert len(create_calls) == 1
+    assert result.appointment_created is True
+    assert result.appointment_id == 123
+    assert conversation.get("state") == "completed"
+    assert conversation.get("requested_date")
+    assert conversation.get("requested_time") == "13:00"
+
+
+def test_generic_collect_name_booking_ack_keeps_state_without_name(monkeypatch):
+    os.environ["CHATBOT_ENGINE"] = "generic"
+    llm_result = {
+        "intent": "booking_request",
+        "reply_text": "Ön görüşme için bilgilerinizi alayım.",
+        "extracted_entities": {"lead_name": "Olur Görüşelim"},
+        "requires_human": False,
+    }
+    conversation = {
+        "sender_id": "generic-collect-name-ack-test",
+        "state": "collect_name",
+        "service": "Otomasyon",
+        "memory_state": {"requested_service": "Otomasyon"},
+    }
+
+    result, conversation = run_generic_message(
+        monkeypatch,
+        "Olur görüşelim",
+        llm_result,
+        {"business_name": "DOEL Digital", "service_catalog": [{"display": "Otomasyon", "name": "Otomasyon"}]},
+        conversation,
+    )
+
+    assert conversation.get("state") == "collect_name"
+    assert conversation.get("full_name") is None
+    assert "ad soyad" in gc.sanitize_text(result.reply_text).lower()
+
+
 def test_generic_completed_pending_reschedule_location_question_does_not_repeat_confirmation(monkeypatch):
     os.environ["CHATBOT_ENGINE"] = "generic"
     create_calls = []
