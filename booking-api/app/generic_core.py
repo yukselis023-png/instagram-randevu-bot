@@ -45,7 +45,35 @@ SERVICE_REPEAT_QUESTION_FRAGMENTS = (
 )
 
 
+def is_preconsultation_explanation_question(message_text: str) -> bool:
+    lowered = sanitize_text(message_text or "").lower()
+    return (
+        any(token in lowered for token in ("on gorusmede", "ön görüşmede", "on gorusme", "ön görüşme"))
+        and any(token in lowered for token in ("ne konus", "ne konuş", "neler konus", "neler konuş", "ne olacak"))
+    )
+
+
+def is_booking_acknowledgement_message(message_text: str) -> bool:
+    lowered = sanitize_text(message_text or "").lower().strip(" .!?")
+    return lowered in {
+        "olur",
+        "olur goruselim",
+        "olur görüşelim",
+        "tamam goruselim",
+        "tamam görüşelim",
+        "goruselim",
+        "görüşelim",
+    }
+
+
+def is_price_question(message_text: str) -> bool:
+    lowered = sanitize_text(message_text or "").lower()
+    return any(token in lowered for token in ("ne kadar", "fiyat", "ucret", "ücret", "kac tl", "kaç tl", "bedel"))
+
+
 def is_booking_opt_in(message_text: str, intent: str | None) -> bool:
+    if is_preconsultation_explanation_question(message_text):
+        return False
     lowered = sanitize_text(message_text or "").lower()
     return intent == "booking_request" or any(phrase in lowered for phrase in BOOKING_OPT_IN_PHRASES)
 
@@ -95,6 +123,54 @@ def service_reply_phrase(service_label: str | None) -> str:
     if "otomasyon" in lowered:
         return "otomasyon"
     return lowered or "bu hizmet"
+
+
+def find_service_config(cfg: dict[str, Any], service_label: str | None, memory: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    service_hint = sanitize_text(service_label or "").lower()
+    goal_hint = sanitize_text((memory or {}).get("customer_goal") or "").lower()
+    if not service_hint and any(token in goal_hint for token in ("dm", "randevu", "mesaj", "otomasyon")):
+        service_hint = "otomasyon"
+    for service in cfg.get("service_catalog", []) or []:
+        if not isinstance(service, dict):
+            continue
+        candidates = [service.get("display"), service.get("name"), service.get("slug")]
+        candidates.extend(service.get("keywords") or [])
+        clean_candidates = [sanitize_text(str(candidate or "")).lower() for candidate in candidates]
+        if service_hint and any(candidate and (candidate in service_hint or service_hint in candidate) for candidate in clean_candidates):
+            return service
+    return None
+
+
+def build_service_price_reply(cfg: dict[str, Any], service_label: str | None, memory: dict[str, Any]) -> str | None:
+    service = find_service_config(cfg, service_label, memory)
+    if not service:
+        return None
+    display = sanitize_text(service.get("display") or service.get("name") or service_label or "Bu hizmet")
+    price = sanitize_text(service.get("price") or "")
+    price_note = sanitize_text(service.get("price_note") or "")
+    summary = sanitize_text(service.get("summary") or "")
+    if not price:
+        return None
+    note = f" ({price_note})" if price_note else ""
+    scope = f" Kapsam: {summary}" if summary else ""
+    return f"{display} için fiyat {price}{note}.{scope}"
+
+
+def build_preconsultation_explanation_reply(service_label: str | None) -> str:
+    service = service_reply_phrase(service_label)
+    return f"Ön görüşmede {service} ihtiyacınızı, mevcut sürecinizi, hedefinizi ve uygun çözüm kapsamını netleştiriyoruz. Sonrasında size en mantıklı yol haritasını çıkarıyoruz."
+
+
+def build_completed_followup_reply(message_text: str, cfg: dict[str, Any]) -> tuple[str | None, str | None]:
+    lowered = sanitize_text(message_text or "").lower()
+    contact_name = sanitize_text(cfg.get("human_contact_name") or "Berkay")
+    if "odeme" in lowered or "ödeme" in lowered:
+        return "Ödeme detayı ön görüşmede netleşir; uygun olursa havale/EFT veya online ödeme seçenekleri paylaşılır.", "completed_payment_reply"
+    if "berkay" in lowered and any(token in lowered for token in ("arar", "arayacak", "donus", "dönüş", "gorusecek", "görüşecek")):
+        return f"Evet, ekibimiz veya {contact_name} Bey uygunluk durumuna göre sizinle dönüş yapacak.", "completed_contact_reply"
+    if any(token in lowered for token in ("tesekkur", "teşekkür", "sagol", "sağol", "tamam")):
+        return "Rica ederiz, istediğiniz zaman buradan yazabilirsiniz.", "completed_closing_reply"
+    return None, None
 
 
 def reply_repeats_service_question(reply_text: str | None) -> bool:
@@ -396,10 +472,32 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
             reply_text = build_company_capability_reply(message_text)
             decision_path.append("reply:company_capability")
             deterministic_reply = True
+        elif is_preconsultation_explanation_question(message_text):
+            reply_text = build_preconsultation_explanation_reply(known_requested_service(conversation, memory))
+            intent = "direct_answer"
+            booking_opt_in = False
+            decision_path.append("reply:preconsultation_explanation")
+            deterministic_reply = True
+        elif is_price_question(message_text):
+            price_reply = build_service_price_reply(get_config(), known_requested_service(conversation, memory), memory)
+            if price_reply:
+                reply_text = price_reply
+                intent = "direct_answer"
+                booking_opt_in = False
+                decision_path.append("reply:service_price")
+                deterministic_reply = True
         elif is_business_fit_question(message_text):
             reply_text = recommendation_engine(conversation, message_text, recent_history)
             decision_path.append("reply:business_fit")
             deterministic_reply = True
+
+        completed_followup_reply, completed_followup_label = build_completed_followup_reply(message_text, get_config()) if is_confirmed_generic_appointment(conversation) else (None, None)
+        if completed_followup_reply:
+            reply_text = completed_followup_reply
+            intent = "direct_answer"
+            booking_opt_in = False
+            deterministic_reply = True
+            decision_path.append(f"reply:{completed_followup_label}")
 
         post_confirmation = handle_confirmed_generic_reschedule(conn, conversation, memory, message_text, extracted, payload.instagram_username)
         if post_confirmation:
@@ -442,6 +540,8 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
         deterministic_name = extract_name(message_text, state_before_entities)
         llm_name = extracted.get("lead_name") if state_before_entities == "collect_name" or not conversation.get("full_name") else None
         name_candidate = deterministic_name or llm_name
+        if is_booking_acknowledgement_message(message_text):
+            name_candidate = None
         if name_candidate:
             conversation["lead_name"] = name_candidate
             conversation["full_name"] = name_candidate
