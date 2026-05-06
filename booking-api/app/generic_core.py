@@ -140,6 +140,25 @@ def build_service_carryover_booking_reply(service_label: str | None, state: str 
     return f"Harika, {service} için ön görüşme oluşturalım. Ad soyadınızı alabilir miyim?"
 
 
+def is_llm_error_reply(reply_text: str | None) -> bool:
+    lowered = sanitize_text(reply_text or "").lower()
+    return lowered.startswith("error:") or "llm json error" in lowered or "too many requests" in lowered
+
+
+def build_active_booking_prompt_reply(conversation: dict[str, Any], memory: dict[str, Any]) -> str | None:
+    state = conversation.get("state")
+    service = service_reply_phrase(known_requested_service(conversation, memory))
+    if state == "collect_service":
+        return "Ön görüşme için hangi hizmeti düşünüyorsunuz: web tasarım, otomasyon, reklam veya sosyal medya mı?"
+    if state == "collect_name":
+        return f"Harika, {service} için ön görüşme oluşturalım. Ad soyadınızı alabilir miyim?"
+    if state == "collect_phone":
+        return f"Harika, {service} için ön görüşme oluşturalım. Telefon numaranızı eksiksiz alabilir miyim?"
+    if state == "collect_datetime":
+        return "Uygun gün ve saati yazar mısınız? Örneğin yarın 13:00 gibi."
+    return None
+
+
 def process_instagram_message_generic(payload: IncomingMessage, background_tasks: BackgroundTasks) -> ProcessResult:
     request_started_at = time_module.perf_counter()
     metrics = {
@@ -213,16 +232,19 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
 
         decision_path = [f"generic_intent:{intent}"]
         booking_opt_in = is_booking_opt_in(message_text, intent)
+        deterministic_reply = False
         if is_company_capability_question(message_text):
             reply_text = build_company_capability_reply(message_text)
             decision_path.append("reply:company_capability")
+            deterministic_reply = True
         elif is_business_fit_question(message_text):
             reply_text = recommendation_engine(conversation, message_text, recent_history)
             decision_path.append("reply:business_fit")
+            deterministic_reply = True
 
         # 2. STATE & CRM DETERMINISTIC LAYER
         handoff = False
-        if intent == "human_handoff" or result_dict.get("requires_human"):
+        if not deterministic_reply and (intent == "human_handoff" or result_dict.get("requires_human")):
             decision_path.append("action:handoff")
             conversation["state"] = "human_handoff"
             conversation["assigned_human"] = True
@@ -303,6 +325,11 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
         ):
             reply_text = build_service_carryover_booking_reply(service_for_booking, conversation.get("state"))
             decision_path.append("fsm:service_carryover_booking")
+        elif curr_state.startswith("collect_") and is_llm_error_reply(reply_text):
+            active_prompt = build_active_booking_prompt_reply(conversation, memory)
+            if active_prompt:
+                reply_text = active_prompt
+                decision_path.append("fsm:active_booking_error_fallback")
 
         # 4. FINAL QUALITY GUARD (Post FSM Check)
         reply_text, guard_label = generic_quality_guard(reply_text, extracted, memory, get_config(), message_text)
@@ -435,7 +462,7 @@ Müşterinin yeni mesajını incele. Oku ve aşağıdaki JSON formatına SIKI SI
         logger.error(f"Generic engine LLM Error: {e}")
         return {
             "intent": "fallback",
-            "reply_text": cfg.get("fallback_reply", "ERROR: " + str(e)),
+            "reply_text": cfg.get("fallback_reply") or "Şu an yanıtı netleştiremedim; mesajınızı aldım, birazdan devam edelim.",
             "extracted_entities": {},
             "requires_human": False
         }

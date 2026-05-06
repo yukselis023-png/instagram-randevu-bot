@@ -183,6 +183,84 @@ def test_generic_capability_question_keeps_unavailable_services_context(monkeypa
     assert "dövme" in captured["system_prompt"]
 
 
+def test_generic_business_fit_does_not_handoff_when_llm_requires_human(monkeypatch):
+    os.environ["CHATBOT_ENGINE"] = "generic"
+    llm_result = {
+        "intent": "direct_answer",
+        "reply_text": "Bunu ekibimiz değerlendirsin.",
+        "extracted_entities": {"requested_service": "Otomasyon"},
+        "requires_human": True,
+    }
+    conversation = {
+        "sender_id": "generic-fit-no-handoff-test",
+        "state": "new",
+        "service": "Otomasyon",
+        "memory_state": {"requested_service": "Otomasyon"},
+    }
+    monkeypatch.setattr(gc, "recommendation_engine", lambda *args, **kwargs: "Otomasyon bu durumda işe yarar. İsterseniz ön görüşme planlayabiliriz.")
+
+    result, conversation = run_generic_message(
+        monkeypatch,
+        "Bu benim işime yarar mı?",
+        llm_result,
+        {"business_name": "DOEL Digital", "service_catalog": [{"display": "Otomasyon", "name": "Otomasyon"}]},
+        conversation,
+    )
+
+    assert result.handoff is False
+    assert conversation.get("state") != "human_handoff"
+    assert "action:handoff" not in result.decision_path
+    assert "reply:business_fit" in result.decision_path
+
+
+def test_generic_llm_error_reply_never_leaks_to_customer(monkeypatch):
+    os.environ["CHATBOT_ENGINE"] = "generic"
+
+    def fake_llm(*_args, **_kwargs):
+        raise ValueError("LLM JSON Error: 429 Too Many Requests")
+
+    monkeypatch.setattr(gc, "get_config", lambda: {"business_name": "DOEL Digital", "service_catalog": []})
+    monkeypatch.setattr(gc, "call_llm_json", fake_llm)
+
+    result = gc.invoke_generic_llm("Ne kadar?", {"state": "new", "memory_state": {}}, {}, [])
+
+    assert result["intent"] == "fallback"
+    assert "ERROR" not in result["reply_text"]
+    assert "429" not in result["reply_text"]
+    assert "Too Many Requests" not in result["reply_text"]
+
+
+def test_generic_collect_phone_llm_error_keeps_fsm_prompt(monkeypatch):
+    os.environ["CHATBOT_ENGINE"] = "generic"
+    llm_result = {
+        "intent": "fallback",
+        "reply_text": "ERROR: LLM JSON Error: 429 Too Many Requests",
+        "extracted_entities": {},
+        "requires_human": False,
+    }
+    conversation = {
+        "sender_id": "generic-collect-phone-error-test",
+        "state": "collect_phone",
+        "lead_name": "Berkay Elbir",
+        "service": "Otomasyon",
+        "memory_state": {"requested_service": "Otomasyon"},
+    }
+
+    result, conversation = run_generic_message(
+        monkeypatch,
+        "055555",
+        llm_result,
+        {"business_name": "DOEL Digital", "service_catalog": [{"display": "Otomasyon", "name": "Otomasyon"}]},
+        conversation,
+    )
+
+    assert result.handoff is False
+    assert conversation.get("state") == "collect_phone"
+    assert "ERROR" not in result.reply_text
+    assert "429" not in result.reply_text
+    assert "telefon" in gc.sanitize_text(result.reply_text).lower()
+
+
 def test_generic_flow_does_not_repeat_greeting_for_business_identity_fit(monkeypatch):
     os.environ["CHATBOT_ENGINE"] = "generic"
     replies = []
