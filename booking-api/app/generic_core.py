@@ -281,12 +281,189 @@ def _collect_config_service_phrases(cfg: dict[str, Any], limit: int = 3) -> list
     return phrases[:limit]
 
 
+def _humanize_turkish_label(value: str | None) -> str:
+    text = str(value or "").strip()
+    replacements = {
+        "Tasarim": "Tasarım",
+        "tasarim": "tasarım",
+        "Cozumleri": "Çözümleri",
+        "cozumleri": "çözümleri",
+        "Cozumler": "Çözümler",
+        "cozumler": "çözümler",
+        "Cozum": "Çözüm",
+        "cozum": "çözüm",
+        "Musteri": "Müşteri",
+        "musteri": "müşteri",
+        "Yonetimi": "Yönetimi",
+        "yonetimi": "yönetimi",
+        "Pazarlama": "Pazarlama",
+        "pazarlama": "pazarlama",
+        "Sosyal Medya": "Sosyal Medya",
+        "sosyal medya": "sosyal medya",
+        "Yapay Zeka": "Yapay Zeka",
+        "yapay zeka": "yapay zeka",
+    }
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+    return text
+
+
+def _natural_service_label(service: dict[str, Any]) -> str | None:
+    raw = _humanize_turkish_label(str(service.get("display") or service.get("name") or service.get("slug") or ""))
+    lowered = sanitize_text(raw).lower()
+    if not lowered:
+        return None
+    if "web" in lowered or "site" in lowered:
+        return "web sitesi"
+    if "reklam" in lowered or "pazarlama" in lowered or "performans" in lowered or "ads" in lowered:
+        return "reklam yönetimi"
+    if "sosyal" in lowered or "instagram" in lowered or "social" in lowered:
+        return "sosyal medya"
+    if "otomasyon" in lowered or "randevu" in lowered or "mesaj" in lowered or "yapay zeka" in lowered or "ai" in lowered:
+        return "mesaj/randevu otomasyonu"
+    return raw[:1].lower() + raw[1:]
+
+
+def _collect_natural_service_labels(cfg: dict[str, Any], limit: int = 4) -> list[str]:
+    labels: list[str] = []
+    for service in cfg.get("service_catalog", []) or []:
+        if not isinstance(service, dict):
+            continue
+        label = _natural_service_label(service)
+        if label and label not in labels:
+            labels.append(label)
+        if len(labels) >= limit:
+            break
+    return labels
+
+
+def _join_natural_list(items: list[str]) -> str:
+    clean = [str(item or "").strip() for item in items if str(item or "").strip()]
+    if not clean:
+        return ""
+    if len(clean) == 1:
+        return clean[0]
+    if len(clean) == 2:
+        return f"{clean[0]} ve {clean[1]}"
+    return f"{', '.join(clean[:-1])} ve {clean[-1]}"
+
+
+def is_service_overview_question(message_text: str, intent: str | None = None) -> bool:
+    lowered = sanitize_text(message_text or "").lower()
+    return any(
+        token in lowered
+        for token in (
+            "tam olarak ne yapiyorsunuz",
+            "tam olarak ne yapıyorsunuz",
+            "ne yapiyorsunuz",
+            "ne yapıyorsunuz",
+            "hizmetleriniz neler",
+            "hizmetleriniz nedir",
+            "hizmetleriniz",
+            "neler yapiyorsunuz",
+            "neler yapıyorsunuz",
+        )
+    )
+
+
+def build_natural_service_overview_reply(cfg: dict[str, Any]) -> str | None:
+    labels = _collect_natural_service_labels(cfg)
+    if not labels:
+        return None
+    services_text = _join_natural_list(labels)
+    digital_keywords = {"web sitesi", "reklam yönetimi", "sosyal medya", "mesaj/randevu otomasyonu"}
+    if any(label in digital_keywords for label in labels):
+        opener = "Kısaca işletmelerin dijitalde daha profesyonel görünmesini ve daha fazla müşteri almasını sağlıyoruz."
+    else:
+        opener = "Kısaca işletmenizin ihtiyacına uygun hizmetleri daha net ve düzenli şekilde sunmanıza destek oluyoruz."
+    return f"{opener} {services_text} tarafında destek veriyoruz. Önceliğiniz daha fazla müşteri kazanmak mı, yoksa gelen mesaj/randevu sürecini düzenlemek mi?"
+
+
 def build_user_business_identity_reply(cfg: dict[str, Any]) -> str:
-    service_phrases = _collect_config_service_phrases(cfg)
-    if service_phrases:
-        services_text = "; ".join(service_phrases)
-        return f"İşletmeniz için şu alanlarda yardımcı olabiliriz: {services_text}. Önceliğiniz hangi hedef: daha fazla müşteri kazanmak mı, mevcut süreci daha düzenli yönetmek mi?"
-    return "İşletmeniz için config’te tanımlı hizmetlerimize göre yardımcı olabiliriz. Önceliğiniz daha fazla müşteri kazanmak mı, mevcut süreci daha düzenli yönetmek mi?"
+    overview = build_natural_service_overview_reply(cfg)
+    if overview:
+        return overview
+    return "İşletmeniz için tanımlı hizmetlerimize göre yardımcı olabiliriz. Önceliğiniz daha fazla müşteri kazanmak mı, yoksa mevcut süreci daha düzenli yönetmek mi?"
+
+
+def build_enriched_inbound_raw_event(
+    payload: IncomingMessage,
+    inbound_platform: str,
+    inbound_message_id: str | None,
+    inbound_dedupe_key: str | None,
+    trace_id: str,
+) -> dict[str, Any]:
+    raw_event_for_log = dict(payload.raw_event or {}) if isinstance(payload.raw_event, dict) else {}
+    raw_event_for_log["platform"] = inbound_platform
+    raw_event_for_log["message_id"] = sanitize_text(str(inbound_message_id or raw_event_for_log.get("message_id") or ""))
+    raw_event_for_log["sender_id"] = sanitize_text(str(payload.sender_id or raw_event_for_log.get("sender_id") or ""))
+    if inbound_dedupe_key:
+        raw_event_for_log["dedupe_key"] = inbound_dedupe_key
+    raw_event_for_log["trace_id"] = sanitize_text(trace_id or inbound_dedupe_key or inbound_message_id or payload.sender_id)
+    return raw_event_for_log
+
+
+def build_outbound_raw_event(
+    decision_path: list[str],
+    trace_id: str,
+    inbound_dedupe_key: str | None,
+    inbound_platform: str,
+    inbound_message_id: str | None,
+) -> dict[str, Any]:
+    raw_event = {
+        "type": "reply",
+        "decision_path": decision_path,
+        "trace_id": sanitize_text(trace_id or inbound_dedupe_key or inbound_message_id or ""),
+        "platform": inbound_platform,
+    }
+    if inbound_message_id:
+        raw_event["message_id"] = inbound_message_id
+    if inbound_dedupe_key:
+        raw_event["dedupe_key"] = inbound_dedupe_key
+    return raw_event
+
+
+def has_outbound_reply_for_trace(conn: Any, sender_id: str, trace_id: str | None) -> bool:
+    clean_trace_id = sanitize_text(trace_id or "")
+    if not clean_trace_id or not hasattr(conn, "cursor"):
+        return False
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT 1
+            FROM message_logs
+            WHERE instagram_user_id = %s
+              AND direction = 'out'
+              AND raw_payload->>'trace_id' = %s
+            LIMIT 1
+            """,
+            (sender_id, clean_trace_id),
+        )
+        return cur.fetchone() is not None
+
+
+def duplicate_process_result(
+    payload: IncomingMessage,
+    conversation: dict[str, Any],
+    metrics: dict[str, Any],
+    decision_label: str,
+    request_started_at: float,
+) -> ProcessResult:
+    metrics["duplicate"] = True
+    metrics["total_ms"] = elapsed_ms(request_started_at)
+    return ProcessResult(
+        sender_id=payload.sender_id,
+        should_reply=False,
+        reply_text=None,
+        handoff=False,
+        conversation_state=conversation.get("state", "new"),
+        appointment_created=False,
+        appointment_id=None,
+        duplicate=True,
+        normalized=build_normalized(conversation),
+        metrics=metrics,
+        decision_path=[decision_label],
+    )
 
 
 def strip_leading_greeting_for_non_greeting(message_text: str, reply_text: str | None) -> str:
@@ -492,7 +669,6 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
         "message_type": "reply"
     }
 
-    trace_id = sanitize_text(payload.trace_id or ((payload.raw_event or {}).get("trace_id") if isinstance(payload.raw_event, dict) else "") or payload.sender_id)
     message_text = sanitize_text(payload.message_text or "")
     if not message_text:
         return ProcessResult(
@@ -508,6 +684,18 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
 
     inbound_message_id = extract_inbound_message_id(payload.raw_event)
     inbound_platform = extract_inbound_platform(payload.raw_event)
+    inbound_dedupe_key = build_inbound_dedupe_key(inbound_platform, payload.sender_id, inbound_message_id)
+    trace_id = sanitize_text(
+        payload.trace_id
+        or ((payload.raw_event or {}).get("trace_id") if isinstance(payload.raw_event, dict) else "")
+        or inbound_dedupe_key
+        or inbound_message_id
+        or payload.sender_id
+    )
+    metrics["inbound_platform"] = inbound_platform
+    metrics["inbound_dedupe_key"] = inbound_dedupe_key
+    metrics["trace_id"] = trace_id
+    raw_event_for_log = build_enriched_inbound_raw_event(payload, inbound_platform, inbound_message_id, inbound_dedupe_key, trace_id)
     
     with get_conn() as conn:
         conversation = get_or_create_conversation(conn, payload.sender_id, payload.instagram_username)
@@ -519,35 +707,22 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
 
         processing_lock_acquired = try_acquire_inbound_processing_lock(conn, inbound_platform, payload.sender_id, inbound_message_id)
         if not processing_lock_acquired:
-            return ProcessResult(
-                sender_id=payload.sender_id,
-                should_reply=False,
-                reply_text=None,
-                handoff=False,
-                conversation_state=conversation.get("state", "new"),
-                normalized=build_normalized(conversation),
-                metrics=metrics,
-                decision_path=["duplicate_inflight_ignored"]
-            )
+            return duplicate_process_result(payload, conversation, metrics, "duplicate_inflight_ignored", request_started_at)
             
         duplicate_inbound = has_processed_inbound_message(conn, inbound_platform, payload.sender_id, inbound_message_id)
         if duplicate_inbound:
-            return ProcessResult(
-                sender_id=payload.sender_id,
-                should_reply=False,
-                reply_text=None,
-                handoff=False,
-                conversation_state=conversation.get("state", "new"),
-                normalized=build_normalized(conversation),
-                metrics=metrics,
-                decision_path=["duplicate_ignored"]
-            )
+            return duplicate_process_result(payload, conversation, metrics, "duplicate_ignored", request_started_at)
+
+        if has_outbound_reply_for_trace(conn, payload.sender_id, trace_id):
+            return duplicate_process_result(payload, conversation, metrics, "duplicate_outbound_trace_ignored", request_started_at)
 
         if should_reset_stale_conversation(conversation, message_text) and not str(conversation.get("state") or "").startswith("collect_"):
             reset_conversation_for_restart(conversation, clear_identity=True)
             memory = ensure_conversation_memory(conversation)
             
-        save_message_log(conn, payload.sender_id, "in", message_text, payload.raw_event or {})
+        inbound_saved = save_message_log(conn, payload.sender_id, "in", message_text, raw_event_for_log)
+        if inbound_saved is False:
+            return duplicate_process_result(payload, conversation, metrics, "duplicate_inbound_insert_ignored", request_started_at)
         recent_history = get_recent_message_history(conn, payload.sender_id)
 
         # 1. CORE LLM & INTENT RECOGNITION
@@ -574,6 +749,12 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
             intent = "direct_answer"
             booking_opt_in = False
             decision_path.append("reply:user_business_identity_config")
+            deterministic_reply = True
+        elif is_service_overview_question(message_text, intent) and build_natural_service_overview_reply(cfg):
+            reply_text = build_natural_service_overview_reply(cfg) or reply_text
+            intent = "direct_answer"
+            booking_opt_in = False
+            decision_path.append("reply:service_overview_config")
             deterministic_reply = True
         elif is_preconsultation_explanation_question(message_text):
             reply_text = build_preconsultation_explanation_reply(known_requested_service(conversation, memory))
@@ -612,7 +793,9 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
             crm_customer = upsert_customer_from_conversation(conn, conversation)
             if crm_customer:
                 schedule_customer_automation_events(conn, int(crm_customer["id"]), crm_customer.get("sector", ""))
-            save_message_log(conn, payload.sender_id, "out", reply_text, {"type": "reply", "decision_path": decision_path})
+            if has_outbound_reply_for_trace(conn, payload.sender_id, trace_id):
+                return duplicate_process_result(payload, conversation, metrics, "duplicate_outbound_trace_ignored", request_started_at)
+            save_message_log(conn, payload.sender_id, "out", reply_text, build_outbound_raw_event(decision_path, trace_id, inbound_dedupe_key, inbound_platform, inbound_message_id))
             metrics["total_ms"] = elapsed_ms(request_started_at)
             queue_crm_sync(background_tasks, conversation, post_confirmation.get("appointment_id"), metrics)
             return ProcessResult(
@@ -773,7 +956,9 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
         if crm_customer:
             schedule_customer_automation_events(conn, int(crm_customer["id"]), crm_customer.get("sector", ""))
             
-        save_message_log(conn, payload.sender_id, "out", reply_text, {"type": "reply", "decision_path": decision_path})
+        if has_outbound_reply_for_trace(conn, payload.sender_id, trace_id):
+            return duplicate_process_result(payload, conversation, metrics, "duplicate_outbound_trace_ignored", request_started_at)
+        save_message_log(conn, payload.sender_id, "out", reply_text, build_outbound_raw_event(decision_path, trace_id, inbound_dedupe_key, inbound_platform, inbound_message_id))
 
         metrics["total_ms"] = elapsed_ms(request_started_at)
         queue_crm_sync(background_tasks, conversation, None, metrics)

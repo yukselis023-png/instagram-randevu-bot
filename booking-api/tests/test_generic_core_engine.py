@@ -13,6 +13,15 @@ class DummyConn:
     def __exit__(self, *args):
         return False
 
+    def cursor(self):
+        return self
+
+    def execute(self, *args, **kwargs):
+        return None
+
+    def fetchone(self):
+        return None
+
 
 def run_generic_message(monkeypatch, message, llm_result, config, conversation=None):
     conversation = conversation or {"sender_id": "generic-test", "state": "new", "memory_state": {}}
@@ -35,6 +44,109 @@ def run_generic_message(monkeypatch, message, llm_result, config, conversation=N
         BackgroundTasks(),
     )
     return result, conversation
+
+
+def test_generic_inbound_save_uses_durable_dedupe_payload(monkeypatch):
+    os.environ["CHATBOT_ENGINE"] = "generic"
+    conversation = {"sender_id": "67000808415", "state": "new", "memory_state": {}}
+    saved = []
+
+    monkeypatch.setattr(gc, "get_conn", lambda: DummyConn())
+    monkeypatch.setattr(gc, "get_or_create_conversation", lambda *args, **kwargs: conversation)
+    monkeypatch.setattr(gc, "try_acquire_inbound_processing_lock", lambda *args, **kwargs: True)
+    monkeypatch.setattr(gc, "has_processed_inbound_message", lambda *args, **kwargs: False)
+    monkeypatch.setattr(gc, "get_recent_message_history", lambda *args, **kwargs: [])
+    monkeypatch.setattr(gc, "upsert_conversation", lambda *args, **kwargs: None)
+    monkeypatch.setattr(gc, "upsert_customer_from_conversation", lambda *args, **kwargs: None)
+    monkeypatch.setattr(gc, "schedule_customer_automation_events", lambda *args, **kwargs: None)
+    monkeypatch.setattr(gc, "queue_crm_sync", lambda *args, **kwargs: None)
+    monkeypatch.setattr(gc, "get_config", lambda: {"business_name": "DOEL Digital", "service_catalog": [{"display": "Web Tasarim"}]})
+    monkeypatch.setattr(gc, "call_llm_json", lambda *args, **kwargs: {"intent": "direct_answer", "reply_text": "Merhaba.", "extracted_entities": {}, "requires_human": False})
+    monkeypatch.setattr(gc, "save_message_log", lambda *args: saved.append(args) or True)
+
+    result = gc.process_instagram_message_generic(
+        IncomingMessage(
+            sender_id="67000808415",
+            message_text="Kolay gelsin",
+            raw_event={"platform": "igdm", "message_id": "32801733821997095931189647533670400", "trace_id": "igdm:67000808415:32801733821997095931189647533670400"},
+        ),
+        BackgroundTasks(),
+    )
+
+    inbound_payload = saved[0][4]
+    outbound_payload = saved[-1][4]
+    assert result.should_reply is True
+    assert inbound_payload["platform"] == "igdm"
+    assert inbound_payload["message_id"] == "32801733821997095931189647533670400"
+    assert inbound_payload["sender_id"] == "67000808415"
+    assert inbound_payload["dedupe_key"] == "igdm:67000808415:32801733821997095931189647533670400"
+    assert inbound_payload["trace_id"] == "igdm:67000808415:32801733821997095931189647533670400"
+    assert outbound_payload["trace_id"] == inbound_payload["trace_id"]
+    assert outbound_payload["dedupe_key"] == inbound_payload["dedupe_key"]
+
+
+def test_generic_duplicate_inbound_short_circuits_before_llm_and_crm(monkeypatch):
+    os.environ["CHATBOT_ENGINE"] = "generic"
+    conversation = {"sender_id": "67000808415", "state": "new", "memory_state": {}}
+    calls = {"llm": 0, "save": 0, "crm": 0}
+
+    monkeypatch.setattr(gc, "get_conn", lambda: DummyConn())
+    monkeypatch.setattr(gc, "get_or_create_conversation", lambda *args, **kwargs: conversation)
+    monkeypatch.setattr(gc, "try_acquire_inbound_processing_lock", lambda *args, **kwargs: True)
+    monkeypatch.setattr(gc, "has_processed_inbound_message", lambda *args, **kwargs: True)
+    monkeypatch.setattr(gc, "save_message_log", lambda *args, **kwargs: calls.__setitem__("save", calls["save"] + 1))
+    monkeypatch.setattr(gc, "upsert_customer_from_conversation", lambda *args, **kwargs: calls.__setitem__("crm", calls["crm"] + 1))
+
+    def fail_llm(*args, **kwargs):
+        calls["llm"] += 1
+        raise AssertionError("LLM must not be called for duplicate inbound")
+
+    monkeypatch.setattr(gc, "call_llm_json", fail_llm)
+
+    result = gc.process_instagram_message_generic(
+        IncomingMessage(
+            sender_id="67000808415",
+            message_text="Kolay gelsin",
+            raw_event={"platform": "igdm", "message_id": "32801733821997095931189647533670400"},
+        ),
+        BackgroundTasks(),
+    )
+
+    assert result.should_reply is False
+    assert result.duplicate is True
+    assert result.decision_path == ["duplicate_ignored"]
+    assert calls == {"llm": 0, "save": 0, "crm": 0}
+
+
+def test_generic_service_overview_is_natural_not_catalog_dump(monkeypatch):
+    os.environ["CHATBOT_ENGINE"] = "generic"
+    config = {
+        "business_name": "DOEL Digital",
+        "service_catalog": [
+            {"display": "Web Tasarim", "summary": "Google uyumlu uzun açıklama"},
+            {"display": "Otomasyon & Yapay Zeka Cozumleri", "summary": "Musteri mesajlarına yanıt"},
+            {"display": "Performans Pazarlama", "summary": "Meta reklam yönetimi"},
+            {"display": "Sosyal Medya", "summary": "İçerik yönetimi"},
+        ],
+    }
+
+    result, _conversation = run_generic_message(
+        monkeypatch,
+        "Tam olarak ne yapıyorsunuz?",
+        {"intent": "service_question", "reply_text": "Web Tasarim: uzun; Otomasyon: uzun", "extracted_entities": {}, "requires_human": False},
+        config,
+    )
+
+    assert "Kısaca" in result.reply_text
+    assert "web sitesi" in result.reply_text
+    assert "reklam yönetimi" in result.reply_text
+    assert "mesaj/randevu otomasyonu" in result.reply_text
+    assert "Web Tasarim:" not in result.reply_text
+    assert "Cozumleri" not in result.reply_text
+    assert ";" not in result.reply_text
+    assert gc.reply_question_count(result.reply_text) <= 1
+    assert gc.reply_sentence_count(result.reply_text) <= 3
+    assert "reply:service_overview_config" in result.decision_path
 
 
 def test_generic_beauty_journey(monkeypatch):
