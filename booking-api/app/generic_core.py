@@ -558,6 +558,7 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
         reply_text = result_dict.get("reply_text", "Anlaşıldı.")
         extracted = result_dict.get("extracted_entities", {})
         metrics["llm_raw_json"] = {k: v for k, v in result_dict.items() if not str(k).startswith("_")}
+        metrics["llm_model_used"] = result_dict.get("_llm_model_used")
         metrics["llm_error"] = result_dict.get("_llm_error")
         metrics["context_summary"] = result_dict.get("_context_summary") or {}
 
@@ -792,42 +793,72 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
 
 
 def call_llm_json(system_prompt: str, user_text: str) -> dict:
-    import requests, os, json, re
+    import requests, os, json, re, time
     llm_url = os.getenv("LLM_BASE_URL", "https://api.groq.com/openai/v1")
     llm_key = os.getenv("LLM_API_KEY", "")
     llm_model = os.getenv("LLM_MODEL", "llama-3.3-70b-versatile")
+    fallback_model = os.getenv("LLM_FALLBACK_MODEL") or os.getenv("LLM_REPLY_ADVISORY_MODEL")
     if not llm_key:
         from app.main import LLM_BASE_URL, LLM_API_KEY, LLM_MODEL
         llm_url = LLM_BASE_URL
         llm_key = LLM_API_KEY
         llm_model = LLM_MODEL
+        fallback_model = os.getenv("LLM_FALLBACK_MODEL") or os.getenv("LLM_REPLY_ADVISORY_MODEL")
+
+    models = []
+    for model in [llm_model, fallback_model]:
+        model = sanitize_text(str(model or ""))
+        if model and model not in models:
+            models.append(model)
+    if not models:
+        models = ["llama-3.3-70b-versatile"]
 
     headers = {"Authorization": f"Bearer {llm_key}", "Content-Type": "application/json"}
-    payload = {
-        "model": llm_model,
-        "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_text}],
-        "temperature": 0.0,
-        "max_tokens": 1000
-    }
-    try:
-        resp = requests.post(f"{llm_url}/chat/completions", headers=headers, json=payload, timeout=30)
-        resp.raise_for_status()
-        content = resp.json()["choices"][0]["message"]["content"]
-        match = re.search(r'\{.*\}', content, re.DOTALL)
-        if match:
-            return json.loads(match.group(0))
-        clean_content = sanitize_text(content)
-        if clean_content:
-            logger.warning("generic_core_llm_non_json_response using direct_answer fallback")
-            return {
-                "intent": "direct_answer",
-                "reply_text": clean_content,
-                "extracted_entities": {},
-                "requires_human": False,
-            }
-        return json.loads(content)
-    except Exception as e:
-        raise ValueError(f"LLM JSON Error: {e} - content: {content if 'content' in locals() else 'None'}")
+    last_error: Exception | None = None
+    last_content = None
+    for idx, model in enumerate(models):
+        payload = {
+            "model": model,
+            "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_text}],
+            "temperature": 0.0,
+            "max_tokens": 1000
+        }
+        try:
+            resp = requests.post(f"{llm_url}/chat/completions", headers=headers, json=payload, timeout=30)
+            status_code = getattr(resp, "status_code", 200)
+            if status_code in {429, 500, 502, 503, 504} and idx < len(models) - 1:
+                logger.warning("generic_core_llm_retry model=%s status=%s", model, status_code)
+                time.sleep(0.6)
+                continue
+            resp.raise_for_status()
+            content = resp.json()["choices"][0]["message"]["content"]
+            last_content = content
+            match = re.search(r'\{.*\}', content, re.DOTALL)
+            if match:
+                result = json.loads(match.group(0))
+                result["_llm_model_used"] = model
+                return result
+            clean_content = sanitize_text(content)
+            if clean_content:
+                logger.warning("generic_core_llm_non_json_response using direct_answer fallback")
+                return {
+                    "intent": "direct_answer",
+                    "reply_text": clean_content,
+                    "extracted_entities": {},
+                    "requires_human": False,
+                    "_llm_model_used": model,
+                }
+            result = json.loads(content)
+            if isinstance(result, dict):
+                result["_llm_model_used"] = model
+            return result
+        except Exception as e:
+            last_error = e
+            if idx < len(models) - 1:
+                logger.warning("generic_core_llm_retry_error model=%s error=%s", model, e)
+                time.sleep(0.6)
+                continue
+    raise ValueError(f"LLM JSON Error: {last_error} - content: {last_content if last_content is not None else 'None'}")
 
 def summarize_generic_business_context(context_json: str) -> dict[str, Any]:
     try:
