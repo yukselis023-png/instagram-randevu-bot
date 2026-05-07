@@ -585,7 +585,7 @@ def test_generic_after_confirmed_time_only_asks_confirmation_without_creating(mo
         "lead_name": "Berkay Elbir",
         "phone": "+905539088638",
         "service": "Otomasyon",
-        "requested_date": "2026-05-07",
+        "requested_date": "2099-05-07",
         "requested_time": "18:00",
         "memory_state": {"requested_service": "Otomasyon"},
     }
@@ -634,7 +634,7 @@ def test_generic_after_confirmed_explicit_time_change_updates_without_creating(m
         "lead_name": "Berkay Elbir",
         "phone": "+905539088638",
         "service": "Otomasyon",
-        "requested_date": "2026-05-07",
+        "requested_date": "2099-05-07",
         "requested_time": "18:00",
         "memory_state": {"requested_service": "Otomasyon"},
     }
@@ -663,7 +663,7 @@ def test_generic_after_confirmed_new_datetime_does_not_create_second_appointment
     llm_result = {
         "intent": "booking_request",
         "reply_text": "Yeni randevu açıyorum.",
-        "extracted_entities": {"requested_date": "2026-05-07", "requested_time": "15:00"},
+        "extracted_entities": {"requested_date": "2099-05-07", "requested_time": "15:00"},
         "requires_human": False,
     }
     conversation = {
@@ -675,7 +675,7 @@ def test_generic_after_confirmed_new_datetime_does_not_create_second_appointment
         "lead_name": "Berkay Elbir",
         "phone": "+905539088638",
         "service": "Otomasyon",
-        "requested_date": "2026-05-07",
+        "requested_date": "2099-05-07",
         "requested_time": "18:00",
         "memory_state": {"requested_service": "Otomasyon"},
     }
@@ -844,7 +844,7 @@ def test_generic_completed_followup_questions_use_safe_replies_and_keep_state(mo
         "lead_name": "Berkay Elbir",
         "phone": "+905539088638",
         "service": "Otomasyon",
-        "requested_date": "2026-05-07",
+        "requested_date": "2099-05-07",
         "requested_time": "18:00",
         "memory_state": {"requested_service": "Otomasyon"},
     }
@@ -910,7 +910,7 @@ def test_generic_collect_datetime_irrelevant_message_does_not_prompt_or_create(m
     llm_result = {
         "intent": "direct_answer",
         "reply_text": "Kolay gelsin, buradayım. Nasıl yardımcı olabilirim?",
-        "extracted_entities": {"requested_date": "2026-05-07", "requested_time": "13:00"},
+        "extracted_entities": {"requested_date": "2099-05-07", "requested_time": "13:00"},
         "requires_human": False,
     }
     conversation = {
@@ -1047,7 +1047,7 @@ def test_generic_completed_pending_reschedule_location_question_does_not_repeat_
     llm_result = {
         "intent": "service_question",
         "reply_text": "Görüşme online yapılacak.",
-        "extracted_entities": {"requested_date": "2026-05-07", "requested_time": "13:00"},
+        "extracted_entities": {"requested_date": "2099-05-07", "requested_time": "13:00"},
         "requires_human": False,
     }
     conversation = {
@@ -1059,12 +1059,12 @@ def test_generic_completed_pending_reschedule_location_question_does_not_repeat_
         "lead_name": "Berkay Elbir",
         "phone": "+905539088638",
         "service": "Otomasyon",
-        "requested_date": "2026-05-07",
+        "requested_date": "2099-05-07",
         "requested_time": "18:00",
         "memory_state": {
             "requested_service": "Otomasyon",
             "open_loop": "generic_reschedule_confirmation_pending",
-            "reschedule_requested_date": "2026-05-07",
+            "reschedule_requested_date": "2099-05-07",
             "reschedule_requested_time": "13:00",
         },
     }
@@ -1105,7 +1105,7 @@ def test_generic_after_confirmed_payment_question_does_not_reenter_slot_flow(mon
         "lead_name": "Berkay Elbir",
         "phone": "+905539088638",
         "service": "Otomasyon",
-        "requested_date": "2026-05-07",
+        "requested_date": "2099-05-07",
         "requested_time": "18:00",
         "memory_state": {"requested_service": "Otomasyon"},
     }

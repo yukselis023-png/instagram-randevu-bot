@@ -967,29 +967,53 @@ def version() -> dict[str, Any]:
     }
 
 
-@app.get("/api/llm-health")
-def llm_health() -> dict[str, Any]:
-    llm_key_hash = hashlib.sha256(LLM_API_KEY.encode("utf-8")).hexdigest()[:12] if LLM_API_KEY else None
-    if not LLM_BASE_URL or not LLM_API_KEY:
-        return {
-            "ok": False,
-            "configured": False,
-            "base_url_configured": bool(LLM_BASE_URL),
-            "api_key_configured": bool(LLM_API_KEY),
-            "api_key_length": len(LLM_API_KEY),
-            "api_key_hash": llm_key_hash,
-            "model": LLM_MODEL,
-        }
-    headers = {
-        "Authorization": f"Bearer {LLM_API_KEY}",
-        "Content-Type": "application/json",
-    }
+def mask_llm_base_url(base_url: str | None) -> str | None:
+    clean = (base_url or "").strip()
+    if not clean:
+        return None
+    try:
+        from urllib.parse import urlsplit, urlunsplit
+
+        parsed = urlsplit(clean)
+        host = parsed.hostname or ""
+        if not host:
+            return "configured"
+        parts = host.split(".")
+        if len(parts) >= 3:
+            masked_host = f"{parts[0][:4]}...{parts[-2]}.{parts[-1]}"
+        elif len(host) > 12:
+            masked_host = f"{host[:4]}...{host[-6:]}"
+        else:
+            masked_host = host
+        if parsed.port:
+            masked_host = f"{masked_host}:{parsed.port}"
+        return urlunsplit((parsed.scheme, masked_host, parsed.path, "", ""))
+    except Exception:  # noqa: BLE001
+        return "configured"
+
+
+def safe_llm_health_error(text: str | None) -> str | None:
+    clean = sanitize_text(text or "")
+    if not clean:
+        return None
+    if LLM_API_KEY:
+        clean = clean.replace(LLM_API_KEY, "[redacted]")
+    clean = re.sub(r"Bearer\s+[A-Za-z0-9._\-]+", "Bearer [redacted]", clean, flags=re.IGNORECASE)
+    clean = re.sub(r"(api[_-]?key|token|authorization)(\s*[=:]\s*)[^\s,;]+", r"\1\2[redacted]", clean, flags=re.IGNORECASE)
+    return clean[:240]
+
+
+def probe_llm_model(model: str | None, headers: dict[str, str]) -> dict[str, Any] | None:
+    clean_model = sanitize_text(model or "")
+    if not clean_model:
+        return None
+    started = time_module.perf_counter()
     try:
         response = requests.post(
             f"{LLM_BASE_URL}/chat/completions",
             headers=headers,
             json={
-                "model": LLM_REPLY_MICRO_MODEL or LLM_MODEL,
+                "model": clean_model,
                 "messages": [
                     {"role": "system", "content": "Return exactly OK."},
                     {"role": "user", "content": "health"},
@@ -999,28 +1023,67 @@ def llm_health() -> dict[str, Any]:
             },
             timeout=10,
         )
-        preview = sanitize_text(response.text)[:240]
+        latency_ms = elapsed_ms(started)
         return {
             "ok": response.status_code < 400,
-            "configured": True,
+            "provider_reachable": True,
             "status_code": response.status_code,
-            "model": LLM_REPLY_MICRO_MODEL or LLM_MODEL,
-            "base_url": LLM_BASE_URL,
-            "api_key_length": len(LLM_API_KEY),
-            "api_key_hash": llm_key_hash,
-            "body_preview": preview,
+            "latency_ms": latency_ms,
+            "error": None if response.status_code < 400 else safe_llm_health_error(response.text),
         }
     except Exception as exc:  # noqa: BLE001
         return {
             "ok": False,
-            "configured": True,
+            "provider_reachable": False,
             "status_code": None,
-            "model": LLM_REPLY_MICRO_MODEL or LLM_MODEL,
-            "base_url": LLM_BASE_URL,
-            "api_key_length": len(LLM_API_KEY),
-            "api_key_hash": llm_key_hash,
-            "error": sanitize_text(str(exc))[:240],
+            "latency_ms": elapsed_ms(started),
+            "error": safe_llm_health_error(str(exc)),
         }
+
+
+@app.get("/api/llm-health")
+def llm_health() -> dict[str, Any]:
+    primary_model = sanitize_text(LLM_MODEL or "")
+    fallback_model = sanitize_text(LLM_FALLBACK_MODEL or "")
+    base_url_masked = mask_llm_base_url(LLM_BASE_URL)
+    if not LLM_BASE_URL or not LLM_API_KEY or not primary_model:
+        return {
+            "ok": False,
+            "configured": False,
+            "primary_model": primary_model or None,
+            "fallback_model": fallback_model or None,
+            "base_url_masked": base_url_masked,
+            "provider_reachable": False,
+            "latency_ms": None,
+            "error": "LLM_BASE_URL, LLM_API_KEY or LLM_MODEL is not configured",
+        }
+    headers = {
+        "Authorization": f"Bearer {LLM_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    primary = probe_llm_model(primary_model, headers) or {
+        "ok": False,
+        "provider_reachable": False,
+        "status_code": None,
+        "latency_ms": None,
+        "error": "Primary model is not configured",
+    }
+    fallback = None
+    if fallback_model and fallback_model != primary_model:
+        fallback = probe_llm_model(fallback_model, headers)
+    return {
+        "ok": bool(primary.get("ok")),
+        "configured": True,
+        "primary_model": primary_model,
+        "fallback_model": fallback_model or None,
+        "base_url_masked": base_url_masked,
+        "provider_reachable": bool(primary.get("provider_reachable")),
+        "latency_ms": primary.get("latency_ms"),
+        "status_code": primary.get("status_code"),
+        "error": primary.get("error"),
+        "primary": primary,
+        "fallback": fallback,
+    }
 
 
 @app.get("/crm", response_class=HTMLResponse)
