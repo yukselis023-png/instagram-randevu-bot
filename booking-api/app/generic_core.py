@@ -18,7 +18,7 @@ from app.main import (
     update_conversation_memory_after_bot_reply, upsert_conversation, upsert_customer_from_conversation,
     schedule_customer_automation_events, sanitize_text, extract_inbound_message_id, extract_inbound_platform,
     build_inbound_dedupe_key, elapsed_ms, queue_crm_sync, get_config, call_llm_content,
-    is_company_capability_question, build_company_capability_reply, is_simple_greeting,
+    is_company_capability_question, build_company_capability_reply, is_user_business_identity_message, is_simple_greeting,
     is_business_fit_question, recommendation_engine, extract_name, extract_phone,
     is_invalid_phone_attempt, extract_date, extract_time_for_state, extract_time, create_appointment,
     build_confirmation_message, try_reschedule_confirmed_appointment, find_active_appointment_for_user
@@ -223,7 +223,6 @@ def build_generic_business_context(message_text: str, cfg: dict[str, Any]) -> st
     if not is_company_capability_question(message_text):
         context.pop("unavailable_services", None)
         
-    from app.main import is_user_business_identity_message
     if is_user_business_identity_message(message_text):
         context["instruction_override"] = (
             "Kullanıcı kendi işletme sektörünü söylüyor, SAKIN 'bu hizmeti vermiyoruz' "
@@ -232,6 +231,20 @@ def build_generic_business_context(message_text: str, cfg: dict[str, Any]) -> st
         )
 
     return json.dumps(context, ensure_ascii=False)
+
+
+def build_user_business_identity_reply(message_text: str) -> str:
+    lowered = sanitize_text(message_text).lower()
+    if any(token in lowered for token in ["dovme", "dovmeci", "tattoo"]):
+        opener = "Dövmeci olarak"
+        focus = "portföyünüzü gösteren bir web sayfası, Instagram reklamları, içerik planı, DM/randevu otomasyonu ve müşteri takibi"
+    elif any(token in lowered for token in ["kuafor", "berber", "guzellik", "salon"]):
+        opener = "Salon işletmesi olarak"
+        focus = "web sitesi, yerel reklamlar, sosyal medya içerikleri, randevu otomasyonu ve müşteri takibi"
+    else:
+        opener = "İşletmeniz için"
+        focus = "web sitesi, reklam, sosyal medya yönetimi, otomasyon ve müşteri takibi"
+    return f"{opener} size {focus} tarafında yardımcı olabiliriz. İsterseniz hedefiniz daha fazla müşteri kazanmak mı, randevuları düzenlemek mi ona göre en uygun dijital planı çıkaralım."
 
 
 def strip_leading_greeting_for_non_greeting(message_text: str, reply_text: str | None) -> str:
@@ -509,6 +522,12 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
         if is_company_capability_question(message_text):
             reply_text = build_company_capability_reply(message_text)
             decision_path.append("reply:company_capability")
+            deterministic_reply = True
+        elif is_user_business_identity_message(message_text):
+            reply_text = build_user_business_identity_reply(message_text)
+            intent = "direct_answer"
+            booking_opt_in = False
+            decision_path.append("reply:user_business_identity")
             deterministic_reply = True
         elif is_preconsultation_explanation_question(message_text):
             reply_text = build_preconsultation_explanation_reply(known_requested_service(conversation, memory))
