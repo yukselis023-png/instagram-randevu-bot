@@ -147,6 +147,44 @@ def test_generic_service_overview_is_natural_not_catalog_dump(monkeypatch):
     assert gc.reply_question_count(result.reply_text) <= 1
     assert gc.reply_sentence_count(result.reply_text) <= 3
     assert "reply:service_overview_config" in result.decision_path
+    assert result.final_reply_source == "config_formatter"
+    assert result.outbound_text == result.reply_text
+
+
+def test_identity_message_uses_valid_llm_raw_reply(monkeypatch):
+    os.environ["CHATBOT_ENGINE"] = "generic"
+    llm_reply = "Harika! Dövme sanatçıları için özellikle randevu otomasyonu ve portfolyonuzu sergileyecek bir web sitesi veya reklam yönetimi çok etkili oluyor. Sizin için şu an öncelik yeni müşterilere ulaşmak mı yoksa randevuları düzene sokmak mı?"
+    result, _conversation = run_generic_message(
+        monkeypatch,
+        "Ben dövmeciyim, sitenizi gördüm merak edip yazdım",
+        {"intent": "direct_answer", "reply_text": llm_reply, "extracted_entities": {}, "requires_human": False},
+        {"business_name": "DOEL Digital", "service_catalog": [{"display": "Web Tasarim"}, {"display": "Otomasyon & Yapay Zeka Cozumleri"}]},
+    )
+
+    assert result.reply_text == llm_reply
+    assert result.outbound_text == llm_reply
+    assert result.llm_raw_reply_text == llm_reply
+    assert result.final_reply_source == "llm_raw"
+    assert "reply:user_business_identity_llm_raw" in result.decision_path
+    assert "Kısaca işletmelerin" not in result.reply_text
+
+
+def test_identity_message_falls_back_when_llm_misreads_capability(monkeypatch):
+    os.environ["CHATBOT_ENGINE"] = "generic"
+    bad_reply = "Maalesef dövme hizmeti vermiyoruz, uzmanlık alanımız dışında."
+    result, _conversation = run_generic_message(
+        monkeypatch,
+        "Dövmeciyim ben, sitenizi gördüm",
+        {"intent": "direct_answer", "reply_text": bad_reply, "extracted_entities": {}, "requires_human": False},
+        {"business_name": "DOEL Digital", "service_catalog": [{"display": "Web Tasarim"}, {"display": "Otomasyon & Yapay Zeka Cozumleri"}]},
+    )
+
+    reply = result.reply_text.lower()
+    assert result.final_reply_source == "config_formatter"
+    assert "reply:user_business_identity_config:identity_misread_as_capability" in result.decision_path
+    assert "hizmeti vermiyoruz" not in reply
+    assert "uzmanlık alanımız dışında" not in reply
+    assert "Kısaca" in result.reply_text
 
 
 def test_generic_beauty_journey(monkeypatch):
@@ -247,7 +285,9 @@ def test_generic_business_identity_fit_prompt_hides_unavailable_services(monkeyp
     assert "cilt bakımı" not in reply
     assert "emlak" not in reply
     assert "doktor" not in reply
-    assert "reply:user_business_identity_config" in result.decision_path
+    assert "reply:user_business_identity_llm_raw" in result.decision_path
+    assert result.final_reply_source == "llm_raw"
+    assert result.llm_raw_reply_text == reply or "dövmeciler" in result.llm_raw_reply_text.lower()
     assert gc.reply_question_count(result.reply_text) <= 1
     assert gc.reply_sentence_count(result.reply_text) <= 3
     assert "unavailable_services" not in captured["system_prompt"]
@@ -297,6 +337,8 @@ def test_generic_capability_question_keeps_unavailable_services_context(monkeypa
     assert "dovme" in reply
     assert "yapmiyoruz" in reply or "vermiyoruz" in reply
     assert "dijital" in reply or "web sitesi" in reply
+    assert result.final_reply_source == "capability"
+    assert result.outbound_text == result.reply_text
     assert "dövme" in captured["system_prompt"]
 
 
@@ -1180,7 +1222,8 @@ def test_generic_flow_does_not_repeat_greeting_for_business_identity_fit(monkeyp
     second_reply = gc.sanitize_text(second.reply_text).lower()
     assert not second_reply.startswith("merhaba")
     assert any(token in second_reply for token in ["reklam", "web", "isletme tanitimi", "yeni musteri"])
-    assert "dovme" not in second_reply
+    assert "dovme hizmeti vermiyoruz" not in second_reply
+    assert "dovme yapmiyoruz" not in second_reply
     assert "uzmanlik alanimiz disinda" not in second_reply
     assert "hizmetleri disinda" not in second_reply
     assert gc.reply_question_count(second.reply_text) <= 1

@@ -386,6 +386,30 @@ def build_user_business_identity_reply(cfg: dict[str, Any]) -> str:
     return "İşletmeniz için tanımlı hizmetlerimize göre yardımcı olabiliriz. Önceliğiniz daha fazla müşteri kazanmak mı, yoksa mevcut süreci daha düzenli yönetmek mi?"
 
 
+def identity_llm_reply_rejection_reason(reply_text: str | None) -> str | None:
+    reply = sanitize_text(reply_text or "")
+    lowered = reply.lower()
+    if not reply:
+        return "empty"
+    if is_llm_error_reply(reply):
+        return "llm_error_reply"
+    wrong_capability_markers = (
+        "hizmet vermiyoruz",
+        "hizmeti vermiyoruz",
+        "hizmet sunmuyoruz",
+        "hizmeti sunmuyoruz",
+        "uzmanlik alanimiz disinda",
+        "uzmanlık alanımız dışında",
+        "alanimiz disinda",
+        "alanımız dışında",
+        "yapmiyoruz",
+        "yapmıyoruz",
+    )
+    if any(marker in lowered for marker in wrong_capability_markers):
+        return "identity_misread_as_capability"
+    return None
+
+
 def build_enriched_inbound_raw_event(
     payload: IncomingMessage,
     inbound_platform: str,
@@ -731,6 +755,8 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
         
         intent = result_dict.get("intent", "fallback")
         reply_text = result_dict.get("reply_text", "Anlaşıldı.")
+        llm_raw_reply_text = str(reply_text or "").strip()
+        final_reply_source = "llm_raw"
         extracted = result_dict.get("extracted_entities", {})
         metrics["llm_raw_json"] = {k: v for k, v in result_dict.items() if not str(k).startswith("_")}
         metrics["llm_model_used"] = result_dict.get("_llm_model_used")
@@ -742,16 +768,26 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
         deterministic_reply = False
         if is_company_capability_question(message_text):
             reply_text = build_company_capability_reply(message_text)
+            final_reply_source = "capability"
             decision_path.append("reply:company_capability")
             deterministic_reply = True
         elif is_user_business_identity_message(message_text):
-            reply_text = build_user_business_identity_reply(cfg)
+            identity_rejection = identity_llm_reply_rejection_reason(reply_text)
+            if metrics.get("llm_error"):
+                identity_rejection = identity_rejection or "llm_error"
+            if identity_rejection:
+                reply_text = build_user_business_identity_reply(cfg)
+                final_reply_source = "config_formatter"
+                decision_path.append(f"reply:user_business_identity_config:{identity_rejection}")
+            else:
+                final_reply_source = "llm_raw"
+                decision_path.append("reply:user_business_identity_llm_raw")
             intent = "direct_answer"
             booking_opt_in = False
-            decision_path.append("reply:user_business_identity_config")
             deterministic_reply = True
         elif is_service_overview_question(message_text, intent) and build_natural_service_overview_reply(cfg):
             reply_text = build_natural_service_overview_reply(cfg) or reply_text
+            final_reply_source = "config_formatter"
             intent = "direct_answer"
             booking_opt_in = False
             decision_path.append("reply:service_overview_config")
@@ -786,6 +822,7 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
         post_confirmation = handle_confirmed_generic_reschedule(conn, conversation, memory, message_text, extracted, payload.instagram_username)
         if post_confirmation:
             reply_text = post_confirmation["reply_text"]
+            final_reply_source = "fsm"
             handoff = bool(post_confirmation.get("handoff"))
             decision_path.append(str(post_confirmation.get("decision_label") or "appointment_reschedule_followup"))
             update_conversation_memory_after_bot_reply(conversation, reply_text, "|".join(decision_path))
@@ -802,6 +839,9 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
                 sender_id=payload.sender_id,
                 should_reply=True,
                 reply_text=reply_text,
+                outbound_text=reply_text,
+                llm_raw_reply_text=llm_raw_reply_text,
+                final_reply_source=final_reply_source,
                 handoff=handoff,
                 conversation_state=conversation.get("state", "new"),
                 appointment_created=False,
@@ -920,6 +960,7 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
         service_for_booking = known_requested_service(conversation, memory)
         if appointment_created:
             reply_text = build_confirmation_message(conversation)
+            final_reply_source = "fsm"
             decision_path.append("fsm:confirmation_reply")
         elif (
             booking_opt_in
@@ -927,16 +968,20 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
             and conversation.get("state") in {"collect_name", "collect_phone"}
         ):
             reply_text = build_service_carryover_booking_reply(service_for_booking, conversation.get("state"))
+            final_reply_source = "fsm"
             decision_path.append("fsm:service_carryover_booking")
         elif (curr_state.startswith("collect_") and active_state_is_relevant and (is_llm_error_reply(reply_text) or state_changed_by_fsm or invalid_phone_prompt or active_state_label == "name_ack")):
             active_prompt = build_active_booking_prompt_reply(conversation, memory)
             if active_prompt:
                 reply_text = active_prompt
+                final_reply_source = "fsm"
                 decision_path.append("fsm:active_booking_prompt")
 
         # 4. FINAL QUALITY GUARD (Post FSM Check)
         reply_text, guard_label = generic_quality_guard(reply_text, extracted, memory, cfg, message_text)
         if guard_label:
+            if guard_label in {"prevent_premature_confirm"} or is_llm_error_reply(reply_text):
+                final_reply_source = "fallback"
             decision_path.append(f"guard:{guard_label}")
 
         fallback_reasons = []
@@ -947,6 +992,8 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
         if is_llm_error_reply(reply_text):
             fallback_reasons.append("final_reply_is_fallback_reply")
         metrics["fallback_reason"] = fallback_reasons
+        metrics["llm_raw_reply_text"] = llm_raw_reply_text
+        metrics["final_reply_source"] = final_reply_source
 
         update_conversation_memory_after_bot_reply(conversation, reply_text, "|".join(decision_path))
 
@@ -967,6 +1014,9 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
             sender_id=payload.sender_id,
             should_reply=True,
             reply_text=reply_text,
+            outbound_text=reply_text,
+            llm_raw_reply_text=llm_raw_reply_text,
+            final_reply_source=final_reply_source,
             handoff=handoff,
             conversation_state=conversation.get("state", "new"),
             appointment_created=appointment_created,

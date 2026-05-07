@@ -749,6 +749,9 @@ class ProcessResult(BaseModel):
     appointment_created: bool = False
     appointment_id: int | None = None
     duplicate: bool = False
+    outbound_text: str | None = None
+    llm_raw_reply_text: str | None = None
+    final_reply_source: str | None = None
     normalized: dict[str, Any] = Field(default_factory=dict)
     metrics: dict[str, Any] = Field(default_factory=dict)
     decision_path: list[str] = Field(default_factory=list)
