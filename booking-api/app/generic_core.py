@@ -225,26 +225,68 @@ def build_generic_business_context(message_text: str, cfg: dict[str, Any]) -> st
         
     if is_user_business_identity_message(message_text):
         context["instruction_override"] = (
-            "Kullanıcı kendi işletme sektörünü söylüyor, SAKIN 'bu hizmeti vermiyoruz' "
-            "veya '... dışında' şeklinde cevap verme! Kullanıcının sektörüne (sosyal medya yönetimi, "
-            "web sitesi, randevu otomasyonu vb. ile) nasıl yardımcı olabileceğini teklif et."
+            "Kullanıcı kendi işletme sektörünü söylüyor. Bu, bizim o sektörel hizmeti verip vermediğimiz sorusu değildir; "
+            "sunulmayan hizmet listesi veya capability reddi üretme. Business config içinde bulunan service_catalog, "
+            "service_descriptions ve service_fit bilgilerine göre bu müşteriye nasıl yardımcı olunabileceğini doğal ve kısa açıkla. "
+            "Hedef belirsizse en fazla 1 net soru sor."
         )
 
     return json.dumps(context, ensure_ascii=False)
 
 
-def build_user_business_identity_reply(message_text: str) -> str:
-    lowered = sanitize_text(message_text).lower()
-    if any(token in lowered for token in ["dovme", "dovmeci", "tattoo"]):
-        opener = "Dövmeci olarak"
-        focus = "portföyünüzü gösteren bir web sayfası, Instagram reklamları, içerik planı, DM/randevu otomasyonu ve müşteri takibi"
-    elif any(token in lowered for token in ["kuafor", "berber", "guzellik", "salon"]):
-        opener = "Salon işletmesi olarak"
-        focus = "web sitesi, yerel reklamlar, sosyal medya içerikleri, randevu otomasyonu ve müşteri takibi"
-    else:
-        opener = "İşletmeniz için"
-        focus = "web sitesi, reklam, sosyal medya yönetimi, otomasyon ve müşteri takibi"
-    return f"{opener} size {focus} tarafında yardımcı olabiliriz. İsterseniz hedefiniz daha fazla müşteri kazanmak mı, randevuları düzenlemek mi ona göre en uygun dijital planı çıkaralım."
+def _collect_config_service_phrases(cfg: dict[str, Any], limit: int = 3) -> list[str]:
+    phrases: list[str] = []
+    for service in cfg.get("service_catalog", []) or []:
+        if not isinstance(service, dict):
+            continue
+        label = sanitize_text(service.get("display") or service.get("name") or service.get("slug") or "")
+        detail = sanitize_text(service.get("service_fit") or service.get("fit") or service.get("summary") or service.get("description") or "")
+        if label and detail:
+            phrases.append(f"{label}: {detail}")
+        elif label:
+            phrases.append(label)
+        if len(phrases) >= limit:
+            break
+
+    descriptions = cfg.get("service_descriptions") or {}
+    if isinstance(descriptions, dict):
+        for label, detail in descriptions.items():
+            label_text = sanitize_text(str(label or ""))
+            detail_text = sanitize_text(str(detail or ""))
+            if label_text and detail_text and not any(label_text in phrase for phrase in phrases):
+                phrases.append(f"{label_text}: {detail_text}")
+            if len(phrases) >= limit:
+                break
+    elif isinstance(descriptions, list):
+        for item in descriptions:
+            text = sanitize_text(str(item or ""))
+            if text:
+                phrases.append(text)
+            if len(phrases) >= limit:
+                break
+
+    fit = cfg.get("service_fit") or cfg.get("business_fit")
+    if isinstance(fit, str) and sanitize_text(fit) and len(phrases) < limit:
+        phrases.append(sanitize_text(fit))
+    elif isinstance(fit, dict):
+        for label, detail in fit.items():
+            label_text = sanitize_text(str(label or ""))
+            detail_text = sanitize_text(str(detail or ""))
+            if label_text and detail_text:
+                phrases.append(f"{label_text}: {detail_text}")
+            elif detail_text:
+                phrases.append(detail_text)
+            if len(phrases) >= limit:
+                break
+    return phrases[:limit]
+
+
+def build_user_business_identity_reply(cfg: dict[str, Any]) -> str:
+    service_phrases = _collect_config_service_phrases(cfg)
+    if service_phrases:
+        services_text = "; ".join(service_phrases)
+        return f"İşletmeniz için şu alanlarda yardımcı olabiliriz: {services_text}. Önceliğiniz hangi hedef: daha fazla müşteri kazanmak mı, mevcut süreci daha düzenli yönetmek mi?"
+    return "İşletmeniz için config’te tanımlı hizmetlerimize göre yardımcı olabiliriz. Önceliğiniz daha fazla müşteri kazanmak mı, mevcut süreci daha düzenli yönetmek mi?"
 
 
 def strip_leading_greeting_for_non_greeting(message_text: str, reply_text: str | None) -> str:
@@ -515,6 +557,9 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
         intent = result_dict.get("intent", "fallback")
         reply_text = result_dict.get("reply_text", "Anlaşıldı.")
         extracted = result_dict.get("extracted_entities", {})
+        metrics["llm_raw_json"] = {k: v for k, v in result_dict.items() if not str(k).startswith("_")}
+        metrics["llm_error"] = result_dict.get("_llm_error")
+        metrics["context_summary"] = result_dict.get("_context_summary") or {}
 
         decision_path = [f"generic_intent:{intent}"]
         booking_opt_in = is_booking_opt_in(message_text, intent)
@@ -524,10 +569,10 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
             decision_path.append("reply:company_capability")
             deterministic_reply = True
         elif is_user_business_identity_message(message_text):
-            reply_text = build_user_business_identity_reply(message_text)
+            reply_text = build_user_business_identity_reply(cfg)
             intent = "direct_answer"
             booking_opt_in = False
-            decision_path.append("reply:user_business_identity")
+            decision_path.append("reply:user_business_identity_config")
             deterministic_reply = True
         elif is_preconsultation_explanation_question(message_text):
             reply_text = build_preconsultation_explanation_reply(known_requested_service(conversation, memory))
@@ -710,6 +755,15 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
         if guard_label:
             decision_path.append(f"guard:{guard_label}")
 
+        fallback_reasons = []
+        if intent == "fallback":
+            fallback_reasons.append("llm_intent_fallback")
+        if metrics.get("llm_error"):
+            fallback_reasons.append("llm_error")
+        if is_llm_error_reply(reply_text):
+            fallback_reasons.append("final_reply_is_fallback_reply")
+        metrics["fallback_reason"] = fallback_reasons
+
         update_conversation_memory_after_bot_reply(conversation, reply_text, "|".join(decision_path))
 
         # Output payload syncs
@@ -775,9 +829,25 @@ def call_llm_json(system_prompt: str, user_text: str) -> dict:
     except Exception as e:
         raise ValueError(f"LLM JSON Error: {e} - content: {content if 'content' in locals() else 'None'}")
 
+def summarize_generic_business_context(context_json: str) -> dict[str, Any]:
+    try:
+        context = json.loads(context_json or "{}")
+    except Exception:
+        context = {}
+    return {
+        "keys": sorted(context.keys()),
+        "service_catalog_count": len(context.get("service_catalog") or []),
+        "has_service_descriptions": bool(context.get("service_descriptions")),
+        "has_service_fit": bool(context.get("service_fit") or context.get("business_fit")),
+        "has_unavailable_services": "unavailable_services" in context,
+        "has_instruction_override": bool(context.get("instruction_override")),
+    }
+
+
 def invoke_generic_llm(message_text: str, conversation: dict, memory: dict, history: list[dict]) -> dict:
     cfg = get_config()
     business_context = build_generic_business_context(message_text, cfg)
+    context_summary = summarize_generic_business_context(business_context)
     
     # Minimize context parsing, formatting user messages
     recent = "\\n".join([f"{msg.get('direction', 'IN').upper()}: {msg.get('message_text', '')}" for msg in history[-10:]])
@@ -834,14 +904,20 @@ Müşterinin yeni mesajını incele. Oku ve aşağıdaki JSON formatına SIKI SI
 }}"""
 
     try:
-        return call_llm_json(system_prompt, message_text)
+        result = call_llm_json(system_prompt, message_text)
+        if isinstance(result, dict):
+            result["_context_summary"] = context_summary
+            result["_llm_error"] = None
+        return result
     except Exception as e:
         logger.error(f"Generic engine LLM Error: {e}")
         return {
             "intent": "fallback",
             "reply_text": cfg.get("fallback_reply") or "Şu an yanıtı netleştiremedim; mesajınızı aldım, birazdan devam edelim.",
             "extracted_entities": {},
-            "requires_human": False
+            "requires_human": False,
+            "_context_summary": context_summary,
+            "_llm_error": str(e),
         }
 
 def generic_quality_guard(reply: str, extracted: dict, memory: dict, cfg: dict, message_text: str | None = None) -> Tuple[str, Optional[str]]:

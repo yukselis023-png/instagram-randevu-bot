@@ -3957,44 +3957,46 @@ def build_referral_intent_reply() -> str:
 
 def is_user_business_identity_message(text: str) -> bool:
     lowered = sanitize_text(text).lower()
-    
-    has_identity = False
-    if re.search(r"\b(ben|benim)\b", lowered):
-        has_identity = True
-    else:
-        identity_cues = [
-            "isletmem var",
-            "işletmem var",
-            "dukkanim var",
-            "dükkanım var",
-            "salonum var",
-            "kafem var",
-            "restoranim var",
-            "restoranım var",
-            "olarak calisiyorum",
-            "olarak çalışıyorum",
-            "sektorundeyim",
-            "sektöründeyim",
-        ]
-        if any(cue in lowered for cue in identity_cues):
-            has_identity = True
-            
-    if not has_identity:
+
+    has_business_keyword = bool(
+        contains_business_keyword(lowered, BEAUTY_BUSINESS_KEYWORDS)
+        or contains_business_keyword(lowered, REAL_ESTATE_BUSINESS_KEYWORDS)
+        or contains_business_keyword(lowered, TATTOO_SUBSECTOR_KEYWORDS)
+        or contains_business_keyword(lowered, HAIRDRESSER_SUBSECTOR_KEYWORDS)
+        or contains_business_keyword(lowered, PLUMBING_SUBSECTOR_KEYWORDS)
+        or contains_business_keyword(lowered, RESTAURANT_SUBSECTOR_KEYWORDS)
+        or contains_business_keyword(lowered, CLINIC_SUBSECTOR_KEYWORDS)
+        or contains_business_keyword(lowered, ECOMMERCE_SUBSECTOR_KEYWORDS)
+        or contains_business_keyword(lowered, GYM_SUBSECTOR_KEYWORDS)
+        or contains_business_keyword(lowered, CLEANING_SUBSECTOR_KEYWORDS)
+    )
+    if not has_business_keyword:
         return False
-        
-    return bool(
-            contains_business_keyword(lowered, BEAUTY_BUSINESS_KEYWORDS)
-            or contains_business_keyword(lowered, REAL_ESTATE_BUSINESS_KEYWORDS)
-            or contains_business_keyword(lowered, TATTOO_SUBSECTOR_KEYWORDS)
-            or contains_business_keyword(lowered, HAIRDRESSER_SUBSECTOR_KEYWORDS)
-            or contains_business_keyword(lowered, PLUMBING_SUBSECTOR_KEYWORDS)
-            or contains_business_keyword(lowered, RESTAURANT_SUBSECTOR_KEYWORDS)
-            or contains_business_keyword(lowered, CLINIC_SUBSECTOR_KEYWORDS)
-            or contains_business_keyword(lowered, ECOMMERCE_SUBSECTOR_KEYWORDS)
-            or contains_business_keyword(lowered, GYM_SUBSECTOR_KEYWORDS)
-            or contains_business_keyword(lowered, CLEANING_SUBSECTOR_KEYWORDS)
-        )
-    return bool(re.search(r"\b(kuaforum|berberim|dovmeciyim|muslukcuyum|tesisatciyim|tamirciyim|emlakciyim)\b", lowered))
+    
+    identity_cues = [
+        "isletmem var",
+        "işletmem var",
+        "dukkanim var",
+        "dükkanım var",
+        "salonum var",
+        "kafem var",
+        "restoranim var",
+        "restoranım var",
+        "merkezim var",
+        "klinigim var",
+        "kliniğim var",
+        "sahibiyim",
+        "olarak calisiyorum",
+        "olarak çalışıyorum",
+        "sektorundeyim",
+        "sektöründeyim",
+    ]
+    if re.search(r"\b(ben|benim|biz|bizim)\b", lowered) or any(cue in lowered for cue in identity_cues):
+        return True
+
+    # Turkish first-person business identity forms such as "emlakçıyım", "kuaförüm", "dövmeciyim".
+    # Kept generic and gated by business-keyword detection above so capability questions do not match.
+    return bool(re.search(r"\b[0-9a-z_çğıöşü]+(ciyim|cıyım|cuyum|cüyüm|iyim|yim|im|ım|um|üm)\b", lowered))
 
 
 def detect_business_sector(text: str, history: list[dict[str, Any]] | None = None) -> str | None:

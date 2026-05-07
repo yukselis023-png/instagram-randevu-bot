@@ -100,7 +100,10 @@ def test_generic_business_identity_fit_prompt_hides_unavailable_services(monkeyp
     conversation = {"sender_id": "generic-tattoo-fit-test", "state": "new", "memory_state": {}}
     config = {
         "business_name": "DOEL Digital",
-        "service_catalog": [],
+        "service_catalog": [
+            {"name": "web", "display": "Web sitesi", "summary": "işletmenin dijital vitrini"},
+            {"name": "ads", "display": "Reklam yönetimi", "summary": "yeni müşteri kazanımı"},
+        ],
         "unavailable_services": ["saç kesimi", "lazer", "cilt bakımı", "dövme", "emlak", "doktor muayenesi"],
     }
 
@@ -123,14 +126,16 @@ def test_generic_business_identity_fit_prompt_hides_unavailable_services(monkeyp
     )
 
     reply = gc.sanitize_text(result.reply_text).lower()
-    assert "dovme" in reply
-    assert any(token in reply for token in ["sosyal medya", "reklam", "web", "portfolyo"])
+    assert any(token in reply for token in ["reklam", "web", "isletmenin dijital vitrini", "yeni musteri"])
     assert not reply.startswith("merhaba")
+    assert "bu hizmeti vermiyoruz" not in reply
+    assert "hizmetleri disinda" not in reply
     assert "uzmanlık alanımız dışında" not in reply
     assert "lazer" not in reply
     assert "cilt bakımı" not in reply
     assert "emlak" not in reply
     assert "doktor" not in reply
+    assert "reply:user_business_identity_config" in result.decision_path
     assert gc.reply_question_count(result.reply_text) <= 1
     assert gc.reply_sentence_count(result.reply_text) <= 3
     assert "unavailable_services" not in captured["system_prompt"]
@@ -1030,7 +1035,10 @@ def test_generic_flow_does_not_repeat_greeting_for_business_identity_fit(monkeyp
     store = []
     config = {
         "business_name": "DOEL Digital",
-        "service_catalog": [],
+        "service_catalog": [
+            {"name": "web", "display": "Web sitesi", "summary": "işletme tanıtımı"},
+            {"name": "ads", "display": "Reklam yönetimi", "summary": "yeni müşteri kazanımı"},
+        ],
         "unavailable_services": ["dövme", "lazer", "cilt bakımı", "emlak"],
     }
 
@@ -1059,9 +1067,10 @@ def test_generic_flow_does_not_repeat_greeting_for_business_identity_fit(monkeyp
     assert first.reply_text
     second_reply = gc.sanitize_text(second.reply_text).lower()
     assert not second_reply.startswith("merhaba")
-    assert "dovme" in second_reply
-    assert any(token in second_reply for token in ["sosyal medya", "reklam", "web", "portfolyo"])
+    assert any(token in second_reply for token in ["reklam", "web", "isletme tanitimi", "yeni musteri"])
+    assert "dovme" not in second_reply
     assert "uzmanlik alanimiz disinda" not in second_reply
+    assert "hizmetleri disinda" not in second_reply
     assert gc.reply_question_count(second.reply_text) <= 1
     assert gc.reply_sentence_count(second.reply_text) <= 3
 
@@ -1079,7 +1088,8 @@ def test_user_business_identity_handling_with_llm():
     ctx_a = json.loads(ctx_a_str)
     assert "unavailable_services" not in ctx_a, "should be popped because it's not a capability question"
     assert "instruction_override" in ctx_a, "should have the explicit instruction override"
-    assert "SAKIN" in ctx_a["instruction_override"]
+    assert "kendi işletme sektörünü" in ctx_a["instruction_override"]
+    assert "service_catalog" in ctx_a["instruction_override"]
 
     # Message A variant with suffix
     msg_a2 = "Dövmeciyim ben, sitenizi gördüm"
@@ -1096,3 +1106,39 @@ def test_user_business_identity_handling_with_llm():
     assert "unavailable_services" in ctx_b, "should keep unavailable_services because it is a capability question"
     assert "instruction_override" not in ctx_b
 
+
+
+def test_user_business_identity_detection_generic_forms():
+    from app.main import is_user_business_identity_message, is_company_capability_question
+
+    identity_messages = [
+        "Ben dövmeciyim, sitenizi gördüm merak edip yazdım",
+        "Dövmeciyim ben, sitenizi gördüm",
+        "Ben kuaförüm",
+        "Emlakçıyım",
+        "Güzellik merkezim var",
+        "Ben güzellik merkezi sahibiyim",
+        "Ben diş kliniğiyim",
+    ]
+    for message in identity_messages:
+        assert is_user_business_identity_message(message) is True, message
+        assert is_company_capability_question(message) is False, message
+
+    assert is_user_business_identity_message("Siz dövme yapıyor musunuz?") is False
+    assert is_company_capability_question("Siz dövme yapıyor musunuz?") is True
+
+
+def test_config_driven_identity_reply_has_no_sector_specific_hardcode():
+    reply = gc.build_user_business_identity_reply({
+        "business_name": "Config Test",
+        "service_catalog": [
+            {"display": "Hizmet A", "summary": "müşteri kazanımı"},
+            {"display": "Hizmet B", "service_fit": "süreç yönetimi"},
+        ],
+    })
+    normalized = gc.sanitize_text(reply).lower()
+    assert "hizmet a" in normalized
+    assert "hizmet b" in normalized
+    assert "dovmeci" not in normalized
+    assert "tattoo" not in normalized
+    assert gc.reply_question_count(reply) <= 1
