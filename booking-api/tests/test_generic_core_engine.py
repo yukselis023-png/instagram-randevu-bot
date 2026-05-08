@@ -201,6 +201,27 @@ def test_service_overview_falls_back_when_llm_empty(monkeypatch):
     assert result.outbound_text == result.reply_text
 
 
+def test_service_overview_falls_back_when_llm_returns_fallback(monkeypatch):
+    os.environ["CHATBOT_ENGINE"] = "generic"
+    result, _conversation = run_generic_message(
+        monkeypatch,
+        "Tam olarak ne yapıyorsunuz?",
+        {
+            "intent": "fallback",
+            "reply_text": "Şu an yanıtı netleştiremedim; mesajınızı aldım, birazdan devam edelim.",
+            "extracted_entities": {},
+            "requires_human": False,
+        },
+        {"business_name": "DOEL Digital", "service_catalog": [{"display": "Web Tasarim"}, {"display": "Performans Pazarlama"}]},
+    )
+
+    assert result.final_reply_source == "config_formatter"
+    assert "reply:service_overview_config:fallback_reply" in result.decision_path
+    assert "Kısaca" in result.reply_text
+    assert "netleştiremedim" not in result.reply_text
+    assert result.outbound_text == result.reply_text
+
+
 def test_identity_message_uses_valid_llm_raw_reply(monkeypatch):
     os.environ["CHATBOT_ENGINE"] = "generic"
     llm_reply = "Harika! Dövme sanatçıları için özellikle randevu otomasyonu ve portfolyonuzu sergileyecek bir web sitesi veya reklam yönetimi çok etkili oluyor. Sizin için şu an öncelik yeni müşterilere ulaşmak mı yoksa randevuları düzene sokmak mı?"

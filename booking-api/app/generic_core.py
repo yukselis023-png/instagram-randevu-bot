@@ -407,6 +407,10 @@ def generic_llm_reply_rejection_reason(reply_text: str | None) -> str | None:
         "tekrar yazar misiniz",
         "şu anda yardımcı olamıyorum",
         "su anda yardimci olamiyorum",
+        "şu an yanıtı netleştiremedim",
+        "su an yaniti netlestiremedim",
+        "mesajınızı aldım, birazdan devam edelim",
+        "mesajinizi aldim, birazdan devam edelim",
         "bir hata oluştu",
         "bir hata olustu",
         "fallback",
@@ -822,6 +826,8 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
             deterministic_reply = True
         elif is_service_overview_question(message_text, intent):
             service_overview_rejection = generic_llm_reply_rejection_reason(reply_text)
+            if intent == "fallback":
+                service_overview_rejection = service_overview_rejection or "llm_intent_fallback"
             if metrics.get("llm_error"):
                 service_overview_rejection = service_overview_rejection or "llm_error"
             overview_reply = build_natural_service_overview_reply(cfg)
