@@ -386,13 +386,34 @@ def build_user_business_identity_reply(cfg: dict[str, Any]) -> str:
     return "İşletmeniz için tanımlı hizmetlerimize göre yardımcı olabiliriz. Önceliğiniz daha fazla müşteri kazanmak mı, yoksa mevcut süreci daha düzenli yönetmek mi?"
 
 
-def identity_llm_reply_rejection_reason(reply_text: str | None) -> str | None:
+def generic_llm_reply_rejection_reason(reply_text: str | None) -> str | None:
+    """Return a generic reason when an LLM reply should be repaired by config fallback.
+
+    This intentionally avoids sector-specific deterministic rules: it only rejects empty,
+    error-like, unrelated/fallback, capability-denial, overly long, or obvious catalog-dump
+    replies. Valid concise LLM replies should remain the final outbound text.
+    """
     reply = sanitize_text(reply_text or "")
     lowered = reply.lower()
     if not reply:
         return "empty"
     if is_llm_error_reply(reply):
         return "llm_error_reply"
+
+    fallback_markers = (
+        "anlayamadım",
+        "anlayamadim",
+        "tekrar yazar mısınız",
+        "tekrar yazar misiniz",
+        "şu anda yardımcı olamıyorum",
+        "su anda yardimci olamiyorum",
+        "bir hata oluştu",
+        "bir hata olustu",
+        "fallback",
+    )
+    if any(marker in lowered for marker in fallback_markers):
+        return "fallback_reply"
+
     wrong_capability_markers = (
         "hizmet vermiyoruz",
         "hizmeti vermiyoruz",
@@ -406,8 +427,22 @@ def identity_llm_reply_rejection_reason(reply_text: str | None) -> str | None:
         "yapmıyoruz",
     )
     if any(marker in lowered for marker in wrong_capability_markers):
-        return "identity_misread_as_capability"
+        return "misread_as_capability"
+
+    if len(reply) > 500 or reply_question_count(reply) > 1 or reply_sentence_count(reply) > 4:
+        return "too_long"
+
+    if ";" in reply and ":" in reply:
+        return "catalog_dump"
+
     return None
+
+
+def identity_llm_reply_rejection_reason(reply_text: str | None) -> str | None:
+    reason = generic_llm_reply_rejection_reason(reply_text)
+    if reason == "misread_as_capability":
+        return "identity_misread_as_capability"
+    return reason
 
 
 def build_enriched_inbound_raw_event(
@@ -785,12 +820,20 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
             intent = "direct_answer"
             booking_opt_in = False
             deterministic_reply = True
-        elif is_service_overview_question(message_text, intent) and build_natural_service_overview_reply(cfg):
-            reply_text = build_natural_service_overview_reply(cfg) or reply_text
-            final_reply_source = "config_formatter"
+        elif is_service_overview_question(message_text, intent):
+            service_overview_rejection = generic_llm_reply_rejection_reason(reply_text)
+            if metrics.get("llm_error"):
+                service_overview_rejection = service_overview_rejection or "llm_error"
+            overview_reply = build_natural_service_overview_reply(cfg)
+            if service_overview_rejection and overview_reply:
+                reply_text = overview_reply
+                final_reply_source = "config_formatter"
+                decision_path.append(f"reply:service_overview_config:{service_overview_rejection}")
+            else:
+                final_reply_source = "llm_raw"
+                decision_path.append("reply:service_overview_llm_raw")
             intent = "direct_answer"
             booking_opt_in = False
-            decision_path.append("reply:service_overview_config")
             deterministic_reply = True
         elif is_preconsultation_explanation_question(message_text):
             reply_text = build_preconsultation_explanation_reply(known_requested_service(conversation, memory))

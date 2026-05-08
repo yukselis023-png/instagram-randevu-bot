@@ -146,8 +146,58 @@ def test_generic_service_overview_is_natural_not_catalog_dump(monkeypatch):
     assert ";" not in result.reply_text
     assert gc.reply_question_count(result.reply_text) <= 1
     assert gc.reply_sentence_count(result.reply_text) <= 3
-    assert "reply:service_overview_config" in result.decision_path
+    assert "reply:service_overview_config:catalog_dump" in result.decision_path
     assert result.final_reply_source == "config_formatter"
+    assert result.outbound_text == result.reply_text
+
+
+def test_service_overview_uses_valid_llm_raw_reply(monkeypatch):
+    os.environ["CHATBOT_ENGINE"] = "generic"
+    llm_reply = "Web tasarım, reklam yönetimi, randevu otomasyonu ve sosyal medya yönetimi konularında profesyonel destek veriyoruz. Önceliğiniz yeni randevular almak mı?"
+    result, _conversation = run_generic_message(
+        monkeypatch,
+        "Hizmetleriniz neler?",
+        {"intent": "service_question", "reply_text": llm_reply, "extracted_entities": {}, "requires_human": False},
+        {"business_name": "DOEL Digital", "service_catalog": [{"display": "Web Tasarim"}, {"display": "Otomasyon & Yapay Zeka Cozumleri"}]},
+    )
+
+    assert result.reply_text == llm_reply
+    assert result.outbound_text == llm_reply
+    assert result.llm_raw_reply_text == llm_reply
+    assert result.final_reply_source == "llm_raw"
+    assert "reply:service_overview_llm_raw" in result.decision_path
+    assert "Kısaca işletmelerin" not in result.reply_text
+
+
+def test_direct_answer_service_overview_uses_valid_llm_raw_reply(monkeypatch):
+    os.environ["CHATBOT_ENGINE"] = "generic"
+    llm_reply = "Özetle işletmelere yeni müşteriler kazandırıyor ve mesaj/randevu sürecini dijitalleştiriyoruz. Sizin tarafta öncelik yeni müşteri kazanmak mı?"
+    result, _conversation = run_generic_message(
+        monkeypatch,
+        "Tam olarak ne yapıyorsunuz?",
+        {"intent": "direct_answer", "reply_text": llm_reply, "extracted_entities": {}, "requires_human": False},
+        {"business_name": "DOEL Digital", "service_catalog": [{"display": "Web Tasarim"}, {"display": "Performans Pazarlama"}]},
+    )
+
+    assert result.reply_text == llm_reply
+    assert result.outbound_text == llm_reply
+    assert result.llm_raw_reply_text == llm_reply
+    assert result.final_reply_source == "llm_raw"
+    assert "reply:service_overview_llm_raw" in result.decision_path
+
+
+def test_service_overview_falls_back_when_llm_empty(monkeypatch):
+    os.environ["CHATBOT_ENGINE"] = "generic"
+    result, _conversation = run_generic_message(
+        monkeypatch,
+        "Hizmetleriniz neler?",
+        {"intent": "service_question", "reply_text": "", "extracted_entities": {}, "requires_human": False},
+        {"business_name": "DOEL Digital", "service_catalog": [{"display": "Web Tasarim"}, {"display": "Otomasyon & Yapay Zeka Cozumleri"}]},
+    )
+
+    assert result.final_reply_source == "config_formatter"
+    assert "reply:service_overview_config:empty" in result.decision_path
+    assert "Kısaca" in result.reply_text
     assert result.outbound_text == result.reply_text
 
 
