@@ -403,16 +403,23 @@ def get_thread_messages(thread: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 
+def get_canonical_reply_text(result: dict[str, Any]) -> str:
+    return str(result.get("outbound_text") or result.get("reply_text") or "").strip()
+
+
 def normalize_processing_response(data: Any) -> dict[str, Any]:
     if isinstance(data, dict):
         result = dict(data)
-        reply_text = str(result.get("reply_text") or "").strip()
-        if result.get("should_reply") is True and not reply_text:
+        canonical_reply_text = get_canonical_reply_text(result)
+        if result.get("should_reply") is True and not canonical_reply_text:
+            result["outbound_text"] = SAFE_PROCESSING_FALLBACK_REPLY
             result["reply_text"] = SAFE_PROCESSING_FALLBACK_REPLY
             result["handoff"] = True
             result["conversation_state"] = result.get("conversation_state") or "processing_failed"
             decision_path = result.get("decision_path") if isinstance(result.get("decision_path"), list) else []
             result["decision_path"] = [*decision_path, "poller:empty_reply_fallback"]
+        elif result.get("outbound_text") and not result.get("reply_text"):
+            result["reply_text"] = result["outbound_text"]
         return result
     if isinstance(data, list) and data:
         first = data[0]
@@ -428,7 +435,7 @@ def should_fallback_processing_result(result: dict[str, Any]) -> bool:
         return True
     if bool(result.get("error")):
         return True
-    reply_text = str(result.get("reply_text") or "").strip()
+    reply_text = get_canonical_reply_text(result)
     should_reply = result.get("should_reply")
     if should_reply is False and not reply_text:
         return True
@@ -606,7 +613,7 @@ def post_to_processing_backend(sender_id: str, username: str | None, message_tex
             )
             response.raise_for_status()
             n8n_result = normalize_processing_response(response.json())
-            logger.info("poller_n8n_response trace_id=%s sender_id=%s status=%s should_reply=%s has_reply=%s", trace_id, sender_id, response.status_code, n8n_result.get("should_reply"), bool(str(n8n_result.get("reply_text") or "").strip()))
+            logger.info("poller_n8n_response trace_id=%s sender_id=%s status=%s should_reply=%s has_reply=%s", trace_id, sender_id, response.status_code, n8n_result.get("should_reply"), bool(get_canonical_reply_text(n8n_result)))
             if not should_fallback_processing_result(n8n_result):
                 return n8n_result
             logger.warning("n8n returned no AI reply trace_id=%s sender_id=%s, trying booking-api directly", trace_id, sender_id)
@@ -622,7 +629,7 @@ def post_to_processing_backend(sender_id: str, username: str | None, message_tex
         )
         response.raise_for_status()
         api_result = normalize_processing_response(response.json())
-        logger.info("poller_api_response trace_id=%s sender_id=%s status=%s should_reply=%s has_reply=%s", trace_id, sender_id, response.status_code, api_result.get("should_reply"), bool(str(api_result.get("reply_text") or "").strip()))
+        logger.info("poller_api_response trace_id=%s sender_id=%s status=%s should_reply=%s has_reply=%s", trace_id, sender_id, response.status_code, api_result.get("should_reply"), bool(get_canonical_reply_text(api_result)))
         if api_result:
             return api_result
         logger.warning("booking-api returned empty payload trace_id=%s sender_id=%s", trace_id, sender_id)
@@ -632,6 +639,7 @@ def post_to_processing_backend(sender_id: str, username: str | None, message_tex
     return {
         "should_reply": True,
         "reply_text": SAFE_PROCESSING_FALLBACK_REPLY,
+        "outbound_text": SAFE_PROCESSING_FALLBACK_REPLY,
         "handoff": True,
         "conversation_state": "processing_failed",
         "normalized": {},
@@ -695,7 +703,7 @@ def process_message(cl: Client, state: PollerState, thread: dict[str, Any], mess
                     "transcription_error": transcription_error,
                 }
                 fallback_result = report_voice_fallback(sender_id, username, fallback_reply, fallback_event, transcription_error)
-                reply_to_send = str(fallback_result.get("reply_text") or fallback_reply).strip()
+                reply_to_send = get_canonical_reply_text(fallback_result) or fallback_reply.strip()
                 should_reply = bool(fallback_result.get("should_reply", True))
                 if should_reply and reply_to_send:
                     try:
@@ -742,7 +750,7 @@ def process_message(cl: Client, state: PollerState, thread: dict[str, Any], mess
     logger.info("poller_inbound_dm trace_id=%s message_id=%s sender_id=%s username=%s via=%s source=%s text=%s", trace_id, message_id, sender_id, username, backend_label, source_kind, processed_text[:160])
     result = post_to_processing_backend(sender_id, username, processed_text, raw_event)
     should_reply = bool(result.get("should_reply"))
-    reply_text = (result.get("reply_text") or "").strip()
+    reply_text = get_canonical_reply_text(result)
     decision_path = result.get("decision_path")
     conversation_state = result.get("conversation_state")
     has_reply = bool(reply_text)
