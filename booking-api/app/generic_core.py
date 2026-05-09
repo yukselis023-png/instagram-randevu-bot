@@ -120,9 +120,59 @@ def is_non_name_action_phrase(message_text: str | None) -> bool:
     return any(lowered.startswith(f"{phrase} ") for phrase in NON_NAME_ACTION_PHRASES)
 
 
+def is_username_save_request(message_text: str | None) -> bool:
+    lowered = sanitize_text(message_text or "").lower().strip(" .!?…")
+    if not lowered:
+        return False
+    wants_save = any(token in lowered for token in ["kaydet", "kayded", "kayd"])
+    mentions_username = any(
+        token in lowered
+        for token in [
+            "kullanici ad",
+            "instagram ad",
+            "instagram kullanici",
+            "username",
+            "ig ad",
+        ]
+    )
+    return wants_save and mentions_username
+
+
+def is_literal_username_placeholder_name(name_text: str | None) -> bool:
+    lowered = sanitize_text(name_text or "").lower().strip(" @.!?…")
+    return lowered in {
+        "kullanici adi",
+        "kullanici adim",
+        "instagram adi",
+        "instagram adim",
+        "username",
+        "ig adi",
+        "ig adim",
+    }
+
+
+def instagram_username_name_label(username: str | None) -> str | None:
+    clean = sanitize_text(username or "").strip().lstrip("@")
+    if not clean:
+        return None
+    safe = re.sub(r"[^A-Za-z0-9._]", "", clean)
+    if not safe:
+        return None
+    return f"@{safe}"
+
+
+def should_apply_instagram_username_name(conversation: dict[str, Any], username_label: str | None) -> bool:
+    if not username_label:
+        return False
+    current_name = sanitize_text(str(conversation.get("full_name") or conversation.get("lead_name") or "")).strip()
+    if not current_name:
+        return True
+    return is_non_name_action_phrase(current_name) or is_literal_username_placeholder_name(current_name)
+
+
 def is_valid_name_candidate(name_text: str | None, *, require_full_name: bool = False) -> bool:
     clean = sanitize_text(name_text or "").strip()
-    if not clean or is_non_name_action_phrase(clean):
+    if not clean or is_non_name_action_phrase(clean) or is_literal_username_placeholder_name(clean):
         return False
     parts = [part for part in re.split(r"\s+", clean) if part]
     if require_full_name and len(parts) < 2:
@@ -146,12 +196,16 @@ def build_active_state_recovery_reply(state: str | None) -> str | None:
 
 def active_state_relevance(message_text: str, state: str | None, cfg: dict[str, Any]) -> tuple[bool, str | None]:
     if state == "collect_name":
+        if is_username_save_request(message_text):
+            return True, "username_save"
         if is_non_name_action_phrase(message_text) or is_simple_greeting(message_text):
             return False, None
         name = extract_name(message_text, "collect_name")
         is_valid_name = is_valid_name_candidate(name, require_full_name=True)
         return is_valid_name, "name" if is_valid_name else None
     if state == "collect_phone":
+        if is_username_save_request(message_text):
+            return True, "username_save"
         if extract_phone(message_text):
             return True, "phone"
         if is_phone_like_attempt(message_text) and is_invalid_phone_attempt(message_text, state):
@@ -1166,8 +1220,20 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
         suppress_active_field_updates = str(state_before_entities or "").startswith("collect_") and not active_state_is_relevant
         if suppress_active_field_updates:
             decision_path.append("fsm:state_irrelevant_skipped")
-        deterministic_name = None if suppress_active_field_updates else extract_name(message_text, state_before_entities)
-        llm_name = None if suppress_active_field_updates else (extracted.get("lead_name") if state_before_entities == "collect_name" or not conversation.get("full_name") else None)
+        username_save_requested = is_username_save_request(message_text)
+        username_label = instagram_username_name_label(payload.instagram_username)
+        if username_save_requested:
+            memory["instagram_identity"] = payload.instagram_username or memory.get("instagram_identity")
+            if should_apply_instagram_username_name(conversation, username_label):
+                conversation["lead_name"] = username_label
+                conversation["full_name"] = username_label
+                memory["name_source"] = "instagram_username"
+                decision_path.append("detected:name_instagram_username")
+            elif username_label:
+                memory["name_source"] = memory.get("name_source") or "existing_name_preserved"
+                decision_path.append("noted:name_instagram_username")
+        deterministic_name = None if suppress_active_field_updates or username_save_requested else extract_name(message_text, state_before_entities)
+        llm_name = None if suppress_active_field_updates or username_save_requested else (extracted.get("lead_name") if state_before_entities == "collect_name" or not conversation.get("full_name") else None)
         name_candidate = deterministic_name or llm_name
         require_full_name = state_before_entities == "collect_name"
         if is_booking_acknowledgement_message(message_text) or not is_valid_name_candidate(name_candidate, require_full_name=require_full_name):
@@ -1277,7 +1343,7 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
             reply_text = build_service_carryover_booking_reply(service_for_booking, conversation.get("state"))
             final_reply_source = "fsm"
             decision_path.append("fsm:service_carryover_booking")
-        elif (curr_state.startswith("collect_") and active_state_is_relevant and (is_llm_error_reply(reply_text) or state_changed_by_fsm or invalid_phone_prompt or active_state_label == "name_ack")):
+        elif (curr_state.startswith("collect_") and active_state_is_relevant and (is_llm_error_reply(reply_text) or state_changed_by_fsm or invalid_phone_prompt or active_state_label in {"name_ack", "username_save"})):
             active_prompt = build_active_booking_prompt_reply(conversation, memory)
             if active_prompt:
                 reply_text = active_prompt

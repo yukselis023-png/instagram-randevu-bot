@@ -23,7 +23,7 @@ class DummyConn:
         return None
 
 
-def run_generic_message(monkeypatch, message, llm_result, config, conversation=None):
+def run_generic_message(monkeypatch, message, llm_result, config, conversation=None, instagram_username=None):
     conversation = conversation or {"sender_id": "generic-test", "state": "new", "memory_state": {}}
 
     monkeypatch.setattr(gc, "get_conn", lambda: DummyConn())
@@ -40,7 +40,7 @@ def run_generic_message(monkeypatch, message, llm_result, config, conversation=N
     monkeypatch.setattr(gc, "call_llm_json", lambda *args, **kwargs: llm_result)
 
     result = gc.process_instagram_message_generic(
-        IncomingMessage(sender_id=conversation.get("sender_id", "generic-test"), message_text=message),
+        IncomingMessage(sender_id=conversation.get("sender_id", "generic-test"), instagram_username=instagram_username, message_text=message),
         BackgroundTasks(),
     )
     return result, conversation
@@ -574,6 +574,144 @@ def test_generic_collect_name_detects_plain_name_and_asks_phone(monkeypatch):
     assert conversation.get("full_name") == "Berkay Elbir"
     assert conversation.get("state") == "collect_phone"
     assert "telefon" in gc.sanitize_text(result.reply_text).lower()
+
+
+def test_generic_collect_name_username_save_uses_instagram_username_and_asks_phone(monkeypatch):
+    os.environ["CHATBOT_ENGINE"] = "generic"
+    llm_result = {
+        "intent": "active_booking",
+        "reply_text": "Tamamdır, not aldım. Size ulaşabilmemiz için telefon numaranızı da paylaşabilir misiniz?",
+        "extracted_entities": {"lead_name": "Kullanıcı Adı", "phone": None, "requested_service": "Otomasyon"},
+        "requires_human": False,
+    }
+    conversation = {
+        "sender_id": "generic-username-name-test",
+        "state": "collect_name",
+        "service": "Otomasyon",
+        "memory_state": {"requested_service": "Otomasyon"},
+    }
+
+    result, conversation = run_generic_message(
+        monkeypatch,
+        "Kullanıcı adım ile kaydedin",
+        llm_result,
+        {"business_name": "DOEL Digital", "service_catalog": [{"display": "Otomasyon", "name": "Otomasyon"}]},
+        conversation,
+        instagram_username="karanlikyukselis",
+    )
+
+    reply = gc.sanitize_text(result.reply_text).lower()
+    assert conversation.get("full_name") == "@karanlikyukselis"
+    assert conversation.get("lead_name") == "@karanlikyukselis"
+    assert conversation.get("memory_state", {}).get("name_source") == "instagram_username"
+    assert conversation.get("state") == "collect_phone"
+    assert conversation.get("phone") is None
+    assert result.appointment_created is False
+    assert "telefon" in reply
+    assert "onceki gorusme" not in reply
+    assert "Kullanıcı Adı" not in str(conversation.get("full_name"))
+    assert "fsm:active_state_recovery_reply" not in result.decision_path
+
+
+def test_generic_collect_name_instagram_name_save_uses_instagram_username(monkeypatch):
+    os.environ["CHATBOT_ENGINE"] = "generic"
+    llm_result = {
+        "intent": "active_booking",
+        "reply_text": "Tamamdır, kullanıcı adınızla kaydediyorum. Telefon numaranızı paylaşabilir misiniz?",
+        "extracted_entities": {"lead_name": "Instagram Adı", "phone": None, "requested_service": "Otomasyon"},
+        "requires_human": False,
+    }
+    conversation = {
+        "sender_id": "generic-instagram-name-test",
+        "state": "collect_name",
+        "service": "Otomasyon",
+        "memory_state": {"requested_service": "Otomasyon"},
+    }
+
+    result, conversation = run_generic_message(
+        monkeypatch,
+        "Instagram adımla kaydedin",
+        llm_result,
+        {"business_name": "DOEL Digital", "service_catalog": [{"display": "Otomasyon", "name": "Otomasyon"}]},
+        conversation,
+        instagram_username="karanlikyukselis",
+    )
+
+    assert conversation.get("full_name") == "@karanlikyukselis"
+    assert conversation.get("state") == "collect_phone"
+    assert "telefon" in gc.sanitize_text(result.reply_text).lower()
+    assert "fsm:active_state_recovery_reply" not in result.decision_path
+
+
+def test_generic_collect_phone_username_save_preserves_clean_name_and_asks_phone(monkeypatch):
+    os.environ["CHATBOT_ENGINE"] = "generic"
+    llm_result = {
+        "intent": "active_booking",
+        "reply_text": "Tamamdır, not aldım. Size ulaşabilmemiz için telefon numaranızı da paylaşabilir misiniz?",
+        "extracted_entities": {"lead_name": "Kullanıcı Adı", "phone": None, "requested_service": "Otomasyon"},
+        "requires_human": False,
+    }
+    conversation = {
+        "sender_id": "generic-username-phone-test",
+        "state": "collect_phone",
+        "full_name": "Berkay Elbir",
+        "lead_name": "Berkay Elbir",
+        "service": "Otomasyon",
+        "memory_state": {"requested_service": "Otomasyon"},
+    }
+
+    result, conversation = run_generic_message(
+        monkeypatch,
+        "Kullanıcı adım ile kaydedin",
+        llm_result,
+        {"business_name": "DOEL Digital", "service_catalog": [{"display": "Otomasyon", "name": "Otomasyon"}]},
+        conversation,
+        instagram_username="karanlikyukselis",
+    )
+
+    reply = gc.sanitize_text(result.reply_text).lower()
+    assert conversation.get("full_name") == "Berkay Elbir"
+    assert conversation.get("lead_name") == "Berkay Elbir"
+    assert conversation.get("phone") is None
+    assert conversation.get("state") == "collect_phone"
+    assert result.appointment_created is False
+    assert "telefon" in reply
+    assert "onceki gorusme" not in reply
+    assert "noted:name_instagram_username" in result.decision_path
+    assert "fsm:active_state_recovery_reply" not in result.decision_path
+
+
+def test_generic_collect_phone_instagram_name_save_preserves_clean_name(monkeypatch):
+    os.environ["CHATBOT_ENGINE"] = "generic"
+    llm_result = {
+        "intent": "active_booking",
+        "reply_text": "Tamamdır, not aldım. Telefon numaranızı paylaşabilir misiniz?",
+        "extracted_entities": {"lead_name": "Instagram Adı", "phone": None, "requested_service": "Otomasyon"},
+        "requires_human": False,
+    }
+    conversation = {
+        "sender_id": "generic-instagram-phone-test",
+        "state": "collect_phone",
+        "full_name": "Berkay Elbir",
+        "lead_name": "Berkay Elbir",
+        "service": "Otomasyon",
+        "memory_state": {"requested_service": "Otomasyon"},
+    }
+
+    result, conversation = run_generic_message(
+        monkeypatch,
+        "Instagram adımla kaydedin",
+        llm_result,
+        {"business_name": "DOEL Digital", "service_catalog": [{"display": "Otomasyon", "name": "Otomasyon"}]},
+        conversation,
+        instagram_username="karanlikyukselis",
+    )
+
+    assert conversation.get("full_name") == "Berkay Elbir"
+    assert conversation.get("phone") is None
+    assert conversation.get("state") == "collect_phone"
+    assert "telefon" in gc.sanitize_text(result.reply_text).lower()
+    assert "fsm:active_state_recovery_reply" not in result.decision_path
 
 
 def test_generic_collect_phone_rejects_short_phone(monkeypatch):
