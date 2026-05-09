@@ -262,7 +262,18 @@ def test_invariant_completed_followups_do_not_create_new_appointment(monkeypatch
         result = run_message(
             monkeypatch,
             followup,
-            {"intent": "direct_answer", "reply_text": "Elbette, yardımcı olayım.", "extracted_entities": {}, "requires_human": False},
+            {
+                "intent": "active_booking",
+                "reply_text": "Elbette, yardımcı olayım.",
+                "extracted_entities": {
+                    "lead_name": "Berkay Elbir",
+                    "phone": "+905539088638",
+                    "requested_service": "Otomasyon",
+                    "requested_date": "2099-05-10",
+                    "requested_time": "18:00",
+                },
+                "requires_human": False,
+            },
             conversation,
         )
         assert result.appointment_created is False

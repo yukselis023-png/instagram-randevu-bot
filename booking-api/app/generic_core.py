@@ -439,6 +439,8 @@ def build_completed_followup_reply(message_text: str, cfg: dict[str, Any]) -> tu
         return "Görüşme online olarak yapılır; ekibimiz uygun bağlantı veya iletişim bilgisini paylaşır.", "completed_location_reply"
     if "berkay" in lowered and any(token in lowered for token in ("arar", "arayacak", "donus", "dönüş", "gorusecek", "görüşecek")):
         return f"Evet, ekibimiz veya {contact_name} Bey uygunluk durumuna göre sizinle dönüş yapacak.", "completed_contact_reply"
+    if any(token in lowered for token in ("sonradan", "sonra yazar", "sonra yaz", "daha sonra")):
+        return "Tabii, ne zaman isterseniz buradan yazabilirsiniz. Mevcut ön görüşme kaydınız korunuyor.", "completed_later_reply"
     if any(token in lowered for token in ("tesekkur", "teşekkür", "sagol", "sağol", "tamam")):
         return "Rica ederiz, istediğiniz zaman buradan yazabilirsiniz.", "completed_closing_reply"
     return None, None
