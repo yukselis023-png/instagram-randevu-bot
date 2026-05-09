@@ -236,6 +236,8 @@ def test_invariant_active_direct_questions_are_never_collection_prompts(monkeypa
         assert "telefon numaranizi" not in reply
         assert "ad soyad" not in reply
         assert "uygun gun" not in reply
+        assert "yarim kalmis" not in reply
+        assert "fsm:active_state_recovery_reply" not in result.decision_path
 
 
 def test_invariant_completed_followups_do_not_create_new_appointment(monkeypatch):

@@ -69,12 +69,22 @@ def is_active_booking_direct_clarification_question(message_text: str) -> bool:
         "detay", "detaylari", "detayları", "anlatir misiniz", "anlatır mısınız",
         "nereden", "online", "video", "odeme", "ödeme", "nasil yapiliyor", "nasıl yapılıyor",
         "ne kadar sure", "ne kadar süre", "kac dakika", "kaç dakika", "surecek", "sürecek",
+        "sonradan", "sonra yazar", "daha sonra",
     )
     has_direct_marker = any(marker in lowered for marker in direct_markers)
+    bare_active_clarifiers = (
+        "kiminle", "kimle", "kim arayacak", "kim arar", "kim gorusecek", "kim görüşecek",
+        "anlamadim", "anlamadım", "ne demek", "bu ne", "bu nasil", "bu nasıl",
+        "sonradan", "sonra yazar", "daha sonra",
+    )
+    if any(marker in lowered for marker in bare_active_clarifiers):
+        return True
+    if "berkay" in lowered and any(marker in lowered for marker in ("kim", " mi", " mı", " mu", " mü", "arayacak", "arar", "bey")):
+        return True
     has_meeting_context = any(token in lowered for token in ("on gorus", "ön görüş", "gorusme", "görüşme", "randevu", "arama", "arayacak"))
     if has_direct_marker and (has_meeting_context or "odeme" in lowered or "ödeme" in lowered or "nereden" in lowered):
         return True
-    return "bu ne" in lowered or "bu nasil" in lowered or "bu nasıl" in lowered
+    return False
 
 
 def is_booking_field_collection_reply(reply_text: str | None) -> bool:
@@ -97,6 +107,8 @@ def build_active_direct_clarification_reply(message_text: str, cfg: dict[str, An
         return "Görüşme online olarak yapılır; ekibimiz uygun bağlantı veya iletişim bilgisini paylaşır."
     if any(token in lowered for token in ("kiminle", "kimle", "kim arayacak", "kim gorusecek", "kim görüşecek", "berkay", "anlamadim", "anlamadım")):
         return f"Ön görüşmeyi ekip arkadaşımız {contact_name} ile yapacaksınız. Bu görüşmede {service} ihtiyacınızı, uygun sistemi ve kurulum sürecini netleştiriyoruz."
+    if any(token in lowered for token in ("sonradan", "sonra yazar", "daha sonra")):
+        return "Tabii, ne zaman isterseniz buradan yazabilirsiniz. Kayda devam etmek isterseniz eksik bilgiyi paylaşmanız yeterli."
     if any(token in lowered for token in ("ne kadar sure", "ne kadar süre", "kac dakika", "kaç dakika", "surecek", "sürecek")):
         return "Ön görüşme genelde kısa bir ihtiyaç analizi şeklinde ilerler; süreyi kapsamınıza göre ekip arkadaşımız netleştirir."
     if any(token in lowered for token in ("detay", "ne demek", "bu ne", "bu nasil", "bu nasıl", "anlat")):
