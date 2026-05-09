@@ -1354,6 +1354,132 @@ def test_generic_collect_datetime_valid_datetime_progresses_to_appointment(monke
     assert conversation.get("requested_time") == "13:00"
 
 
+
+def test_generic_collect_datetime_blocks_llm_confirmation_when_time_missing(monkeypatch):
+    os.environ["CHATBOT_ENGINE"] = "generic"
+    create_calls = []
+    llm_result = {
+        "intent": "active_booking",
+        "reply_text": "Tamamdır, yarın saat 12:00 için randevunuzu oluşturdum. Belirttiğiniz numara üzerinden Berkay Bey sizi arayacaktır.",
+        "extracted_entities": {"requested_date": "2099-05-07", "requested_time": None, "requested_service": "Otomasyon"},
+        "requires_human": False,
+    }
+    conversation = {
+        "sender_id": "generic-false-confirmation-missing-time-test",
+        "state": "collect_datetime",
+        "full_name": "Berkay Elbir",
+        "lead_name": "Berkay Elbir",
+        "phone": "+905539088638",
+        "service": "Otomasyon",
+        "memory_state": {"requested_service": "Otomasyon"},
+    }
+    monkeypatch.setattr(gc, "create_appointment", lambda *args, **kwargs: create_calls.append(args) or (999, 0))
+
+    result, conversation = run_generic_message(
+        monkeypatch,
+        "yarın olsun",
+        llm_result,
+        {"business_name": "DOEL Digital", "service_catalog": [{"display": "Otomasyon", "name": "Otomasyon"}]},
+        conversation,
+    )
+
+    reply = gc.sanitize_text(result.reply_text).lower()
+    assert create_calls == []
+    assert result.appointment_created is False
+    assert result.appointment_id is None
+    assert conversation.get("state") == "collect_datetime"
+    assert conversation.get("requested_date")
+    assert conversation.get("requested_time") is None
+    assert result.final_reply_source == "fsm_guard"
+    assert "guard:block_false_appointment_confirmation" in result.decision_path
+    assert "olusturdum" not in reply
+    assert "olusturuldu" not in reply
+    assert "arayacaktir" not in reply
+    assert "saat" in reply
+
+
+
+def test_generic_collect_datetime_noon_phrase_creates_real_appointment(monkeypatch):
+    os.environ["CHATBOT_ENGINE"] = "generic"
+    create_calls = []
+
+    def fake_create(_conn, conversation, username):
+        create_calls.append(dict(conversation))
+        return 124, 0
+
+    llm_result = {
+        "intent": "active_booking",
+        "reply_text": "Tamamdır, yarın saat 12:00 için randevunuzu oluşturdum.",
+        "extracted_entities": {"requested_service": "Otomasyon"},
+        "requires_human": False,
+    }
+    conversation = {
+        "sender_id": "generic-noon-booking-test",
+        "state": "collect_datetime",
+        "full_name": "Berkay Elbir",
+        "lead_name": "Berkay Elbir",
+        "phone": "+905539088638",
+        "service": "Otomasyon",
+        "memory_state": {"requested_service": "Otomasyon"},
+    }
+    monkeypatch.setattr(gc, "create_appointment", fake_create)
+
+    result, conversation = run_generic_message(
+        monkeypatch,
+        "Yarın öğlen olsun",
+        llm_result,
+        {"business_name": "DOEL Digital", "service_catalog": [{"display": "Otomasyon", "name": "Otomasyon"}]},
+        conversation,
+    )
+
+    assert len(create_calls) == 1
+    assert result.appointment_created is True
+    assert result.appointment_id == 124
+    assert conversation.get("state") == "completed"
+    assert conversation.get("requested_date")
+    assert conversation.get("requested_time") == "12:00"
+    assert create_calls[0]["requested_time"] == "12:00"
+    assert "guard:block_false_appointment_confirmation" not in result.decision_path
+
+
+
+def test_generic_false_confirmation_guard_catches_confirmation_variants(monkeypatch):
+    os.environ["CHATBOT_ENGINE"] = "generic"
+    config = {"business_name": "DOEL Digital", "service_catalog": [{"display": "Otomasyon", "name": "Otomasyon"}]}
+    variants = [
+        "Randevunuzu oluşturdum.",
+        "Kaydınız oluşturuldu.",
+        "Ön görüşme kaydınız tamamlandı.",
+        "Yarın saat 12:00 için randevunuz hazır.",
+    ]
+    for idx, reply_text in enumerate(variants):
+        conversation = {
+            "sender_id": f"generic-false-confirmation-variant-{idx}",
+            "state": "collect_datetime",
+            "full_name": "Berkay Elbir",
+            "lead_name": "Berkay Elbir",
+            "phone": "+905539088638",
+            "service": "Otomasyon",
+            "memory_state": {"requested_service": "Otomasyon"},
+        }
+        result, _conversation = run_generic_message(
+            monkeypatch,
+            "yarın olsun",
+            {"intent": "active_booking", "reply_text": reply_text, "extracted_entities": {"requested_service": "Otomasyon"}, "requires_human": False},
+            config,
+            conversation,
+        )
+        normalized_reply = gc.sanitize_text(result.reply_text).lower()
+        assert result.appointment_created is False
+        assert result.appointment_id is None
+        assert result.final_reply_source == "fsm_guard"
+        assert "guard:block_false_appointment_confirmation" in result.decision_path
+        assert "olusturdum" not in normalized_reply
+        assert "olusturuldu" not in normalized_reply
+        assert "tamamlandi" not in normalized_reply
+        assert "hazir" not in normalized_reply
+
+
 def test_generic_collect_name_booking_ack_keeps_state_without_name(monkeypatch):
     os.environ["CHATBOT_ENGINE"] = "generic"
     llm_result = {

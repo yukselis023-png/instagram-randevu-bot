@@ -739,15 +739,17 @@ def is_llm_error_reply(reply_text: str | None) -> bool:
 
 def extract_generic_datetime_time(message_text: str) -> str | None:
     lowered = sanitize_text(message_text or "").lower()
-    match = re.search(r"\b(akşam|aksam|sabah|öğlen|oglen)?\s*(\d{1,2})(?::(\d{2}))?\b", lowered)
+    if re.search(r"\b(oglen|ogle arasi|ogle|ogleye|ogleye dogru|ogle vakti)\b", lowered):
+        return "12:00"
+    match = re.search(r"\b(aksam|sabah|oglen)?\s*(\d{1,2})(?::(\d{2}))?\b", lowered)
     if not match:
         return None
     period, hour_text, minute_text = match.groups()
     hour = int(hour_text)
     minute = int(minute_text or "0")
-    if period in {"akşam", "aksam"} and 1 <= hour <= 11:
+    if period == "aksam" and 1 <= hour <= 11:
         hour += 12
-    if period in {"öğlen", "oglen"} and hour == 12:
+    if period == "oglen" and hour == 12:
         hour = 12
     if 0 <= hour <= 23 and 0 <= minute <= 59:
         return f"{hour:02d}:{minute:02d}"
@@ -1000,6 +1002,36 @@ def build_active_booking_prompt_reply(conversation: dict[str, Any], memory: dict
     if state == "collect_datetime":
         return "Uygun gün ve saati yazar mısınız? Örneğin yarın 13:00 gibi."
     return None
+
+
+def is_appointment_confirmation_like_reply(reply: str) -> bool:
+    lowered = sanitize_text(reply or "").lower()
+    if not lowered:
+        return False
+    explicit_patterns = [
+        r"\brandevu(?:nuz|nuzu|niz|nizi)?\b.{0,80}\b(?:olusturdum|olusturuldu|hazir|tamamlandi|planlandi|ayarladim|ayarlanmistir|onaylandi)\b",
+        r"\b(?:on gorusme|gorusme)\b.{0,80}\b(?:kaydiniz|kaydini|randevunuz|randevunuzu)\b.{0,80}\b(?:olusturdum|olusturuldu|tamamlandi|hazir|planlandi|onaylandi)\b",
+        r"\b(?:kaydiniz|kaydinizi|kayit)\b.{0,80}\b(?:olusturdum|olusturuldu|tamamlandi|hazir|onaylandi)\b",
+        r"\b(?:confirmed|scheduled)\b",
+    ]
+    if any(re.search(pattern, lowered) for pattern in explicit_patterns):
+        return True
+    has_definite_datetime = bool(re.search(r"\b(?:bugun|yarin|\d{1,2}[:.]\d{2}|saat\s*\d{1,2})\b", lowered))
+    has_final_call_phrase = any(phrase in lowered for phrase in ["sizi arayacaktir", "sizi arayacak", "gorusmek uzere", "gorusuruz"])
+    has_booking_context = any(token in lowered for token in ["randevu", "on gorusme", "gorusme", "kayit"])
+    return has_booking_context and has_definite_datetime and has_final_call_phrase
+
+
+def build_false_confirmation_guard_reply(conversation: dict[str, Any], memory: dict[str, Any]) -> str:
+    state = conversation.get("state") or "collect_datetime"
+    if state == "collect_datetime":
+        if conversation.get("requested_date") and not conversation.get("requested_time"):
+            return "Yarın için net saati yazabilir misiniz? Örneğin 12:00 veya 13:00."
+        if conversation.get("requested_time") and not conversation.get("requested_date"):
+            return "Hangi gün için planlayalım? Örneğin yarın 13:00 gibi yazabilirsiniz."
+        return "Uygun gün ve saati net yazar mısınız? Örneğin yarın 13:00 gibi."
+    active_prompt = build_active_booking_prompt_reply(conversation, memory)
+    return active_prompt or "Randevu kaydı için eksik bilgileri tamamlayalım; uygun gün ve saati yazar mısınız?"
 
 
 def process_instagram_message_generic(payload: IncomingMessage, background_tasks: BackgroundTasks) -> ProcessResult:
@@ -1353,9 +1385,18 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
         # 4. FINAL QUALITY GUARD (Post FSM Check)
         reply_text, guard_label = generic_quality_guard(reply_text, extracted, memory, cfg, message_text)
         if guard_label:
-            if guard_label in {"prevent_premature_confirm"} or is_llm_error_reply(reply_text):
+            if guard_label == "prevent_premature_confirm":
+                reply_text = build_false_confirmation_guard_reply(conversation, memory)
+                final_reply_source = "fsm_guard"
+                decision_path.append("guard:block_false_appointment_confirmation")
+            elif is_llm_error_reply(reply_text):
                 final_reply_source = "fallback"
             decision_path.append(f"guard:{guard_label}")
+
+        if is_appointment_confirmation_like_reply(reply_text) and (not appointment_created or not appointment_id):
+            reply_text = build_false_confirmation_guard_reply(conversation, memory)
+            final_reply_source = "fsm_guard"
+            decision_path.append("guard:block_false_appointment_confirmation")
 
         fallback_reasons = []
         if intent == "fallback":
