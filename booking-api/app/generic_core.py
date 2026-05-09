@@ -22,7 +22,8 @@ from app.main import (
     is_business_fit_question, recommendation_engine, extract_name, extract_phone,
     is_invalid_phone_attempt, extract_date, extract_time_for_state, extract_time, create_appointment,
     build_confirmation_message, try_reschedule_confirmed_appointment, find_active_appointment_for_user,
-    detect_customer_subsector, customer_sector_for_subsector
+    detect_customer_subsector, customer_sector_for_subsector, normalize_date_string, normalize_time_string,
+    validate_slot, format_human_date, get_booking_label
 )
 
 logger = logging.getLogger(__name__)
@@ -724,6 +725,84 @@ def build_reschedule_confirmation_question(conversation: dict[str, Any], request
     return "Mevcut ön görüşme tarihinizi değiştirmek istediğinizi onaylıyor musunuz?"
 
 
+def update_existing_appointment_from_pending_reschedule(
+    conn: Any,
+    conversation: dict[str, Any],
+    appointment_id: int | None,
+    requested_date: str | None,
+    requested_time: str | None,
+    username: str | None,
+) -> tuple[bool, str, str | None]:
+    if not appointment_id:
+        return False, "", None
+
+    detected_date = normalize_date_string(requested_date or conversation.get("requested_date"))
+    detected_time = normalize_time_string(requested_time or conversation.get("requested_time"))
+    validation_error = validate_slot(detected_date, detected_time)
+    if validation_error:
+        return False, validation_error, None
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE appointments
+                SET appointment_date = %s::date,
+                    appointment_time = %s::time,
+                    instagram_username = COALESCE(%s, instagram_username),
+                    full_name = COALESCE(%s, full_name),
+                    phone = COALESCE(%s, phone),
+                    service = COALESCE(%s, service),
+                    updated_at = NOW()
+                WHERE id = %s
+                  AND instagram_user_id = %s
+                  AND status IN ('confirmed', 'preconsultation', 'scheduled')
+                RETURNING id, status
+                """,
+                (
+                    detected_date,
+                    detected_time,
+                    username or conversation.get("instagram_username"),
+                    conversation.get("full_name"),
+                    conversation.get("phone"),
+                    conversation.get("service"),
+                    appointment_id,
+                    conversation.get("instagram_user_id") or conversation.get("sender_id"),
+                ),
+            )
+            updated = cur.fetchone()
+        if not updated:
+            conn.rollback()
+            return False, "", None
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.exception("generic_pending_reschedule_update_failed appointment_id=%s", appointment_id)
+        return False, "", None
+
+    conversation["requested_date"] = detected_date
+    conversation["requested_time"] = detected_time
+    conversation["appointment_status"] = "confirmed"
+    conversation["state"] = "completed"
+    conversation["appointment_id"] = appointment_id
+    conversation["assigned_human"] = False
+    memory = ensure_conversation_memory(conversation)
+    memory["reschedule_requested_date"] = None
+    memory["reschedule_requested_time"] = None
+    memory["pending_reschedule_request"] = None
+    memory["open_loop"] = "completed"
+    conversation["memory_state"] = memory
+    try:
+        conn.commit()
+    except Exception:
+        pass
+
+    booking_label = get_booking_label(conversation)
+    return True, f"{format_human_date(detected_date)} saat {detected_time} için {booking_label} kaydınız güncellendi.", "appointment_rescheduled"
+
+
 def handle_confirmed_generic_reschedule(
     conn: Any,
     conversation: dict[str, Any],
@@ -741,6 +820,16 @@ def handle_confirmed_generic_reschedule(
     if pending_confirm and is_reschedule_confirmation_acceptance(message_text):
         requested_date = memory.get("reschedule_requested_date") or conversation.get("requested_date")
         requested_time = memory.get("reschedule_requested_time") or conversation.get("requested_time")
+        updated, reply, label = update_existing_appointment_from_pending_reschedule(
+            conn,
+            conversation,
+            existing_id,
+            requested_date,
+            requested_time,
+            username,
+        )
+        if updated:
+            return {"handled": True, "reply_text": reply, "handoff": False, "appointment_id": existing_id, "decision_label": label or "appointment_rescheduled"}
         update_text = f"randevuyu {requested_date or ''} {requested_time or ''} yap".strip()
         try:
             updated, reply, label = try_reschedule_confirmed_appointment(conn, conversation, update_text, username)
