@@ -55,6 +55,55 @@ def is_preconsultation_explanation_question(message_text: str) -> bool:
     )
 
 
+def is_active_booking_direct_clarification_question(message_text: str) -> bool:
+    lowered = sanitize_text(message_text or "").lower()
+    if not lowered:
+        return False
+    if extract_phone(message_text) or extract_time(message_text) or extract_generic_datetime_time(message_text):
+        return False
+    if is_preconsultation_explanation_question(message_text) or is_price_question(message_text):
+        return True
+    direct_markers = (
+        "kiminle", "kimle", "kim arayacak", "kim arar", "kim gorusecek", "kim görüşecek",
+        "berkay", "anlamadim", "anlamadım", "hicbir sey", "hiçbir şey", "ne demek",
+        "detay", "detaylari", "detayları", "anlatir misiniz", "anlatır mısınız",
+        "nereden", "online", "video", "odeme", "ödeme", "nasil yapiliyor", "nasıl yapılıyor",
+        "ne kadar sure", "ne kadar süre", "kac dakika", "kaç dakika", "surecek", "sürecek",
+    )
+    has_direct_marker = any(marker in lowered for marker in direct_markers)
+    has_meeting_context = any(token in lowered for token in ("on gorus", "ön görüş", "gorusme", "görüşme", "randevu", "arama", "arayacak"))
+    if has_direct_marker and (has_meeting_context or "odeme" in lowered or "ödeme" in lowered or "nereden" in lowered):
+        return True
+    return "bu ne" in lowered or "bu nasil" in lowered or "bu nasıl" in lowered
+
+
+def is_booking_field_collection_reply(reply_text: str | None) -> bool:
+    lowered = sanitize_text(reply_text or "").lower()
+    if not lowered:
+        return False
+    asks_name = any(token in lowered for token in ("ad soyad", "adinizi", "adınızı", "isminizi", "isim soyisim"))
+    asks_phone = "telefon" in lowered and any(token in lowered for token in ("alabilir", "paylas", "paylaş", "yazar", "rica"))
+    asks_datetime = any(token in lowered for token in ("uygun gun", "uygun gün", "uygun saat", "hangi saat", "gun ve saat", "gün ve saat"))
+    return asks_name or asks_phone or asks_datetime
+
+
+def build_active_direct_clarification_reply(message_text: str, cfg: dict[str, Any], conversation: dict[str, Any], memory: dict[str, Any]) -> str | None:
+    lowered = sanitize_text(message_text or "").lower()
+    contact_name = sanitize_text(cfg.get("human_contact_name") or "Berkay")
+    service = service_reply_phrase(known_requested_service(conversation, memory))
+    if "odeme" in lowered or "ödeme" in lowered:
+        return "Ödeme detayı ön görüşmede netleşir; uygun olursa havale/EFT veya online ödeme seçenekleri paylaşılır."
+    if "nereden" in lowered or "online" in lowered or "video" in lowered:
+        return "Görüşme online olarak yapılır; ekibimiz uygun bağlantı veya iletişim bilgisini paylaşır."
+    if any(token in lowered for token in ("kiminle", "kimle", "kim arayacak", "kim gorusecek", "kim görüşecek", "berkay", "anlamadim", "anlamadım")):
+        return f"Ön görüşmeyi ekip arkadaşımız {contact_name} ile yapacaksınız. Bu görüşmede {service} ihtiyacınızı, uygun sistemi ve kurulum sürecini netleştiriyoruz."
+    if any(token in lowered for token in ("ne kadar sure", "ne kadar süre", "kac dakika", "kaç dakika", "surecek", "sürecek")):
+        return "Ön görüşme genelde kısa bir ihtiyaç analizi şeklinde ilerler; süreyi kapsamınıza göre ekip arkadaşımız netleştirir."
+    if any(token in lowered for token in ("detay", "ne demek", "bu ne", "bu nasil", "bu nasıl", "anlat")):
+        return f"Ön görüşmede {service} ihtiyacınızı, mevcut sürecinizi ve size uygun çözüm kapsamını netleştiriyoruz."
+    return None
+
+
 def is_booking_acknowledgement_message(message_text: str) -> bool:
     lowered = sanitize_text(message_text or "").lower().strip(" .!?")
     return lowered in {
@@ -1248,9 +1297,15 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
 
         # Sync deterministic entities immediately. Booking fields must not depend only on LLM extraction.
         state_before_entities = conversation.get("state", "new")
+        active_direct_clarification = str(state_before_entities or "").startswith("collect_") and is_active_booking_direct_clarification_question(message_text)
+        if active_direct_clarification:
+            booking_opt_in = False
+            intent = "direct_answer"
         active_state_is_relevant, active_state_label = active_state_relevance(message_text, state_before_entities, cfg)
-        suppress_active_field_updates = str(state_before_entities or "").startswith("collect_") and not active_state_is_relevant
-        if suppress_active_field_updates:
+        suppress_active_field_updates = str(state_before_entities or "").startswith("collect_") and (active_direct_clarification or not active_state_is_relevant)
+        if active_direct_clarification:
+            decision_path.append("fsm:active_direct_clarification")
+        elif suppress_active_field_updates:
             decision_path.append("fsm:state_irrelevant_skipped")
         username_save_requested = is_username_save_request(message_text)
         username_label = instagram_username_name_label(payload.instagram_username)
@@ -1326,7 +1381,7 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
         invalid_phone_prompt = False
         
         active_fsm_applies = curr_state.startswith("collect_") and active_state_is_relevant
-        if suppress_active_field_updates:
+        if suppress_active_field_updates and not active_direct_clarification:
             recovery_reply = build_active_state_recovery_reply(curr_state)
             if recovery_reply:
                 reply_text = recovery_reply
@@ -1375,12 +1430,20 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
             reply_text = build_service_carryover_booking_reply(service_for_booking, conversation.get("state"))
             final_reply_source = "fsm"
             decision_path.append("fsm:service_carryover_booking")
-        elif (curr_state.startswith("collect_") and active_state_is_relevant and (is_llm_error_reply(reply_text) or state_changed_by_fsm or invalid_phone_prompt or active_state_label in {"name_ack", "username_save"})):
+        elif (curr_state.startswith("collect_") and active_state_is_relevant and not active_direct_clarification and (is_llm_error_reply(reply_text) or state_changed_by_fsm or invalid_phone_prompt or active_state_label in {"name_ack", "username_save"})):
             active_prompt = build_active_booking_prompt_reply(conversation, memory)
             if active_prompt:
                 reply_text = active_prompt
                 final_reply_source = "fsm"
                 decision_path.append("fsm:active_booking_prompt")
+
+        if active_direct_clarification and (is_llm_error_reply(reply_text) or is_booking_field_collection_reply(reply_text)):
+            direct_reply = build_active_direct_clarification_reply(message_text, cfg, conversation, memory)
+            if direct_reply:
+                reply_text = direct_reply
+                final_reply_source = "fsm_direct_answer"
+                intent = "direct_answer"
+                decision_path.append("fsm:active_direct_clarification_reply")
 
         # 4. FINAL QUALITY GUARD (Post FSM Check)
         reply_text, guard_label = generic_quality_guard(reply_text, extracted, memory, cfg, message_text)

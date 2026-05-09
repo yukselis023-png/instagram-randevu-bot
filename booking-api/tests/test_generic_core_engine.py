@@ -1313,6 +1313,127 @@ def test_generic_collect_phone_valid_phone_progresses(monkeypatch):
     assert "saat" in gc.sanitize_text(result.reply_text).lower()
 
 
+def test_generic_collect_phone_direct_contact_question_preserves_llm_answer(monkeypatch):
+    os.environ["CHATBOT_ENGINE"] = "generic"
+    llm_reply = "Ön görüşmeyi ekip arkadaşımız Berkay ile yapacaksınız. Merak ettiğiniz tüm detayları yanıtlayıp size uygun sistemi birlikte planlıyoruz; sizin için uygun bir zaman var mı?"
+    conversation = {
+        "sender_id": "generic-active-contact-clarification-test",
+        "state": "collect_phone",
+        "full_name": "Berkay Elbir",
+        "lead_name": "Berkay Elbir",
+        "service": "Otomasyon",
+        "memory_state": {"requested_service": "Otomasyon"},
+    }
+
+    result, conversation = run_generic_message(
+        monkeypatch,
+        "Kiminle olacak ön görüşme anlamadım hiçbir şey?",
+        {"intent": "direct_answer", "reply_text": llm_reply, "extracted_entities": {}, "requires_human": False},
+        {"business_name": "DOEL Digital", "service_catalog": [{"display": "Otomasyon", "name": "Otomasyon"}], "human_contact_name": "Berkay"},
+        conversation,
+    )
+
+    reply = gc.sanitize_text(result.reply_text).lower()
+    assert result.reply_text == llm_reply
+    assert result.final_reply_source == "llm_raw"
+    assert result.appointment_created is False
+    assert conversation.get("state") == "collect_phone"
+    assert conversation.get("phone") is None
+    assert "telefon" not in reply
+    assert "fsm:active_booking_prompt" not in result.decision_path
+    assert "fsm:active_state_recovery_reply" not in result.decision_path
+    assert "fsm:active_direct_clarification" in result.decision_path
+
+
+def test_generic_collect_name_preconsultation_question_does_not_ask_name(monkeypatch):
+    os.environ["CHATBOT_ENGINE"] = "generic"
+    conversation = {
+        "sender_id": "generic-active-preconsult-clarification-test",
+        "state": "collect_name",
+        "service": "Otomasyon",
+        "memory_state": {"requested_service": "Otomasyon"},
+    }
+
+    result, conversation = run_generic_message(
+        monkeypatch,
+        "Ön görüşmede ne konuşacağız?",
+        {"intent": "booking_request", "reply_text": "Ad soyadınızı alabilir miyim?", "extracted_entities": {"lead_name": "Ön Görüşme"}, "requires_human": False},
+        {"business_name": "DOEL Digital", "service_catalog": [{"display": "Otomasyon", "name": "Otomasyon"}]},
+        conversation,
+    )
+
+    reply = gc.sanitize_text(result.reply_text).lower()
+    assert result.appointment_created is False
+    assert conversation.get("state") == "collect_name"
+    assert conversation.get("full_name") is None
+    assert "ad soyad" not in reply
+    assert "telefon" not in reply
+    assert "ihtiyac" in reply or "hedef" in reply
+    assert "fsm:active_booking_prompt" not in result.decision_path
+
+
+def test_generic_collect_datetime_location_question_does_not_ask_time(monkeypatch):
+    os.environ["CHATBOT_ENGINE"] = "generic"
+    llm_reply = "Görüşme online olarak yapılacak; ekibimiz uygun bağlantıyı paylaşır."
+    conversation = {
+        "sender_id": "generic-active-location-clarification-test",
+        "state": "collect_datetime",
+        "full_name": "Berkay Elbir",
+        "lead_name": "Berkay Elbir",
+        "phone": "+905539088638",
+        "service": "Otomasyon",
+        "memory_state": {"requested_service": "Otomasyon"},
+    }
+
+    result, conversation = run_generic_message(
+        monkeypatch,
+        "Görüşme nereden olacak?",
+        {"intent": "direct_answer", "reply_text": llm_reply, "extracted_entities": {"requested_time": "13:00"}, "requires_human": False},
+        {"business_name": "DOEL Digital", "service_catalog": [{"display": "Otomasyon", "name": "Otomasyon"}]},
+        conversation,
+    )
+
+    reply = gc.sanitize_text(result.reply_text).lower()
+    assert result.reply_text == llm_reply
+    assert result.appointment_created is False
+    assert conversation.get("state") == "collect_datetime"
+    assert conversation.get("requested_time") is None
+    assert "hangi saat" not in reply
+    assert "uygun gun" not in reply
+    assert "online" in reply
+    assert "fsm:active_booking_prompt" not in result.decision_path
+
+
+def test_generic_collect_phone_payment_question_does_not_ask_phone(monkeypatch):
+    os.environ["CHATBOT_ENGINE"] = "generic"
+    llm_reply = "Ödeme detayları ön görüşmede netleşir; uygun olursa havale/EFT veya online ödeme seçenekleri paylaşılır."
+    conversation = {
+        "sender_id": "generic-active-payment-clarification-test",
+        "state": "collect_phone",
+        "full_name": "Berkay Elbir",
+        "lead_name": "Berkay Elbir",
+        "service": "Otomasyon",
+        "memory_state": {"requested_service": "Otomasyon"},
+    }
+
+    result, conversation = run_generic_message(
+        monkeypatch,
+        "Ödeme nasıl yapılıyor?",
+        {"intent": "direct_answer", "reply_text": llm_reply, "extracted_entities": {}, "requires_human": False},
+        {"business_name": "DOEL Digital", "service_catalog": [{"display": "Otomasyon", "name": "Otomasyon"}]},
+        conversation,
+    )
+
+    reply = gc.sanitize_text(result.reply_text).lower()
+    assert result.reply_text == llm_reply
+    assert result.appointment_created is False
+    assert conversation.get("state") == "collect_phone"
+    assert conversation.get("phone") is None
+    assert "telefon" not in reply
+    assert "odeme" in reply
+    assert "fsm:active_booking_prompt" not in result.decision_path
+
+
 def test_generic_collect_datetime_valid_datetime_progresses_to_appointment(monkeypatch):
     os.environ["CHATBOT_ENGINE"] = "generic"
     create_calls = []
