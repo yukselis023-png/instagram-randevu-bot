@@ -298,7 +298,12 @@ def test_generic_doel_booking_crm(monkeypatch):
 
     assert conversation.get("lead_name") == "Remzi"
     assert conversation.get("phone") == "+905554443322"
-    assert "Numaranızı aldım" in result.reply_text
+    reply = gc.sanitize_text(result.reply_text).lower()
+    assert result.appointment_created is False
+    assert result.appointment_id is None
+    assert "sizi arayacagiz" not in reply
+    assert "hangi hizmet" in reply
+    assert "guard:block_false_appointment_confirmation" in result.decision_path
 
 
 def test_generic_business_identity_fit_prompt_hides_unavailable_services(monkeypatch):

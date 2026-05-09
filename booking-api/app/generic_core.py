@@ -1058,9 +1058,13 @@ def is_appointment_confirmation_like_reply(reply: str) -> bool:
     if not lowered:
         return False
     explicit_patterns = [
-        r"\brandevu(?:nuz|nuzu|niz|nizi)?\b.{0,80}\b(?:olusturdum|olusturuldu|hazir|tamamlandi|planlandi|ayarladim|ayarlanmistir|onaylandi)\b",
-        r"\b(?:on gorusme|gorusme)\b.{0,80}\b(?:kaydiniz|kaydini|randevunuz|randevunuzu)\b.{0,80}\b(?:olusturdum|olusturuldu|tamamlandi|hazir|planlandi|onaylandi)\b",
+        r"\brandevu(?:nuz|nuzu|niz|nizi)?\b.{0,80}\b(?:olusturdum|olusturuldu|hazir|tamamlandi|planlandi|ayarladim|ayarlandi|ayarlanmistir|onaylandi)\b",
+        r"\b(?:on gorusme|gorusme)\b.{0,80}\b(?:kaydiniz|kaydini|randevunuz|randevunuzu)\b.{0,80}\b(?:olusturdum|olusturuldu|tamamlandi|hazir|planlandi|onaylandi|ayarlandi|ayarlanmistir)\b",
+        r"\b(?:on gorusmeniz|gorusmeniz)\b.{0,80}\b(?:olusturuldu|tamamlandi|hazir|planlandi|onaylandi|ayarlandi|ayarlanmistir)\b",
         r"\b(?:kaydiniz|kaydinizi|kayit)\b.{0,80}\b(?:olusturdum|olusturuldu|tamamlandi|hazir|onaylandi)\b",
+        r"\bsizi\s+arayac(?:agiz|aktir|ak)\b",
+        r"\bislem\b.{0,40}\btamamlandi\b",
+        r"\bsaat(?:iniz|inizi|i)?\b.{0,40}\b(?:guncelledim|guncellendi|degistirdim|degisti)\b",
         r"\b(?:confirmed|scheduled)\b",
     ]
     if any(re.search(pattern, lowered) for pattern in explicit_patterns):
@@ -1411,10 +1415,26 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
             else:
                 conversation["state"] = "completed"
                 conversation["appointment_status"] = "confirmed"
-                appointment_created = True
-                appointment_id, _live_crm_ms = create_appointment(conn, conversation, payload.instagram_username)
-                conversation["appointment_id"] = appointment_id
-                decision_path.append("action:appointment_confirmed")
+                try:
+                    appointment_id, _live_crm_ms = create_appointment(conn, conversation, payload.instagram_username)
+                    appointment_created = True
+                    conversation["appointment_id"] = appointment_id
+                    decision_path.append("action:appointment_confirmed")
+                except Exception as exc:  # noqa: BLE001
+                    logger.exception("generic_appointment_create_failed sender_id=%s", conversation.get("instagram_user_id"))
+                    appointment_created = False
+                    appointment_id = None
+                    conversation["state"] = "collect_datetime"
+                    conversation["appointment_status"] = "pending_review"
+                    conversation["assigned_human"] = True
+                    memory = ensure_conversation_memory(conversation)
+                    memory["human_review_reason"] = "appointment_create_failed"
+                    memory["safety_block_reason"] = sanitize_text(str(exc))[:300]
+                    conversation["memory_state"] = memory
+                    handoff = True
+                    reply_text = "Randevu kaydını şu an kesinleştiremedim; bilgilerinizi ekibin kontrol etmesi için not aldım."
+                    final_reply_source = "fsm_guard"
+                    decision_path.append("guard:appointment_create_failed")
             state_changed_by_fsm = conversation.get("state") != previous_state
 
         service_for_booking = known_requested_service(conversation, memory)
