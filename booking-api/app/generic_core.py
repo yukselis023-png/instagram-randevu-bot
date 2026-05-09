@@ -21,7 +21,8 @@ from app.main import (
     is_company_capability_question, build_company_capability_reply, is_user_business_identity_message, is_simple_greeting,
     is_business_fit_question, recommendation_engine, extract_name, extract_phone,
     is_invalid_phone_attempt, extract_date, extract_time_for_state, extract_time, create_appointment,
-    build_confirmation_message, try_reschedule_confirmed_appointment, find_active_appointment_for_user
+    build_confirmation_message, try_reschedule_confirmed_appointment, find_active_appointment_for_user,
+    detect_customer_subsector, customer_sector_for_subsector
 )
 
 logger = logging.getLogger(__name__)
@@ -78,10 +79,23 @@ def is_booking_opt_in(message_text: str, intent: str | None) -> bool:
     return intent == "booking_request" or any(phrase in lowered for phrase in BOOKING_OPT_IN_PHRASES)
 
 
+def clear_stale_active_booking_state(conversation: dict[str, Any], memory: dict[str, Any], conn: Any | None = None) -> None:
+    has_confirmed_appointment = is_confirmed_generic_appointment(conversation) or bool(existing_generic_appointment_id(conversation, conn))
+    conversation["state"] = "completed" if has_confirmed_appointment else "new"
+    conversation["appointment_status"] = "confirmed" if has_confirmed_appointment else "collecting"
+    conversation["assigned_human"] = False
+    memory["open_loop"] = "completed" if has_confirmed_appointment else None
+    memory["last_bot_question_type"] = None
+    conversation["memory_state"] = memory
+    sync_conversation_memory_summary(conversation)
+
+
 def active_state_relevance(message_text: str, state: str | None, cfg: dict[str, Any]) -> tuple[bool, str | None]:
     if state == "collect_name":
         if is_booking_acknowledgement_message(message_text):
             return True, "name_ack"
+        if is_simple_greeting(message_text):
+            return False, None
         return bool(extract_name(message_text, "collect_name")), "name" if extract_name(message_text, "collect_name") else None
     if state == "collect_phone":
         if extract_phone(message_text):
@@ -141,6 +155,67 @@ def remember_requested_service(conversation: dict[str, Any], memory: dict[str, A
     if not sanitize_text(conversation.get("service") or ""):
         conversation["service"] = clean
     return clean
+
+
+def persist_user_business_identity_context(
+    message_text: str,
+    history: list[dict[str, Any]] | None,
+    conversation: dict[str, Any],
+    memory: dict[str, Any],
+) -> bool:
+    subsector = detect_customer_subsector(message_text, history)
+    if not subsector:
+        return False
+    sector = customer_sector_for_subsector(subsector)
+    if sector:
+        memory["customer_sector"] = sector
+    memory["customer_subsector"] = subsector
+    conversation["memory_state"] = memory
+    return True
+
+
+def persist_customer_identity_to_crm(conn: Any, customer: dict[str, Any] | None, memory: dict[str, Any]) -> None:
+    if not customer:
+        return
+    subsector = sanitize_text(str(memory.get("customer_subsector") or ""))
+    sector = sanitize_text(str(memory.get("customer_sector") or customer.get("sector") or ""))
+    if not subsector:
+        return
+    note = f"customer_subsector={subsector}"
+    preferences_patch = {
+        "customer_subsector": subsector,
+        "customer_sector": sector or None,
+    }
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE customers
+                SET sector = COALESCE(NULLIF(%s, ''), sector),
+                    preferences = COALESCE(preferences, '{}'::jsonb) || %s::jsonb,
+                    notes = CASE
+                        WHEN COALESCE(notes, '') ILIKE %s THEN notes
+                        WHEN COALESCE(notes, '') = '' THEN %s
+                        ELSE notes || E'\n' || %s
+                    END,
+                    updated_at = NOW()
+                WHERE id = %s
+                """,
+                (
+                    sector,
+                    json.dumps(preferences_patch, ensure_ascii=False),
+                    f"%{note}%",
+                    note,
+                    note,
+                    customer.get("id"),
+                ),
+            )
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.exception("generic_customer_identity_persist_failed customer_id=%s", customer.get("id"))
 
 
 def service_reply_phrase(service_label: str | None) -> str:
@@ -608,8 +683,12 @@ def is_explicit_reschedule_request(message_text: str) -> bool:
 
 
 def is_reschedule_confirmation_acceptance(message_text: str) -> bool:
-    lowered = sanitize_text(message_text or "").lower().strip()
-    return lowered in {"evet", "onayliyorum", "onaylıyorum", "tamam", "olur", "aynen"}
+    lowered = sanitize_text(message_text or "").lower().strip(" .!?")
+    if lowered in {"evet", "onayliyorum", "onaylıyorum", "tamam", "olur", "aynen"}:
+        return True
+    has_acceptance = any(token in lowered for token in ("evet", "onay", "tamam", "olur", "aynen"))
+    has_change_context = any(token in lowered for token in ("degistir", "değiştir", "guncelle", "güncelle", "olarak", "saat")) or bool(extract_time(message_text) or extract_generic_datetime_time(message_text))
+    return has_acceptance and has_change_context
 
 
 def detect_reschedule_candidate(message_text: str, extracted: dict[str, Any]) -> tuple[str | None, str | None]:
@@ -657,7 +736,8 @@ def handle_confirmed_generic_reschedule(
         return None
 
     existing_id = existing_generic_appointment_id(conversation, conn)
-    pending_confirm = memory.get("open_loop") == "generic_reschedule_confirmation_pending"
+    pending_reschedule = bool(memory.get("reschedule_requested_date") or memory.get("reschedule_requested_time"))
+    pending_confirm = memory.get("open_loop") == "generic_reschedule_confirmation_pending" or pending_reschedule
     if pending_confirm and is_reschedule_confirmation_acceptance(message_text):
         requested_date = memory.get("reschedule_requested_date") or conversation.get("requested_date")
         requested_time = memory.get("reschedule_requested_time") or conversation.get("requested_time")
@@ -707,6 +787,8 @@ def handle_confirmed_generic_reschedule(
         "handoff": False,
         "appointment_id": existing_id,
         "decision_label": "appointment_reschedule_confirm_required",
+        "reschedule_requested_date": memory.get("reschedule_requested_date"),
+        "reschedule_requested_time": memory.get("reschedule_requested_time"),
     }
 
 
@@ -779,7 +861,12 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
         if has_outbound_reply_for_trace(conn, payload.sender_id, trace_id):
             return duplicate_process_result(payload, conversation, metrics, "duplicate_outbound_trace_ignored", request_started_at)
 
-        if should_reset_stale_conversation(conversation, message_text) and not str(conversation.get("state") or "").startswith("collect_"):
+        stale_recovery_applies = should_reset_stale_conversation(conversation, message_text)
+        stale_active_booking_state = stale_recovery_applies and str(conversation.get("state") or "").startswith("collect_")
+        if stale_active_booking_state:
+            clear_stale_active_booking_state(conversation, memory, conn)
+            memory = ensure_conversation_memory(conversation)
+        elif stale_recovery_applies:
             reset_conversation_for_restart(conversation, clear_identity=True)
             memory = ensure_conversation_memory(conversation)
             
@@ -811,6 +898,8 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
             decision_path.append("reply:company_capability")
             deterministic_reply = True
         elif is_user_business_identity_message(message_text):
+            if persist_user_business_identity_context(message_text, recent_history, conversation, memory):
+                decision_path.append("persist:user_business_identity")
             identity_rejection = identity_llm_reply_rejection_reason(reply_text)
             if metrics.get("llm_error"):
                 identity_rejection = identity_rejection or "llm_error"
@@ -860,6 +949,17 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
             decision_path.append("reply:business_fit")
             deterministic_reply = True
 
+        if "persist:user_business_identity" not in decision_path and persist_user_business_identity_context(message_text, recent_history, conversation, memory):
+            decision_path.append("persist:user_business_identity")
+
+        if stale_active_booking_state:
+            reply_text = "Teşekkürler, size de. Buradayım; nasıl yardımcı olabilirim?"
+            intent = "direct_answer"
+            booking_opt_in = False
+            deterministic_reply = True
+            final_reply_source = "fsm"
+            decision_path.append("fsm:stale_active_state_recovery")
+
         completed_followup_reply, completed_followup_label = build_completed_followup_reply(message_text, cfg) if is_confirmed_generic_appointment(conversation) else (None, None)
         if completed_followup_reply:
             reply_text = completed_followup_reply
@@ -873,10 +973,18 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
             reply_text = post_confirmation["reply_text"]
             final_reply_source = "fsm"
             handoff = bool(post_confirmation.get("handoff"))
-            decision_path.append(str(post_confirmation.get("decision_label") or "appointment_reschedule_followup"))
+            decision_label = str(post_confirmation.get("decision_label") or "appointment_reschedule_followup")
+            decision_path.append(decision_label)
             update_conversation_memory_after_bot_reply(conversation, reply_text, "|".join(decision_path))
+            if decision_label == "appointment_reschedule_confirm_required":
+                memory = ensure_conversation_memory(conversation)
+                memory["reschedule_requested_date"] = post_confirmation.get("reschedule_requested_date") or memory.get("reschedule_requested_date")
+                memory["reschedule_requested_time"] = post_confirmation.get("reschedule_requested_time") or memory.get("reschedule_requested_time")
+                memory["open_loop"] = "generic_reschedule_confirmation_pending"
+                conversation["memory_state"] = memory
             upsert_conversation(conn, conversation)
             crm_customer = upsert_customer_from_conversation(conn, conversation)
+            persist_customer_identity_to_crm(conn, crm_customer, ensure_conversation_memory(conversation))
             if crm_customer:
                 schedule_customer_automation_events(conn, int(crm_customer["id"]), crm_customer.get("sector", ""))
             if has_outbound_reply_for_trace(conn, payload.sender_id, trace_id):
@@ -1049,6 +1157,7 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
         # Output payload syncs
         upsert_conversation(conn, conversation)
         crm_customer = upsert_customer_from_conversation(conn, conversation)
+        persist_customer_identity_to_crm(conn, crm_customer, ensure_conversation_memory(conversation))
         if crm_customer:
             schedule_customer_automation_events(conn, int(crm_customer["id"]), crm_customer.get("sector", ""))
             
