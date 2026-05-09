@@ -91,17 +91,70 @@ def clear_stale_active_booking_state(conversation: dict[str, Any], memory: dict[
     sync_conversation_memory_summary(conversation)
 
 
+NON_NAME_ACTION_PHRASES = {
+    "kolay gelsin",
+    "merhaba",
+    "selam",
+    "iyi gunler",
+    "iyi günler",
+    "tesekkurler",
+    "teşekkürler",
+    "tesekkur ederim",
+    "teşekkür ederim",
+    "tamam",
+    "olur",
+    "goruselim",
+    "görüşelim",
+    "evet",
+    "hayir",
+    "hayır",
+}
+
+
+def is_non_name_action_phrase(message_text: str | None) -> bool:
+    lowered = sanitize_text(message_text or "").lower().strip(" .!?…")
+    if not lowered:
+        return False
+    if lowered in NON_NAME_ACTION_PHRASES:
+        return True
+    return any(lowered.startswith(f"{phrase} ") for phrase in NON_NAME_ACTION_PHRASES)
+
+
+def is_valid_name_candidate(name_text: str | None, *, require_full_name: bool = False) -> bool:
+    clean = sanitize_text(name_text or "").strip()
+    if not clean or is_non_name_action_phrase(clean):
+        return False
+    parts = [part for part in re.split(r"\s+", clean) if part]
+    if require_full_name and len(parts) < 2:
+        return False
+    if len(parts) > 4:
+        return False
+    if any(re.search(r"\d", part) for part in parts):
+        return False
+    return True
+
+
+def is_phone_like_attempt(message_text: str | None) -> bool:
+    return bool(re.search(r"\d", sanitize_text(message_text or "")))
+
+
+def build_active_state_recovery_reply(state: str | None) -> str | None:
+    if state in {"collect_phone", "collect_name"}:
+        return "Teşekkür ederim, size de. Önceki görüşme kaydınız yarım kalmış görünüyor; devam etmek ister misiniz, yoksa farklı bir konuda mı yardımcı olayım?"
+    return None
+
+
 def active_state_relevance(message_text: str, state: str | None, cfg: dict[str, Any]) -> tuple[bool, str | None]:
     if state == "collect_name":
-        if is_booking_acknowledgement_message(message_text):
-            return True, "name_ack"
-        if is_simple_greeting(message_text):
+        if is_non_name_action_phrase(message_text) or is_simple_greeting(message_text):
             return False, None
-        return bool(extract_name(message_text, "collect_name")), "name" if extract_name(message_text, "collect_name") else None
+        name = extract_name(message_text, "collect_name")
+        is_valid_name = is_valid_name_candidate(name, require_full_name=True)
+        return is_valid_name, "name" if is_valid_name else None
     if state == "collect_phone":
         if extract_phone(message_text):
             return True, "phone"
-        if is_invalid_phone_attempt(message_text, state):
+        if is_phone_like_attempt(message_text) and is_invalid_phone_attempt(message_text, state):
             return True, "invalid_phone"
         return False, None
     if state == "collect_datetime":
@@ -1116,7 +1169,8 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
         deterministic_name = None if suppress_active_field_updates else extract_name(message_text, state_before_entities)
         llm_name = None if suppress_active_field_updates else (extracted.get("lead_name") if state_before_entities == "collect_name" or not conversation.get("full_name") else None)
         name_candidate = deterministic_name or llm_name
-        if is_booking_acknowledgement_message(message_text):
+        require_full_name = state_before_entities == "collect_name"
+        if is_booking_acknowledgement_message(message_text) or not is_valid_name_candidate(name_candidate, require_full_name=require_full_name):
             name_candidate = None
         if name_candidate:
             conversation["lead_name"] = name_candidate
@@ -1129,7 +1183,7 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
             phone_candidate = direct_phone_candidate
         else:
             phone_candidate = direct_phone_candidate or extract_phone(str(extracted.get("phone") or ""))
-        invalid_phone_attempt = (not suppress_active_field_updates) and is_invalid_phone_attempt(message_text, state_before_entities)
+        invalid_phone_attempt = (not suppress_active_field_updates) and is_phone_like_attempt(message_text) and is_invalid_phone_attempt(message_text, state_before_entities)
         if phone_candidate:
             conversation["phone"] = phone_candidate
             decision_path.append("detected:phone" if extract_phone(message_text) else "extracted:phone")
@@ -1174,7 +1228,14 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
         invalid_phone_prompt = False
         
         active_fsm_applies = curr_state.startswith("collect_") and active_state_is_relevant
-        if not handoff and (booking_opt_in or intent in ["booking_request", "active_booking"] or active_fsm_applies):
+        if suppress_active_field_updates:
+            recovery_reply = build_active_state_recovery_reply(curr_state)
+            if recovery_reply:
+                reply_text = recovery_reply
+                final_reply_source = "fsm"
+                intent = "direct_answer"
+                decision_path.append("fsm:active_state_recovery_reply")
+        if not handoff and not suppress_active_field_updates and (booking_opt_in or intent in ["booking_request", "active_booking"] or active_fsm_applies):
             carried_service = remember_requested_service(conversation, memory, known_requested_service(conversation, memory))
             has_service = bool(carried_service)
             has_phone = bool(conversation.get("phone"))

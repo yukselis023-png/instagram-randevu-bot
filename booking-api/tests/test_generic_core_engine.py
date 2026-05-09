@@ -1017,6 +1017,96 @@ def test_generic_collect_phone_irrelevant_message_does_not_prompt_or_write_phone
     assert "kolay gelsin" in reply or "yardimci" in reply
 
 
+def test_dirty_collect_phone_greeting_recovers_without_phone_prompt_or_name_write(monkeypatch):
+    os.environ["CHATBOT_ENGINE"] = "generic"
+    llm_result = {
+        "intent": "active_booking",
+        "reply_text": "Harika, otomasyon için ön görüşme oluşturalım. Telefon numaranızı eksiksiz alabilir miyim?",
+        "extracted_entities": {"lead_name": "Kolay Gelsin", "requested_service": "Otomasyon"},
+        "requires_human": False,
+    }
+    conversation = {
+        "sender_id": "generic-dirty-collect-phone-greeting-test",
+        "state": "collect_phone",
+        "service": "Otomasyon",
+        "memory_state": {"requested_service": "Otomasyon", "open_loop": "collect_phone"},
+    }
+
+    result, conversation = run_generic_message(
+        monkeypatch,
+        "Kolay gelsin",
+        llm_result,
+        {"business_name": "DOEL Digital", "service_catalog": [{"display": "Otomasyon", "name": "Otomasyon"}]},
+        conversation,
+    )
+
+    reply = gc.sanitize_text(result.reply_text).lower()
+    assert conversation.get("full_name") is None
+    assert conversation.get("lead_name") is None
+    assert conversation.get("phone") is None
+    assert result.appointment_created is False
+    assert "telefon" not in reply
+    assert "yarim kal" in reply or "yardimci" in reply
+    assert "fsm:active_state_recovery_reply" in result.decision_path
+
+
+def test_collect_name_greeting_is_not_saved_as_full_name(monkeypatch):
+    os.environ["CHATBOT_ENGINE"] = "generic"
+    llm_result = {
+        "intent": "active_booking",
+        "reply_text": "Ad soyadınızı alabilir miyim?",
+        "extracted_entities": {"lead_name": "Kolay Gelsin"},
+        "requires_human": False,
+    }
+    conversation = {
+        "sender_id": "generic-collect-name-greeting-test",
+        "state": "collect_name",
+        "service": "Otomasyon",
+        "memory_state": {"requested_service": "Otomasyon", "open_loop": "collect_name"},
+    }
+
+    result, conversation = run_generic_message(
+        monkeypatch,
+        "Kolay gelsin",
+        llm_result,
+        {"business_name": "DOEL Digital", "service_catalog": [{"display": "Otomasyon", "name": "Otomasyon"}]},
+        conversation,
+    )
+
+    assert conversation.get("full_name") is None
+    assert conversation.get("lead_name") is None
+    assert result.appointment_created is False
+    assert "telefon" not in gc.sanitize_text(result.reply_text).lower()
+
+
+def test_collect_name_real_full_name_is_saved(monkeypatch):
+    os.environ["CHATBOT_ENGINE"] = "generic"
+    llm_result = {
+        "intent": "active_booking",
+        "reply_text": "Telefon numaranızı alabilir miyim?",
+        "extracted_entities": {"lead_name": "Berkay Elbir"},
+        "requires_human": False,
+    }
+    conversation = {
+        "sender_id": "generic-collect-name-real-name-test",
+        "state": "collect_name",
+        "service": "Otomasyon",
+        "memory_state": {"requested_service": "Otomasyon", "open_loop": "collect_name"},
+    }
+
+    result, conversation = run_generic_message(
+        monkeypatch,
+        "Berkay Elbir",
+        llm_result,
+        {"business_name": "DOEL Digital", "service_catalog": [{"display": "Otomasyon", "name": "Otomasyon"}]},
+        conversation,
+    )
+
+    assert conversation.get("full_name") == "Berkay Elbir"
+    assert conversation.get("lead_name") == "Berkay Elbir"
+    assert conversation.get("state") == "collect_phone"
+
+
 def test_generic_collect_datetime_irrelevant_message_does_not_prompt_or_create(monkeypatch):
     os.environ["CHATBOT_ENGINE"] = "generic"
     create_calls = []
