@@ -1189,8 +1189,9 @@ def test_dirty_collect_phone_greeting_recovers_without_phone_prompt_or_name_writ
     assert conversation.get("phone") is None
     assert result.appointment_created is False
     assert "telefon" not in reply
-    assert "yarim kal" in reply or "yardimci" in reply
-    assert "fsm:active_state_recovery_reply" in result.decision_path
+    assert "yarim kal" not in reply
+    assert "yardimci" in reply
+    assert "fsm:active_greeting_safe_reply" in result.decision_path
 
 
 def test_collect_name_greeting_is_not_saved_as_full_name(monkeypatch):
@@ -1217,9 +1218,11 @@ def test_collect_name_greeting_is_not_saved_as_full_name(monkeypatch):
     )
 
     assert conversation.get("full_name") is None
+    reply = gc.sanitize_text(result.reply_text).lower()
     assert conversation.get("lead_name") is None
     assert result.appointment_created is False
-    assert "telefon" not in gc.sanitize_text(result.reply_text).lower()
+    assert "telefon" not in reply
+    assert "yarim kal" not in reply
 
 
 

@@ -203,6 +203,24 @@ def is_non_name_action_phrase(message_text: str | None) -> bool:
     return any(lowered.startswith(f"{phrase} ") for phrase in NON_NAME_ACTION_PHRASES)
 
 
+def is_active_salutation_message(message_text: str | None) -> bool:
+    lowered = sanitize_text(message_text or "").lower().strip(" .!?…")
+    if not lowered:
+        return False
+    salutations = {
+        "kolay gelsin",
+        "merhaba",
+        "selam",
+        "iyi gunler",
+        "iyi günler",
+        "tesekkurler",
+        "teşekkürler",
+        "tesekkur ederim",
+        "teşekkür ederim",
+    }
+    return lowered in salutations or any(lowered.startswith(f"{phrase} ") for phrase in salutations)
+
+
 def is_username_save_request(message_text: str | None) -> bool:
     lowered = sanitize_text(message_text or "").lower().strip(" .!?…")
     if not lowered:
@@ -1422,7 +1440,7 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
         
         active_fsm_applies = curr_state.startswith("collect_") and active_state_is_relevant
         if suppress_active_field_updates and not active_direct_clarification:
-            if is_simple_greeting(message_text):
+            if is_simple_greeting(message_text) or is_active_salutation_message(message_text):
                 intent = "direct_answer"
                 if is_booking_field_collection_reply(reply_text):
                     reply_text = "Merhaba, buradayım. Nasıl yardımcı olabilirim?"
