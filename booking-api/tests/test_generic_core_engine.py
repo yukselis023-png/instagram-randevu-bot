@@ -1383,6 +1383,42 @@ def test_dirty_active_state_missing_name_accepts_llm_full_name_without_recovery(
 
 
 
+def test_collect_name_payment_question_repairs_llm_field_prompt(monkeypatch):
+    os.environ["CHATBOT_ENGINE"] = "generic"
+    llm_result = {
+        "intent": "price_question",
+        "reply_text": "Otomasyon hizmetimiz ilk 3 ay indirimli aylık 5.000 TL'dir. Detayları netleştirmek için isminizi öğrenebilir miyim?",
+        "extracted_entities": {"requested_service": "Otomasyon"},
+        "requires_human": False,
+    }
+    conversation = {
+        "sender_id": "generic-active-payment-field-prompt-repair-test",
+        "state": "collect_name",
+        "service": "Otomasyon",
+        "memory_state": {"requested_service": "Otomasyon", "open_loop": "collect_name"},
+    }
+
+    result, conversation = run_generic_message(
+        monkeypatch,
+        "Ödeme nasıl oluyor?",
+        llm_result,
+        {"business_name": "DOEL Digital", "service_catalog": [{"display": "Otomasyon", "name": "Otomasyon"}]},
+        conversation,
+    )
+
+    reply = gc.sanitize_text(result.reply_text).lower()
+    assert conversation.get("state") == "collect_name"
+    assert conversation.get("full_name") is None
+    assert result.appointment_created is False
+    assert result.appointment_id is None
+    assert "odeme" in reply
+    assert "on gorus" in reply
+    assert "ismin" not in reply
+    assert "ad soyad" not in reply
+    assert "fsm:active_direct_clarification_reply" in result.decision_path
+
+
+
 def test_active_recovery_does_not_overwrite_valid_llm_reply(monkeypatch):
     os.environ["CHATBOT_ENGINE"] = "generic"
     llm_reply = "Tabii, özüne dönüş tarafını netleştiririz. Önce mevcut hedefinizi kısaca anlayalım."

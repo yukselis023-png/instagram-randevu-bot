@@ -92,7 +92,7 @@ def is_booking_field_collection_reply(reply_text: str | None) -> bool:
     lowered = sanitize_text(reply_text or "").lower()
     if not lowered:
         return False
-    asks_name = any(token in lowered for token in ("ad soyad", "adinizi", "adınızı", "isminizi", "isim soyisim"))
+    asks_name = any(token in lowered for token in ("ad soyad", "adinizi", "adınızı", "isminizi", "ismininizi", "isminizi öğren", "isminizi ogren", "ismininizi öğren", "ismininizi ogren", "isim soyisim"))
     asks_phone = "telefon" in lowered and any(token in lowered for token in ("alabilir", "paylas", "paylaş", "yazar", "rica"))
     asks_datetime = any(token in lowered for token in ("uygun gun", "uygun gün", "uygun saat", "hangi saat", "gun ve saat", "gün ve saat"))
     return asks_name or asks_phone or asks_datetime
@@ -103,7 +103,7 @@ def reply_asks_for_collection_state(reply_text: str | None, state: str | None) -
     if not lowered:
         return False
     if state == "collect_name":
-        return any(token in lowered for token in ("ad soyad", "adinizi", "adınızı", "isminizi", "isim soyisim"))
+        return any(token in lowered for token in ("ad soyad", "adinizi", "adınızı", "isminizi", "ismininizi", "isminizi öğren", "isminizi ogren", "ismininizi öğren", "ismininizi ogren", "isim soyisim"))
     if state == "collect_phone":
         return "telefon" in lowered and any(token in lowered for token in ("alabilir", "paylas", "paylaş", "yazar", "rica"))
     if state == "collect_datetime":
