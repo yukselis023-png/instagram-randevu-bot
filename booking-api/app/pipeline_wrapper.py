@@ -412,6 +412,173 @@ def build_info_answer_final(
     }
 
 
+# ============================================================
+# PHASE 4D — APPOINTMENT ACTION REPLY FINAL BUILDER
+# ============================================================
+
+_APPT_CREATE_FAIL_REPLY = (
+    "Randevu kaydını şu an kesinleştiremedim; "
+    "bilgilerinizi ekibin kontrol etmesi için not aldım."
+)
+_APPT_UPDATE_FAIL_REPLY = (
+    "Saat değişikliği talebinizi ekibe iletmek üzere not aldım. "
+    "Mevcut randevu kaydınız korunuyor."
+)
+
+# Phrases that must NOT appear unless DB action succeeded
+_FALSE_CONFIRM_PHRASES = (
+    "oluşturuldu",
+    "kaydınız oluşturuldu",
+    "ön görüşmeniz ayarlandı",
+    "sizi arayacağız",
+    "şlem tamamlandı",
+)
+_FALSE_UPDATE_PHRASES = (
+    "saatiniz güncellendi",
+    "randevunuz değiştirildi",
+    "olarak güncelledim",
+    "güncellendi",
+)
+
+
+def build_appointment_action_reply(
+    action_result: dict,
+    *,
+    conversation: dict,
+) -> dict:
+    """
+    Phase 4D Final Builder for appointment action replies.
+
+    Reads the DB action result and produces the canonical outbound_text.
+    Never produces confirmations without verified DB success.
+
+    action_result keys:
+      action           : str  (appointment_created | appointment_updated |
+                               appointment_create_failed | appointment_update_failed |
+                               reschedule_pending_confirmation | none)
+      db_success       : bool
+      appointment_created  : bool
+      appointment_updated  : bool
+      appointment_id   : int | None
+      appointment_date : str | None   (formatted, e.g. "11.05.2026")
+      appointment_time : str | None   (e.g. "13:00")
+      same_appointment_id : bool
+      reschedule_date  : str | None
+      reschedule_time  : str | None
+      error            : str | None
+    """
+    from app.generic_core import (
+        build_confirmation_message,
+        build_reschedule_confirmation_question,
+        sanitize_text,
+    )
+
+    action = action_result.get("action", "none")
+    db_success = bool(action_result.get("db_success"))
+    appointment_created = bool(action_result.get("appointment_created"))
+    appointment_updated = bool(action_result.get("appointment_updated"))
+    appointment_id = action_result.get("appointment_id")
+
+    # --- 1. Appointment Created (happy path) ---
+    if action == "appointment_created":
+        if db_success and appointment_created and appointment_id:
+            text = build_confirmation_message(conversation)
+            return {
+                "outbound_text": text,
+                "source": "4d_appointment_created",
+                "block_reason": None,
+            }
+        # Conditions not met — safe failure
+        return {
+            "outbound_text": _APPT_CREATE_FAIL_REPLY,
+            "source": "4d_create_guard_failed",
+            "block_reason": "db_success_or_id_missing",
+        }
+
+    # --- 2. Appointment Updated (reschedule confirmed) ---
+    if action == "appointment_updated":
+        if db_success and appointment_updated and appointment_id:
+            upd_time = action_result.get("appointment_time") or ""
+            text = (
+                f"Ön görüşme saatiniz {upd_time} olarak güncellendi."
+                if upd_time
+                else "Randevu bilgileriniz güncellendi."
+            )
+            return {
+                "outbound_text": text,
+                "source": "4d_appointment_updated",
+                "block_reason": None,
+            }
+        return {
+            "outbound_text": _APPT_UPDATE_FAIL_REPLY,
+            "source": "4d_update_guard_failed",
+            "block_reason": "db_update_not_confirmed",
+        }
+
+    # --- 3. Reschedule pending confirmation ---
+    if action == "reschedule_pending_confirmation":
+        r_date = action_result.get("reschedule_date")
+        r_time = action_result.get("reschedule_time")
+        text = build_reschedule_confirmation_question(conversation, r_date, r_time)
+        return {
+            "outbound_text": text,
+            "source": "4d_reschedule_pending",
+            "block_reason": None,
+        }
+
+    # --- 4. Create failed ---
+    if action == "appointment_create_failed":
+        return {
+            "outbound_text": _APPT_CREATE_FAIL_REPLY,
+            "source": "4d_appointment_create_failed",
+            "block_reason": "create_failed",
+        }
+
+    # --- 5. Update failed ---
+    if action == "appointment_update_failed":
+        return {
+            "outbound_text": _APPT_UPDATE_FAIL_REPLY,
+            "source": "4d_appointment_update_failed",
+            "block_reason": "update_failed",
+        }
+
+    # --- 6. No action (action=none) — nothing to produce here ---
+    return {
+        "outbound_text": None,
+        "source": "4d_no_action",
+        "block_reason": None,
+    }
+
+
+def validate_appointment_reply_no_false_confirmation(
+    reply_text: str | None,
+    *,
+    appointment_created: bool,
+    appointment_updated: bool,
+    appointment_id,
+) -> tuple[bool, str | None]:
+    """
+    Invariant guard: ensure reply_text does not contain confirmation
+    phrases when the DB action didn't actually succeed.
+    Returns (is_safe, block_reason).
+    """
+    if not reply_text:
+        return True, None
+    lowered = reply_text.lower()
+
+    if not appointment_created and not appointment_id:
+        for phrase in _FALSE_CONFIRM_PHRASES:
+            if phrase in lowered:
+                return False, f"false_confirm_phrase:{phrase}"
+
+    if not appointment_updated:
+        for phrase in _FALSE_UPDATE_PHRASES:
+            if phrase in lowered:
+                return False, f"false_update_phrase:{phrase}"
+
+    return True, None
+
+
 def run_shadow_pipeline(message_text: str, conversation: dict, memory: dict, extracted: dict, result_dict: dict, old_outbound_text: str | None, commit_changes: bool = False) -> dict:
     ai_reply_candidate = generate_ai_answer_candidate(result_dict)
     entities_result = validate_entities(conversation, extracted)

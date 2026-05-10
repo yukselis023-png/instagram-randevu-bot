@@ -1657,6 +1657,7 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
         enforce_missing_field_prompts = os.environ.get("ANSWER_FIRST_ENFORCE_MISSING_FIELD_PROMPTS", "false").lower() == "true"
         enforce_completed_followups = os.environ.get("ANSWER_FIRST_ENFORCE_COMPLETED_FOLLOWUPS", "false").lower() == "true"
         enforce_info_answers = os.environ.get("ANSWER_FIRST_ENFORCE_INFO_ANSWERS", "false").lower() == "true"
+        enforce_appointment_action_replies = os.environ.get("ANSWER_FIRST_ENFORCE_APPOINTMENT_ACTION_REPLIES", "false").lower() == "true"
         
         if shadow_mode in ("shadow", "on") or enforce_direct_question:
             from app.pipeline_wrapper import run_shadow_pipeline
@@ -1724,6 +1725,64 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
                 except Exception as e:
                     logger.exception("phase4a_final_builder_failed message_text=%s", sanitize_text(message_text or "")[:50])
         # --- PHASE 4A END ---
+
+        # --- PHASE 4D — APPOINTMENT ACTION REPLY FINAL BUILDER ---
+        if enforce_appointment_action_replies and not handoff:
+            from app.pipeline_wrapper import build_appointment_action_reply, validate_appointment_reply_no_false_confirmation
+            try:
+                # Determine which action occurred
+                _4d_action = "none"
+                if appointment_created and appointment_id:
+                    _4d_action = "appointment_created"
+                elif not appointment_created and "guard:appointment_create_failed" in " ".join(decision_path):
+                    _4d_action = "appointment_create_failed"
+
+                # Build action result dict for the Final Builder
+                _4d_result_dict = {
+                    "action": _4d_action,
+                    "db_success": appointment_created,
+                    "appointment_created": appointment_created,
+                    "appointment_updated": False,
+                    "appointment_id": appointment_id,
+                    "appointment_date": conversation.get("requested_date"),
+                    "appointment_time": conversation.get("requested_time"),
+                    "same_appointment_id": False,
+                    "reschedule_date": None,
+                    "reschedule_time": None,
+                    "error": None,
+                }
+
+                _4d_reply = build_appointment_action_reply(
+                    _4d_result_dict,
+                    conversation=conversation,
+                )
+                _4d_text = _4d_reply.get("outbound_text")
+                _4d_src = _4d_reply.get("source", "4d_no_action")
+
+                if _4d_text and _4d_action != "none":
+                    reply_text = _4d_text
+                    final_reply_source = _4d_src
+                    metrics["final_reply_source"] = final_reply_source
+                    decision_path.append(f"enforce:4d_{_4d_src}")
+                elif _4d_reply.get("block_reason"):
+                    decision_path.append(f"4d_block:{_4d_reply['block_reason']}")
+
+                # Invariant guard: reply_text must never contain false confirmation
+                _is_safe, _block_reason = validate_appointment_reply_no_false_confirmation(
+                    reply_text,
+                    appointment_created=appointment_created,
+                    appointment_updated=False,
+                    appointment_id=appointment_id,
+                )
+                if not _is_safe:
+                    reply_text = "Randevu kaydını şu an kesinleştiremedim; bilgilerinizi ekibin kontrol etmesi için not aldım."
+                    final_reply_source = "4d_false_confirm_blocked"
+                    metrics["final_reply_source"] = final_reply_source
+                    decision_path.append(f"4d_invariant_block:{_block_reason}")
+
+            except Exception as e:
+                logger.exception("phase4d_appointment_action_reply_failed message_text=%s", sanitize_text(message_text or "")[:50])
+        # --- PHASE 4D END ---
 
         # --- PHASE 4C — INFO / CONFIG ANSWER FINAL BUILDER ---
         if enforce_info_answers and not handoff and not appointment_created and not is_confirmed_generic_appointment(conversation):
