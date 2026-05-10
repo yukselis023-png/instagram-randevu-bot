@@ -1325,6 +1325,28 @@ def test_generic_blocks_unconfigured_price_and_discount_hallucination(monkeypatc
 
 
 
+def test_generic_compacts_overlong_llm_reply(monkeypatch):
+    os.environ["CHATBOT_ENGINE"] = "generic"
+    long_reply = (
+        "Otomasyon tarafında gelen mesajlara hızlı yanıt verir, randevu taleplerini toplar ve müşteri takibini düzenli hale getirir. "
+        "Bu sayede ekibiniz aynı soruları tekrar tekrar yanıtlamak zorunda kalmaz. "
+        "Ayrıca tüm süreci CRM tarafında takip edebilirsiniz. "
+        "İsterseniz size uygun akışı kısa bir ön görüşmede netleştirebiliriz."
+    )
+
+    result, _conversation = run_generic_message(
+        monkeypatch,
+        "Otomasyon ne işe yarar?",
+        {"intent": "direct_answer", "reply_text": long_reply, "extracted_entities": {"requested_service": "Otomasyon"}, "requires_human": False},
+        {"business_name": "DOEL Digital", "service_catalog": [{"display": "Otomasyon", "name": "Otomasyon"}]},
+    )
+
+    assert len(result.reply_text) <= 300
+    assert result.reply_text.count(".") <= 3
+    assert "guard:compact_overlong_reply" in result.decision_path
+
+
+
 def test_collect_name_real_full_name_is_saved(monkeypatch):
     os.environ["CHATBOT_ENGINE"] = "generic"
     llm_result = {

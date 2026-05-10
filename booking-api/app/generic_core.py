@@ -1706,7 +1706,9 @@ BUSINESS CONTEXT:
 KONUŞMA STİLİ:
 - En son müşteri mesajını merkeze al; önce o mesaja doğrudan cevap ver.
 - Önceki konuşmada zaten selamlaştıysanız tekrar "Merhaba/Selam" ile başlama.
-- Instagram DM gibi kısa yaz: çoğu cevap 1-2 kısa cümle olsun.
+- KISA VE NET YAZ: reply_text çoğu durumda 160 karakteri geçmesin; maksimum 2 kısa cümle olsun.
+- Uzun açıklama, paragraf, madde madde liste ve satış metni yazma; müşteri detay isterse bile en kritik 1-2 noktayı söyle.
+- Instagram DM gibi doğal yaz; cevap tek ekranda hızlı okunmalı.
 - En fazla 1 net soru sor; birden fazla eksik bilgiyi aynı anda sorma.
 - Müşteri açıkça istemedikçe randevu, ön görüşme, telefon veya tarih/saat isteme; booking akışını zorlama. Ancak hizmete olumlu ilgi gösterirse kısa ve yumuşak bir sonraki adım önerebilirsin.
 - Genel kurumsal tanıtım, hizmet kataloğu dökümü ve alakasız çapraz satış yapma.
@@ -1725,6 +1727,7 @@ SATIŞ VE ÖN GÖRÜŞME YÖNLENDİRMESİ:
 - Gerçek slot/müsaitlik bilinmiyorsa "kesin boş", "müsait", "randevunuz hazır" deme; "uygunluk oluşturabiliriz", "genelde şu saatler arasında alıyoruz", "şu saatlerden biri sizin için uygun olur mu?", "netleştirelim" gibi güvenli ifadeler kullan.
 - Randevu DB'ye kaydedilmeden ve appointment_id olmadan "randevunuz oluşturuldu", "ön görüşmeniz ayarlandı" veya kesin confirmation cümlesi kurma.
 - Her yanıtta en fazla 1 soru sor; cevaplar kısa, doğal, profesyonel ve Instagram DM dilinde kalsın.
+- Yanıt uzuyorsa kısalt: önce soruyu cevapla, sonra gerekiyorsa tek kısa yönlendirme ekle.
 
 RANDEVU AKIŞI:
 Eğer son konuşmada veya hafızada bir hizmet zaten biliniyorsa (requested_service / selected_service / service_interest), booking opt-in geldiğinde bu hizmeti kullan; "hangi hizmeti araştırıyorsunuz?" diye tekrar sorma.
@@ -1796,6 +1799,22 @@ def build_unconfigured_price_guard_reply(message_text: str | None, extracted: di
     return f"{service.capitalize()} tarafında süreci otomatikleştirip mesaj yanıtlama, takip ve randevu akışlarını daha düzenli hale getirebiliriz. İsterseniz kısa bir ön görüşmede ihtiyacınızı netleştirelim."
 
 
+def compact_overlong_reply(reply: str | None, *, max_chars: int = 300, max_sentences: int = 3) -> str | None:
+    clean = re.sub(r"\s+", " ", str(reply or "")).strip()
+    if not clean:
+        return None
+    lowered = sanitize_text(clean).lower()
+    if re.search(r"\d", clean) or is_appointment_confirmation_like_reply(clean) or re.search(r"(?<![a-z0-9])(?:tl|try|usd|eur)(?![a-z0-9])", lowered) or any(token in lowered for token in ("fiyat", "ucret", "ücret")):
+        return None
+    sentences = [part.strip() for part in re.split(r"(?<=[.!?…])\s+", clean) if part.strip()]
+    if len(clean) <= max_chars and len(sentences) <= max_sentences:
+        return None
+    compact = " ".join(sentences[:max_sentences]) if len(sentences) > max_sentences else clean
+    if len(compact) > max_chars:
+        compact = compact[:max_chars].rsplit(" ", 1)[0].rstrip(" ,;:-") + "."
+    return compact if compact and compact != clean else None
+
+
 def generic_quality_guard(reply: str, extracted: dict, memory: dict, cfg: dict, message_text: str | None = None) -> Tuple[str, Optional[str]]:
     # 1. Config Service Matching
     if extracted.get("requested_service"):
@@ -1818,5 +1837,9 @@ def generic_quality_guard(reply: str, extracted: dict, memory: dict, cfg: dict, 
     cleaned_reply = strip_leading_greeting_for_non_greeting(message_text or "", reply)
     if cleaned_reply != reply:
         return cleaned_reply, "strip_repeated_greeting"
+
+    compact_reply = compact_overlong_reply(reply)
+    if compact_reply:
+        return compact_reply, "compact_overlong_reply"
         
     return reply, None
