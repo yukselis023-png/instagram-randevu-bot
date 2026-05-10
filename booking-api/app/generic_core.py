@@ -1621,6 +1621,26 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
         metrics["fallback_reason"] = fallback_reasons
         metrics["llm_raw_reply_text"] = llm_raw_reply_text
         metrics["final_reply_source"] = final_reply_source
+        
+        # --- PHASE 2 SHADOW PIPELINE START ---
+        # Feature flag control
+        shadow_mode = os.environ.get("ANSWER_FIRST_PIPELINE", "off")
+        if shadow_mode in ("shadow", "on"):
+            from app.pipeline_wrapper import run_shadow_pipeline
+            try:
+                shadow_result = run_shadow_pipeline(
+                    message_text=message_text,
+                    conversation=conversation, 
+                    memory=memory, 
+                    extracted=extracted, 
+                    result_dict=result_dict, 
+                    old_outbound_text=reply_text
+                )
+                metrics["answer_first_shadow"] = shadow_result
+            except Exception as e:
+                logger.exception("shadow_pipeline_failed message_text=%s", sanitize_text(message_text or "")[:50])
+                metrics["answer_first_shadow"] = {"error": str(e)}
+        # --- PHASE 2 SHADOW PIPELINE END ---
 
         update_conversation_memory_after_bot_reply(conversation, reply_text, "|".join(decision_path))
 
