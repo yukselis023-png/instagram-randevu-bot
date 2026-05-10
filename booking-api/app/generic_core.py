@@ -1654,6 +1654,7 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
         # Feature flag control
         shadow_mode = os.environ.get("ANSWER_FIRST_PIPELINE", "off")
         enforce_direct_question = os.environ.get("ANSWER_FIRST_ENFORCE_ACTIVE_DIRECT_QUESTION", "false").lower() == "true"
+        enforce_missing_field_prompts = os.environ.get("ANSWER_FIRST_ENFORCE_MISSING_FIELD_PROMPTS", "false").lower() == "true"
         
         if shadow_mode in ("shadow", "on") or enforce_direct_question:
             from app.pipeline_wrapper import run_shadow_pipeline
@@ -1690,6 +1691,38 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
             except Exception as e:
                 logger.exception("shadow_pipeline_failed message_text=%s", sanitize_text(message_text or "")[:50])
                 metrics["answer_first_shadow"] = {"error": str(e)}
+        # --- PHASE 4A — FINAL BUILDER MISSING FIELD ENFORCEMENT ---
+        if enforce_missing_field_prompts and not handoff and not appointment_created:
+            curr_state_4a = conversation.get("state", "new")
+            in_collect_state = curr_state_4a in ("collect_name", "collect_phone", "collect_datetime")
+            # Only applies to missing field prompt paths — not appointment create/update/reschedule/duplicate
+            if in_collect_state and final_reply_source in ("fsm", "fsm_direct_answer", "llm_raw", "answer_first_enforced", "fallback"):
+                from app.pipeline_wrapper import check_missing_fields, build_final_missing_field_prompt
+                try:
+                    mf_result = check_missing_fields(conversation, memory)
+                    missing = mf_result.get("missing_fields", [])
+                    # Determine context flags
+                    _is_direct_q = bool(active_direct_clarification)
+                    _wants_booking = bool(
+                        booking_opt_in
+                        or intent in ("booking_request", "active_booking")
+                        or active_fsm_applies
+                    )
+                    composed = build_final_missing_field_prompt(
+                        ai_reply_candidate=reply_text,
+                        missing_fields=missing,
+                        direct_question=_is_direct_q,
+                        wants_booking=_wants_booking,
+                    )
+                    if composed and composed != reply_text:
+                        reply_text = composed
+                        final_reply_source = "final_builder_missing_field"
+                        metrics["final_reply_source"] = final_reply_source
+                        decision_path.append("enforce:final_builder_missing_field_prompt")
+                except Exception as e:
+                    logger.exception("phase4a_final_builder_failed message_text=%s", sanitize_text(message_text or "")[:50])
+        # --- PHASE 4A END ---
+
         # --- PHASE 2/3 SHADOW PIPELINE END ---
 
         update_conversation_memory_after_bot_reply(conversation, reply_text, "|".join(decision_path))
