@@ -1347,6 +1347,42 @@ def test_generic_compacts_overlong_llm_reply(monkeypatch):
 
 
 
+def test_dirty_active_state_missing_name_accepts_llm_full_name_without_recovery(monkeypatch):
+    os.environ["CHATBOT_ENGINE"] = "generic"
+    llm_result = {
+        "intent": "active_booking",
+        "reply_text": "Memnun oldum Berkay Bey. Ön görüşme için size ulaşabileceğimiz bir telefon numarası alabilir miyim?",
+        "extracted_entities": {"lead_name": "Berkay Cakmak", "requested_service": "Performans Pazarlama"},
+        "requires_human": False,
+    }
+    conversation = {
+        "sender_id": "generic-dirty-active-missing-name-test",
+        "state": "collect_datetime",
+        "service": "Performans Pazarlama",
+        "memory_state": {"requested_service": "Performans Pazarlama", "open_loop": "collect_datetime"},
+    }
+
+    result, conversation = run_generic_message(
+        monkeypatch,
+        "Berkay Çakmak",
+        llm_result,
+        {"business_name": "DOEL Digital", "service_catalog": [{"display": "Performans Pazarlama", "name": "Performans Pazarlama"}]},
+        conversation,
+    )
+
+    reply = gc.sanitize_text(result.reply_text).lower()
+    assert conversation.get("full_name") == "Berkay Cakmak"
+    assert conversation.get("lead_name") == "Berkay Cakmak"
+    assert conversation.get("state") == "collect_phone"
+    assert result.appointment_created is False
+    assert result.appointment_id is None
+    assert "telefon" in reply
+    assert "yarim kal" not in reply
+    assert "fsm:active_state_recovery_reply" not in result.decision_path
+    assert "fsm:active_llm_name_relevant" in result.decision_path
+
+
+
 def test_collect_name_real_full_name_is_saved(monkeypatch):
     os.environ["CHATBOT_ENGINE"] = "generic"
     llm_result = {

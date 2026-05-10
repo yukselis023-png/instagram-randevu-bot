@@ -1360,6 +1360,20 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
             booking_opt_in = False
             intent = "direct_answer"
         active_state_is_relevant, active_state_label = active_state_relevance(message_text, state_before_entities, cfg)
+        llm_active_name_candidate = extracted.get("lead_name")
+        if (
+            str(state_before_entities or "").startswith("collect_")
+            and not active_direct_clarification
+            and not active_state_is_relevant
+            and not conversation.get("full_name")
+            and not is_booking_acknowledgement_message(message_text)
+            and not is_simple_greeting(message_text)
+            and not is_active_salutation_message(message_text)
+            and is_valid_name_candidate(llm_active_name_candidate, require_full_name=True)
+        ):
+            active_state_is_relevant = True
+            active_state_label = "name"
+            decision_path.append("fsm:active_llm_name_relevant")
         suppress_active_field_updates = str(state_before_entities or "").startswith("collect_") and (active_direct_clarification or not active_state_is_relevant)
         if active_direct_clarification:
             decision_path.append("fsm:active_direct_clarification")
