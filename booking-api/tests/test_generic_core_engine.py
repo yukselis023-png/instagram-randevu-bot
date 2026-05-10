@@ -1606,32 +1606,38 @@ def test_generic_false_confirmation_guard_catches_confirmation_variants(monkeypa
         assert "hazir" not in normalized_reply
 
 
-def test_generic_collect_name_booking_ack_keeps_state_without_name(monkeypatch):
+def test_generic_collect_name_continue_signals_prompt_for_name_without_writing_name_or_appointment(monkeypatch):
     os.environ["CHATBOT_ENGINE"] = "generic"
-    llm_result = {
-        "intent": "booking_request",
-        "reply_text": "Ön görüşme için bilgilerinizi alayım.",
-        "extracted_entities": {"lead_name": "Olur Görüşelim"},
-        "requires_human": False,
-    }
-    conversation = {
-        "sender_id": "generic-collect-name-ack-test",
-        "state": "collect_name",
-        "service": "Otomasyon",
-        "memory_state": {"requested_service": "Otomasyon"},
-    }
+    config = {"business_name": "DOEL Digital", "service_catalog": [{"display": "Otomasyon", "name": "Otomasyon"}]}
 
-    result, conversation = run_generic_message(
-        monkeypatch,
-        "Olur görüşelim",
-        llm_result,
-        {"business_name": "DOEL Digital", "service_catalog": [{"display": "Otomasyon", "name": "Otomasyon"}]},
-        conversation,
-    )
+    for idx, message in enumerate(["Tamam", "Olur", "Görüşelim"]):
+        llm_result = {
+            "intent": "booking_request",
+            "reply_text": "Ön görüşme için bilgilerinizi alayım.",
+            "extracted_entities": {"lead_name": message, "requested_service": "Otomasyon"},
+            "requires_human": False,
+        }
+        conversation = {
+            "sender_id": f"generic-collect-name-continue-test-{idx}",
+            "state": "collect_name",
+            "service": "Otomasyon",
+            "memory_state": {"requested_service": "Otomasyon", "open_loop": "collect_name"},
+        }
+        create_calls = []
+        monkeypatch.setattr(gc, "create_appointment", lambda *args, **kwargs: create_calls.append(args) or (999, 0))
 
-    assert conversation.get("state") == "collect_name"
-    assert conversation.get("full_name") is None
-    assert "ad soyad" in gc.sanitize_text(result.reply_text).lower()
+        result, conversation = run_generic_message(monkeypatch, message, llm_result, config, conversation)
+
+        reply = gc.sanitize_text(result.reply_text).lower()
+        assert conversation.get("state") == "collect_name"
+        assert conversation.get("full_name") is None
+        assert conversation.get("lead_name") is None
+        assert result.appointment_created is False
+        assert result.appointment_id is None
+        assert create_calls == []
+        assert "ad" in reply and "soyad" in reply
+        assert "yarim kal" not in reply
+        assert "fsm:collect_name_continue_prompt" in result.decision_path
 
 
 def test_generic_completed_pending_reschedule_location_question_does_not_repeat_confirmation(monkeypatch):

@@ -129,6 +129,27 @@ def is_booking_acknowledgement_message(message_text: str) -> bool:
     }
 
 
+def is_collect_name_continue_signal(message_text: str) -> bool:
+    lowered = sanitize_text(message_text or "").lower().strip(" .!?…")
+    if not lowered:
+        return False
+    return lowered in {
+        "tamam",
+        "olur",
+        "evet",
+        "goruselim",
+        "görüşelim",
+        "planlayalim",
+        "planlayalım",
+        "iyi olur",
+        "tamam olur",
+        "tamam goruselim",
+        "tamam görüşelim",
+        "olur goruselim",
+        "olur görüşelim",
+    }
+
+
 def is_price_question(message_text: str) -> bool:
     lowered = sanitize_text(message_text or "").lower()
     return any(token in lowered for token in ("ne kadar", "fiyat", "ucret", "ücret", "kac tl", "kaç tl", "bedel"))
@@ -1400,12 +1421,22 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
         
         active_fsm_applies = curr_state.startswith("collect_") and active_state_is_relevant
         if suppress_active_field_updates and not active_direct_clarification:
-            recovery_reply = build_active_state_recovery_reply(curr_state)
-            if recovery_reply:
-                reply_text = recovery_reply
+            if (
+                curr_state == "collect_name"
+                and not conversation.get("full_name")
+                and is_collect_name_continue_signal(message_text)
+            ):
+                reply_text = "Harika. Kayıt oluşturabilmem için adınızı ve soyadınızı alabilir miyim?"
                 final_reply_source = "fsm"
                 intent = "direct_answer"
-                decision_path.append("fsm:active_state_recovery_reply")
+                decision_path.append("fsm:collect_name_continue_prompt")
+            else:
+                recovery_reply = build_active_state_recovery_reply(curr_state)
+                if recovery_reply:
+                    reply_text = recovery_reply
+                    final_reply_source = "fsm"
+                    intent = "direct_answer"
+                    decision_path.append("fsm:active_state_recovery_reply")
         if not handoff and not suppress_active_field_updates and (booking_opt_in or intent in ["booking_request", "active_booking"] or active_fsm_applies):
             carried_service = remember_requested_service(conversation, memory, known_requested_service(conversation, memory))
             has_service = bool(carried_service)
