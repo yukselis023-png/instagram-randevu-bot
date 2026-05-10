@@ -98,6 +98,19 @@ def is_booking_field_collection_reply(reply_text: str | None) -> bool:
     return asks_name or asks_phone or asks_datetime
 
 
+def reply_asks_for_collection_state(reply_text: str | None, state: str | None) -> bool:
+    lowered = sanitize_text(reply_text or "").lower()
+    if not lowered:
+        return False
+    if state == "collect_name":
+        return any(token in lowered for token in ("ad soyad", "adinizi", "adınızı", "isminizi", "isim soyisim"))
+    if state == "collect_phone":
+        return "telefon" in lowered and any(token in lowered for token in ("alabilir", "paylas", "paylaş", "yazar", "rica"))
+    if state == "collect_datetime":
+        return any(token in lowered for token in ("uygun gun", "uygun gün", "uygun saat", "hangi saat", "gun ve saat", "gün ve saat", "yarin", "yarın", "oglen", "öğlen"))
+    return False
+
+
 def build_active_direct_clarification_reply(message_text: str, cfg: dict[str, Any], conversation: dict[str, Any], memory: dict[str, Any]) -> str | None:
     lowered = sanitize_text(message_text or "").lower()
     contact_name = sanitize_text(cfg.get("human_contact_name") or "Berkay")
@@ -1539,9 +1552,17 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
         elif (curr_state.startswith("collect_") and active_state_is_relevant and not active_direct_clarification and (is_llm_error_reply(reply_text) or state_changed_by_fsm or invalid_phone_prompt or active_state_label in {"name_ack", "username_save"})):
             active_prompt = build_active_booking_prompt_reply(conversation, memory)
             if active_prompt:
-                reply_text = active_prompt
-                final_reply_source = "fsm"
-                decision_path.append("fsm:active_booking_prompt")
+                if (
+                    state_changed_by_fsm
+                    and not invalid_phone_prompt
+                    and not is_llm_error_reply(reply_text)
+                    and reply_asks_for_collection_state(reply_text, conversation.get("state"))
+                ):
+                    decision_path.append("fsm:active_booking_prompt_preserved_llm")
+                else:
+                    reply_text = active_prompt
+                    final_reply_source = "fsm"
+                    decision_path.append("fsm:active_booking_prompt")
 
         if active_direct_clarification and (is_llm_error_reply(reply_text) or is_booking_field_collection_reply(reply_text)):
             direct_reply = build_active_direct_clarification_reply(message_text, cfg, conversation, memory)

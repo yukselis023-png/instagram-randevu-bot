@@ -1383,6 +1383,39 @@ def test_dirty_active_state_missing_name_accepts_llm_full_name_without_recovery(
 
 
 
+def test_collect_name_valid_llm_phone_prompt_is_not_overwritten(monkeypatch):
+    os.environ["CHATBOT_ENGINE"] = "generic"
+    llm_reply = "Memnun oldum Berkay Bey. Ön görüşme için size ulaşabileceğimiz bir telefon numarası alabilir miyim?"
+    llm_result = {
+        "intent": "active_booking",
+        "reply_text": llm_reply,
+        "extracted_entities": {"lead_name": "Berkay Cakmak", "requested_service": "Performans Pazarlama"},
+        "requires_human": False,
+    }
+    conversation = {
+        "sender_id": "generic-collect-name-preserve-llm-phone-test",
+        "state": "collect_name",
+        "service": "Performans Pazarlama",
+        "memory_state": {"requested_service": "Performans Pazarlama", "open_loop": "collect_name"},
+    }
+
+    result, conversation = run_generic_message(
+        monkeypatch,
+        "Berkay Çakmak",
+        llm_result,
+        {"business_name": "DOEL Digital", "service_catalog": [{"display": "Performans Pazarlama", "name": "Performans Pazarlama"}]},
+        conversation,
+    )
+
+    assert conversation.get("full_name") == "Berkay Cakmak"
+    assert conversation.get("state") == "collect_phone"
+    assert result.reply_text == llm_reply
+    assert result.final_reply_source == "llm_raw"
+    assert "fsm:active_booking_prompt_preserved_llm" in result.decision_path
+    assert "fsm:active_booking_prompt" not in result.decision_path
+
+
+
 def test_collect_name_real_full_name_is_saved(monkeypatch):
     os.environ["CHATBOT_ENGINE"] = "generic"
     llm_result = {
