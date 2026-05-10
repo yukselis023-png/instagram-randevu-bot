@@ -1222,6 +1222,106 @@ def test_collect_name_greeting_is_not_saved_as_full_name(monkeypatch):
     assert "telefon" not in gc.sanitize_text(result.reply_text).lower()
 
 
+
+def test_collect_name_simple_greeting_preserves_llm_reply_without_recovery(monkeypatch):
+    os.environ["CHATBOT_ENGINE"] = "generic"
+    llm_result = {
+        "intent": "direct_answer",
+        "reply_text": "Merhaba, nasıl yardımcı olabilirim?",
+        "extracted_entities": {"lead_name": "Merhaba"},
+        "requires_human": False,
+    }
+    conversation = {
+        "sender_id": "generic-collect-name-merhaba-test",
+        "state": "collect_name",
+        "service": "Otomasyon",
+        "memory_state": {"requested_service": "Otomasyon", "open_loop": "collect_name"},
+    }
+
+    result, conversation = run_generic_message(
+        monkeypatch,
+        "Merhaba",
+        llm_result,
+        {"business_name": "DOEL Digital", "service_catalog": [{"display": "Otomasyon", "name": "Otomasyon"}]},
+        conversation,
+    )
+
+    reply = gc.sanitize_text(result.reply_text).lower()
+    assert conversation.get("full_name") is None
+    assert conversation.get("lead_name") is None
+    assert result.appointment_created is False
+    assert "yarim kal" not in reply
+    assert "tesekkur" not in reply
+    assert result.reply_text == "Merhaba, nasıl yardımcı olabilirim?"
+    assert "fsm:active_greeting_preserve_llm_reply" in result.decision_path
+
+
+def test_collect_name_meeting_method_question_gets_answered_without_recovery(monkeypatch):
+    os.environ["CHATBOT_ENGINE"] = "generic"
+    llm_result = {
+        "intent": "active_booking",
+        "reply_text": "Ad soyadınızı alabilir miyim?",
+        "extracted_entities": {"lead_name": None, "requested_service": "Otomasyon"},
+        "requires_human": False,
+    }
+    conversation = {
+        "sender_id": "generic-collect-name-meeting-method-test",
+        "state": "collect_name",
+        "service": "Otomasyon",
+        "memory_state": {"requested_service": "Otomasyon", "open_loop": "collect_name"},
+    }
+
+    result, conversation = run_generic_message(
+        monkeypatch,
+        "Nasıl görüşeceğiz?",
+        llm_result,
+        {"business_name": "DOEL Digital", "service_catalog": [{"display": "Otomasyon", "name": "Otomasyon"}]},
+        conversation,
+    )
+
+    reply = gc.sanitize_text(result.reply_text).lower()
+    assert conversation.get("state") == "collect_name"
+    assert conversation.get("full_name") is None
+    assert conversation.get("lead_name") is None
+    assert result.appointment_created is False
+    assert "online" in reply or "baglanti" in reply or "iletişim" in result.reply_text.lower()
+    assert "yarim kal" not in reply
+    assert "fsm:active_direct_clarification_reply" in result.decision_path
+
+
+
+def test_generic_blocks_unconfigured_price_and_discount_hallucination(monkeypatch):
+    os.environ["CHATBOT_ENGINE"] = "generic"
+    llm_result = {
+        "intent": "direct_answer",
+        "reply_text": "Otomasyon çözümlerimiz ilk 3 ay indirimli olarak aylık 5.000 TL. Bu sistem mesajlarınıza 7/24 otomatik yanıt verir.",
+        "extracted_entities": {"requested_service": "Otomasyon"},
+        "requires_human": False,
+    }
+    conversation = {
+        "sender_id": "generic-price-hallucination-test",
+        "state": "new",
+        "memory_state": {},
+    }
+
+    result, conversation = run_generic_message(
+        monkeypatch,
+        "Otomasyon peki",
+        llm_result,
+        {"business_name": "DOEL Digital", "service_catalog": [{"display": "Otomasyon", "name": "Otomasyon"}]},
+        conversation,
+    )
+
+    reply = gc.sanitize_text(result.reply_text).lower()
+    assert "5.000" not in result.reply_text
+    assert not gc.re.search(r"(?<![a-z0-9])tl(?![a-z0-9])", reply)
+    assert "indirim" not in reply
+    assert "on gorus" in reply or "ön görüş" in result.reply_text.lower()
+    assert result.final_reply_source == "fsm_guard"
+    assert "guard:block_unconfigured_price_or_discount" in result.decision_path
+
+
+
 def test_collect_name_real_full_name_is_saved(monkeypatch):
     os.environ["CHATBOT_ENGINE"] = "generic"
     llm_result = {

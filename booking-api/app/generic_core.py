@@ -67,7 +67,7 @@ def is_active_booking_direct_clarification_question(message_text: str) -> bool:
         "kiminle", "kimle", "kim arayacak", "kim arar", "kim gorusecek", "kim görüşecek",
         "berkay", "anlamadim", "anlamadım", "hicbir sey", "hiçbir şey", "ne demek",
         "detay", "detaylari", "detayları", "anlatir misiniz", "anlatır mısınız",
-        "nereden", "online", "video", "odeme", "ödeme", "nasil yapiliyor", "nasıl yapılıyor",
+        "nereden", "online", "video", "nasil gorusecegiz", "nasıl görüşeceğiz", "nasil gorusuruz", "nasıl görüşürüz", "odeme", "ödeme", "nasil yapiliyor", "nasıl yapılıyor",
         "ne kadar sure", "ne kadar süre", "kac dakika", "kaç dakika", "surecek", "sürecek",
         "sonradan", "sonra yazar", "daha sonra",
     )
@@ -75,13 +75,14 @@ def is_active_booking_direct_clarification_question(message_text: str) -> bool:
     bare_active_clarifiers = (
         "kiminle", "kimle", "kim arayacak", "kim arar", "kim gorusecek", "kim görüşecek",
         "anlamadim", "anlamadım", "ne demek", "bu ne", "bu nasil", "bu nasıl",
+        "nasil gorusecegiz", "nasıl görüşeceğiz", "nasil gorusuruz", "nasıl görüşürüz",
         "sonradan", "sonra yazar", "daha sonra",
     )
     if any(marker in lowered for marker in bare_active_clarifiers):
         return True
     if "berkay" in lowered and any(marker in lowered for marker in ("kim", " mi", " mı", " mu", " mü", "arayacak", "arar", "bey")):
         return True
-    has_meeting_context = any(token in lowered for token in ("on gorus", "ön görüş", "gorusme", "görüşme", "randevu", "arama", "arayacak"))
+    has_meeting_context = any(token in lowered for token in ("on gorus", "ön görüş", "gorus", "görüş", "randevu", "arama", "arayacak"))
     if has_direct_marker and (has_meeting_context or "odeme" in lowered or "ödeme" in lowered or "nereden" in lowered):
         return True
     return False
@@ -103,7 +104,7 @@ def build_active_direct_clarification_reply(message_text: str, cfg: dict[str, An
     service = service_reply_phrase(known_requested_service(conversation, memory))
     if "odeme" in lowered or "ödeme" in lowered:
         return "Ödeme detayı ön görüşmede netleşir; uygun olursa havale/EFT veya online ödeme seçenekleri paylaşılır."
-    if "nereden" in lowered or "online" in lowered or "video" in lowered:
+    if any(token in lowered for token in ("nereden", "online", "video", "nasil gorusecegiz", "nasıl görüşeceğiz", "nasil gorusuruz", "nasıl görüşürüz")):
         return "Görüşme online olarak yapılır; ekibimiz uygun bağlantı veya iletişim bilgisini paylaşır."
     if any(token in lowered for token in ("kiminle", "kimle", "kim arayacak", "kim gorusecek", "kim görüşecek", "berkay", "anlamadim", "anlamadım")):
         return f"Ön görüşmeyi ekip arkadaşımız {contact_name} ile yapacaksınız. Bu görüşmede {service} ihtiyacınızı, uygun sistemi ve kurulum sürecini netleştiriyoruz."
@@ -1421,7 +1422,15 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
         
         active_fsm_applies = curr_state.startswith("collect_") and active_state_is_relevant
         if suppress_active_field_updates and not active_direct_clarification:
-            if (
+            if is_simple_greeting(message_text):
+                intent = "direct_answer"
+                if is_booking_field_collection_reply(reply_text):
+                    reply_text = "Merhaba, buradayım. Nasıl yardımcı olabilirim?"
+                    final_reply_source = "fsm"
+                    decision_path.append("fsm:active_greeting_safe_reply")
+                else:
+                    decision_path.append("fsm:active_greeting_preserve_llm_reply")
+            elif (
                 curr_state == "collect_name"
                 and not conversation.get("full_name")
                 and is_collect_name_continue_signal(message_text)
@@ -1517,6 +1526,8 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
                 reply_text = build_false_confirmation_guard_reply(conversation, memory)
                 final_reply_source = "fsm_guard"
                 decision_path.append("guard:block_false_appointment_confirmation")
+            elif guard_label == "block_unconfigured_price_or_discount":
+                final_reply_source = "fsm_guard"
             elif is_llm_error_reply(reply_text):
                 final_reply_source = "fallback"
             decision_path.append(f"guard:{guard_label}")
@@ -1739,6 +1750,34 @@ Müşterinin yeni mesajını incele. Oku ve aşağıdaki JSON formatına SIKI SI
             "_llm_error": str(e),
         }
 
+def reply_mentions_unconfigured_price_or_discount(reply: str | None) -> bool:
+    lowered = sanitize_text(reply or "").lower()
+    if not lowered:
+        return False
+    if any(token in lowered for token in ("indirim", "kampanya", "ucretsiz", "ücretsiz")):
+        return True
+    if "₺" in (reply or ""):
+        return True
+    if re.search(r"(?<![a-z0-9])(?:tl|try|usd|eur|dolar|euro)(?![a-z0-9])", lowered):
+        return True
+    if re.search(r"\b\d{2,}(?:[.,]\d{2,3})*\s*(?:lira|try|aylik|aylık)\b", lowered):
+        return True
+    return bool(re.search(r"\b(?:aylik|aylık)\s+\d", lowered))
+
+
+def has_configured_price_for_reply(cfg: dict[str, Any], extracted: dict, memory: dict) -> bool:
+    service_label = extracted.get("requested_service") or memory.get("requested_service") or memory.get("selected_service") or memory.get("service_interest")
+    service = find_service_config(cfg, service_label, memory)
+    return bool(service and sanitize_text(service.get("price") or ""))
+
+
+def build_unconfigured_price_guard_reply(message_text: str | None, extracted: dict, memory: dict) -> str:
+    service = service_reply_phrase(extracted.get("requested_service") or memory.get("requested_service") or memory.get("selected_service") or memory.get("service_interest"))
+    if is_price_question(message_text or ""):
+        return f"{service.capitalize()} için fiyat kapsamınıza göre ön görüşmede netleşir; net rakamı ihtiyacı gördükten sonra paylaşabiliriz."
+    return f"{service.capitalize()} tarafında süreci otomatikleştirip mesaj yanıtlama, takip ve randevu akışlarını daha düzenli hale getirebiliriz. İsterseniz kısa bir ön görüşmede ihtiyacınızı netleştirelim."
+
+
 def generic_quality_guard(reply: str, extracted: dict, memory: dict, cfg: dict, message_text: str | None = None) -> Tuple[str, Optional[str]]:
     # 1. Config Service Matching
     if extracted.get("requested_service"):
@@ -1754,6 +1793,9 @@ def generic_quality_guard(reply: str, extracted: dict, memory: dict, cfg: dict, 
     # 2. Prevent Booking confirmed without real fields locally
     if "Kaydınız oluşturuldu" in reply and (not memory.get("customer_phone") or not memory.get("requested_service")):
         return "İşlemlerinize devam edebilmem için lütfen bilgileri eksiksiz tamamlayalım.", "prevent_premature_confirm"
+
+    if reply_mentions_unconfigured_price_or_discount(reply) and not has_configured_price_for_reply(cfg, extracted, memory):
+        return build_unconfigured_price_guard_reply(message_text, extracted, memory), "block_unconfigured_price_or_discount"
 
     cleaned_reply = strip_leading_greeting_for_non_greeting(message_text or "", reply)
     if cleaned_reply != reply:
