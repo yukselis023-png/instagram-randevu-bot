@@ -1653,11 +1653,14 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
         # --- PHASE 2/3 SHADOW & SCALED PIPELINE START ---
         # Feature flag control
         shadow_mode = os.environ.get("ANSWER_FIRST_PIPELINE", "off")
-        enforce_direct_question = os.environ.get("ANSWER_FIRST_ENFORCE_ACTIVE_DIRECT_QUESTION", "false").lower() == "true"
-        enforce_missing_field_prompts = os.environ.get("ANSWER_FIRST_ENFORCE_MISSING_FIELD_PROMPTS", "false").lower() == "true"
-        enforce_completed_followups = os.environ.get("ANSWER_FIRST_ENFORCE_COMPLETED_FOLLOWUPS", "false").lower() == "true"
-        enforce_info_answers = os.environ.get("ANSWER_FIRST_ENFORCE_INFO_ANSWERS", "false").lower() == "true"
-        enforce_appointment_action_replies = os.environ.get("ANSWER_FIRST_ENFORCE_APPOINTMENT_ACTION_REPLIES", "false").lower() == "true"
+        # Phase 5 full cutover: when ANSWER_FIRST_PIPELINE=on all scoped enforce flags
+        # are automatically active — no need to set each individually in env.
+        _full_cutover = shadow_mode == "on"
+        enforce_direct_question = _full_cutover or os.environ.get("ANSWER_FIRST_ENFORCE_ACTIVE_DIRECT_QUESTION", "false").lower() == "true"
+        enforce_missing_field_prompts = _full_cutover or os.environ.get("ANSWER_FIRST_ENFORCE_MISSING_FIELD_PROMPTS", "false").lower() == "true"
+        enforce_completed_followups = _full_cutover or os.environ.get("ANSWER_FIRST_ENFORCE_COMPLETED_FOLLOWUPS", "false").lower() == "true"
+        enforce_info_answers = _full_cutover or os.environ.get("ANSWER_FIRST_ENFORCE_INFO_ANSWERS", "false").lower() == "true"
+        enforce_appointment_action_replies = _full_cutover or os.environ.get("ANSWER_FIRST_ENFORCE_APPOINTMENT_ACTION_REPLIES", "false").lower() == "true"
         
         if shadow_mode in ("shadow", "on") or enforce_direct_question:
             from app.pipeline_wrapper import run_shadow_pipeline
