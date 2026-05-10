@@ -1383,6 +1383,62 @@ def test_dirty_active_state_missing_name_accepts_llm_full_name_without_recovery(
 
 
 
+def test_active_recovery_does_not_overwrite_valid_llm_reply(monkeypatch):
+    os.environ["CHATBOT_ENGINE"] = "generic"
+    llm_reply = "Tabii, özüne dönüş tarafını netleştiririz. Önce mevcut hedefinizi kısaca anlayalım."
+    conversation = {
+        "sender_id": "generic-active-recovery-preserve-llm-test",
+        "state": "collect_phone",
+        "full_name": "Berkay Cakmak",
+        "lead_name": "Berkay Cakmak",
+        "service": "Performans Pazarlama",
+        "memory_state": {"requested_service": "Performans Pazarlama", "open_loop": "collect_phone"},
+    }
+
+    result, conversation = run_generic_message(
+        monkeypatch,
+        "Özüne dönüş",
+        {"intent": "direct_answer", "reply_text": llm_reply, "extracted_entities": {"requested_service": "Performans Pazarlama"}, "requires_human": False},
+        {"business_name": "DOEL Digital", "service_catalog": [{"display": "Performans Pazarlama", "name": "Performans Pazarlama"}]},
+        conversation,
+    )
+
+    reply = gc.sanitize_text(result.reply_text).lower()
+    assert result.reply_text == llm_reply
+    assert result.final_reply_source == "llm_raw"
+    assert conversation.get("full_name") == "Berkay Cakmak"
+    assert "yarim kal" not in reply
+    assert "fsm:active_state_recovery_preserved_llm" in result.decision_path
+    assert "fsm:active_state_recovery_reply" not in result.decision_path
+
+
+
+def test_service_carryover_does_not_overwrite_valid_llm_field_prompt(monkeypatch):
+    os.environ["CHATBOT_ENGINE"] = "generic"
+    llm_reply = "Tabii. Ön görüşme için ad soyadınızı alabilir miyim?"
+    conversation = {
+        "sender_id": "generic-service-carryover-preserve-llm-test",
+        "state": "new",
+        "service": "Performans Pazarlama",
+        "memory_state": {"requested_service": "Performans Pazarlama"},
+    }
+
+    result, conversation = run_generic_message(
+        monkeypatch,
+        "Tamam görüşelim",
+        {"intent": "booking_request", "reply_text": llm_reply, "extracted_entities": {"requested_service": "Performans Pazarlama"}, "requires_human": False},
+        {"business_name": "DOEL Digital", "service_catalog": [{"display": "Performans Pazarlama", "name": "Performans Pazarlama"}]},
+        conversation,
+    )
+
+    assert conversation.get("state") == "collect_name"
+    assert result.reply_text == llm_reply
+    assert result.final_reply_source == "llm_raw"
+    assert "fsm:service_carryover_preserved_llm" in result.decision_path
+    assert "fsm:service_carryover_booking" not in result.decision_path
+
+
+
 def test_collect_name_valid_llm_phone_prompt_is_not_overwritten(monkeypatch):
     os.environ["CHATBOT_ENGINE"] = "generic"
     llm_reply = "Memnun oldum Berkay Bey. Ön görüşme için size ulaşabileceğimiz bir telefon numarası alabilir miyim?"

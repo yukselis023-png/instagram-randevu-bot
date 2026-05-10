@@ -111,6 +111,19 @@ def reply_asks_for_collection_state(reply_text: str | None, state: str | None) -
     return False
 
 
+def can_preserve_valid_llm_reply_from_overwrite(reply_text: str | None, *, appointment_created: bool = False, appointment_id: Any = None) -> bool:
+    clean = sanitize_text(reply_text or "").strip()
+    if not clean or is_llm_error_reply(clean):
+        return False
+    if generic_llm_reply_rejection_reason(clean):
+        return False
+    if is_booking_field_collection_reply(clean):
+        return False
+    if is_appointment_confirmation_like_reply(clean) and (not appointment_created or not appointment_id):
+        return False
+    return True
+
+
 def build_active_direct_clarification_reply(message_text: str, cfg: dict[str, Any], conversation: dict[str, Any], memory: dict[str, Any]) -> str | None:
     lowered = sanitize_text(message_text or "").lower()
     contact_name = sanitize_text(cfg.get("human_contact_name") or "Berkay")
@@ -1487,10 +1500,14 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
             else:
                 recovery_reply = build_active_state_recovery_reply(curr_state)
                 if recovery_reply:
-                    reply_text = recovery_reply
-                    final_reply_source = "fsm"
-                    intent = "direct_answer"
-                    decision_path.append("fsm:active_state_recovery_reply")
+                    if final_reply_source == "llm_raw" and can_preserve_valid_llm_reply_from_overwrite(reply_text, appointment_created=appointment_created, appointment_id=appointment_id):
+                        intent = "direct_answer"
+                        decision_path.append("fsm:active_state_recovery_preserved_llm")
+                    else:
+                        reply_text = recovery_reply
+                        final_reply_source = "fsm"
+                        intent = "direct_answer"
+                        decision_path.append("fsm:active_state_recovery_reply")
         if not handoff and not suppress_active_field_updates and (booking_opt_in or intent in ["booking_request", "active_booking"] or active_fsm_applies):
             carried_service = remember_requested_service(conversation, memory, known_requested_service(conversation, memory))
             has_service = bool(carried_service)
@@ -1546,9 +1563,12 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
             and service_for_booking
             and conversation.get("state") in {"collect_name", "collect_phone"}
         ):
-            reply_text = build_service_carryover_booking_reply(service_for_booking, conversation.get("state"))
-            final_reply_source = "fsm"
-            decision_path.append("fsm:service_carryover_booking")
+            if final_reply_source == "llm_raw" and reply_asks_for_collection_state(reply_text, conversation.get("state")):
+                decision_path.append("fsm:service_carryover_preserved_llm")
+            else:
+                reply_text = build_service_carryover_booking_reply(service_for_booking, conversation.get("state"))
+                final_reply_source = "fsm"
+                decision_path.append("fsm:service_carryover_booking")
         elif (curr_state.startswith("collect_") and active_state_is_relevant and not active_direct_clarification and (is_llm_error_reply(reply_text) or state_changed_by_fsm or invalid_phone_prompt or active_state_label in {"name_ack", "username_save"})):
             active_prompt = build_active_booking_prompt_reply(conversation, memory)
             if active_prompt:
