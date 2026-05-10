@@ -146,6 +146,75 @@ def build_final_missing_field_prompt(
     return ai_reply_candidate
 
 
+# ============================================================
+# PHASE 4B — COMPLETED FOLLOW-UP ANSWER-FIRST ENFORCEMENT
+# ============================================================
+
+_COMPLETED_FOLLOWUP_SAFE_FALLBACK = (
+    "Mevcut ön görüşme kaydınız korunuyor. Ek bir detay olursa buradan yazabilirsiniz."
+)
+
+
+def _is_completed_followup_field_prompt(text: str) -> bool:
+    """True if the text is asking for a booking field — forbidden in completed state."""
+    from app.generic_core import sanitize_text, is_booking_field_collection_reply
+    return is_booking_field_collection_reply(text)
+
+
+def build_completed_followup_answer_first(
+    ai_reply_candidate: str | None,
+    *,
+    appointment_created: bool = False,
+    appointment_id=None,
+) -> dict:
+    """
+    Phase 4B Final Builder for completed/confirmed appointment follow-ups.
+
+    Contract:
+    - AI reply_candidate is preferred when valid.
+    - Safe fallback only when AI is empty, error, false confirmation,
+      config-outside info, or field collection prompt.
+    - appointment_created / appointment_updated always False here.
+    - Returns dict with outbound_text, source, and block_reason.
+    """
+    from app.generic_core import (
+        is_appointment_confirmation_like_reply,
+        is_llm_error_reply,
+        sanitize_text,
+    )
+
+    candidate = (ai_reply_candidate or "").strip()
+
+    # --- Block conditions ---
+    block_reason = None
+
+    if not candidate:
+        block_reason = "ai_empty"
+    elif is_llm_error_reply(candidate):
+        block_reason = "ai_error"
+    elif is_appointment_confirmation_like_reply(candidate) and (not appointment_created or not appointment_id):
+        block_reason = "false_confirmation"
+    elif _is_completed_followup_field_prompt(candidate):
+        block_reason = "field_prompt_in_completed_state"
+
+    if block_reason:
+        return {
+            "outbound_text": _COMPLETED_FOLLOWUP_SAFE_FALLBACK,
+            "source": "completed_followup_safe_fallback",
+            "block_reason": block_reason,
+            "appointment_created": False,
+            "appointment_updated": False,
+        }
+
+    return {
+        "outbound_text": candidate,
+        "source": "completed_followup_ai",
+        "block_reason": None,
+        "appointment_created": False,
+        "appointment_updated": False,
+    }
+
+
 def run_shadow_pipeline(message_text: str, conversation: dict, memory: dict, extracted: dict, result_dict: dict, old_outbound_text: str | None, commit_changes: bool = False) -> dict:
     ai_reply_candidate = generate_ai_answer_candidate(result_dict)
     entities_result = validate_entities(conversation, extracted)

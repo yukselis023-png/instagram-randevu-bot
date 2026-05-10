@@ -1655,6 +1655,7 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
         shadow_mode = os.environ.get("ANSWER_FIRST_PIPELINE", "off")
         enforce_direct_question = os.environ.get("ANSWER_FIRST_ENFORCE_ACTIVE_DIRECT_QUESTION", "false").lower() == "true"
         enforce_missing_field_prompts = os.environ.get("ANSWER_FIRST_ENFORCE_MISSING_FIELD_PROMPTS", "false").lower() == "true"
+        enforce_completed_followups = os.environ.get("ANSWER_FIRST_ENFORCE_COMPLETED_FOLLOWUPS", "false").lower() == "true"
         
         if shadow_mode in ("shadow", "on") or enforce_direct_question:
             from app.pipeline_wrapper import run_shadow_pipeline
@@ -1722,6 +1723,34 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
                 except Exception as e:
                     logger.exception("phase4a_final_builder_failed message_text=%s", sanitize_text(message_text or "")[:50])
         # --- PHASE 4A END ---
+
+        # --- PHASE 4B — COMPLETED FOLLOW-UP ANSWER-FIRST ENFORCEMENT ---
+        if enforce_completed_followups and not handoff and not appointment_created:
+            _is_completed = is_confirmed_generic_appointment(conversation)
+            if _is_completed:
+                from app.pipeline_wrapper import build_completed_followup_answer_first
+                try:
+                    # AI reply_candidate: use the LLM reply that was produced before FSM overrides.
+                    # result_dict["reply_text"] is the raw LLM output; reply_text may already be
+                    # a legacy FSM string — we prefer the raw LLM answer when flag=true.
+                    _ai_candidate = (result_dict.get("reply_text") or "").strip() or reply_text
+                    _4b_result = build_completed_followup_answer_first(
+                        _ai_candidate,
+                        appointment_created=appointment_created,
+                        appointment_id=appointment_id,
+                    )
+                    _new_text = _4b_result.get("outbound_text")
+                    _source = _4b_result.get("source", "completed_followup_ai")
+                    if _new_text and _new_text != reply_text:
+                        reply_text = _new_text
+                        final_reply_source = _source
+                        metrics["final_reply_source"] = final_reply_source
+                        decision_path.append(f"enforce:4b_{_source}")
+                    if _4b_result.get("block_reason"):
+                        decision_path.append(f"4b_block:{_4b_result['block_reason']}")
+                except Exception as e:
+                    logger.exception("phase4b_completed_followup_failed message_text=%s", sanitize_text(message_text or "")[:50])
+        # --- PHASE 4B END ---
 
         # --- PHASE 2/3 SHADOW PIPELINE END ---
 
