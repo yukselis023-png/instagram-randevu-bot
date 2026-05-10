@@ -215,6 +215,203 @@ def build_completed_followup_answer_first(
     }
 
 
+# ============================================================
+# PHASE 4C — INFO / CONFIG ANSWER FINAL BUILDER
+# ============================================================
+
+_INFO_SAFE_FALLBACK = (
+    "Bu konuda daha fazla bilgi almak isterseniz ön görüşmede netleştirebiliriz."
+)
+_PRICE_UNKNOWN_SERVICE_FALLBACK = (
+    "Hangi hizmet için fiyat bilgisi almak istersiniz: web sitesi, otomasyon veya reklam?"
+)
+_PRICE_NO_CONFIG_FALLBACK = (
+    "Bu hizmetin fiyatı kapsamınıza göre netleşir. "
+    "İhtiyacınızı gördükten sonra doğru teklif paylaşılır."
+)
+
+
+def _extract_numeric_price_from_text(text: str) -> str | None:
+    """
+    Pull the first price-like token from text.
+    Returns a normalised digits-only string like '12900', or None.
+    """
+    import re
+    m = re.search(r"[₺]?\s*(\d{1,3}(?:[.,]\d{3})*)\s*(?:TL|₺|lira|try)?", text, re.IGNORECASE)
+    if m:
+        raw = m.group(1).replace(".", "").replace(",", "")
+        return raw
+    return None
+
+
+def _config_price_digits(price_str: str | None) -> str | None:
+    """Normalise config price to pure digits for comparison."""
+    if not price_str:
+        return None
+    import re
+    digits = re.sub(r"[^\d]", "", price_str)
+    return digits or None
+
+
+def _is_catalog_dump(text: str) -> bool:
+    """Heuristic: too many bullet points or char count > 400."""
+    if not text:
+        return False
+    bullet_count = text.count("\n-") + text.count("\n•") + text.count("\n*")
+    if bullet_count >= 3:
+        return True
+    if len(text) > 400:
+        return True
+    return False
+
+
+def build_info_answer_final(
+    ai_reply_candidate: str | None,
+    *,
+    cfg: dict,
+    message_text: str,
+    service_label: str | None,
+    is_price_q: bool,
+    wants_booking: bool,
+) -> dict:
+    """
+    Phase 4C Final Builder for info / config answer paths.
+
+    Contract:
+    - AI reply preferred when config-safe.
+    - Price guard: wrong price → config correction; correct price → preserve AI.
+    - Field drift guard: field collection prompts blocked when wants_booking=False.
+    - Error guard: LLM error → safe fallback.
+    - Catalog dump guard: overlong list → info fallback.
+    - No hardcoded per-intent reply chains.
+    - Returns dict with outbound_text, source, block_reason.
+    """
+    from app.generic_core import (
+        is_booking_field_collection_reply,
+        is_llm_error_reply,
+        reply_mentions_unconfigured_price_or_discount,
+        find_service_config,
+        build_service_price_reply,
+    )
+
+    candidate = (ai_reply_candidate or "").strip()
+
+    # --- Guard 1: LLM error or empty ---
+    if not candidate or is_llm_error_reply(candidate):
+        return {
+            "outbound_text": _INFO_SAFE_FALLBACK,
+            "source": "info_safe_fallback",
+            "block_reason": "ai_error_or_empty",
+        }
+
+    # --- Guard 2: field collection drift (only block when no booking opt-in) ---
+    if is_booking_field_collection_reply(candidate) and not wants_booking:
+        import re
+        trimmed = re.split(
+            r"(?:Ad|İsim|Telefon|Uygun\s+gün|Randevu\s+oluştur|Ad\s+soyad)[^.!?]*[.!?]",
+            candidate, flags=re.IGNORECASE
+        )
+        clean = trimmed[0].strip() if trimmed and trimmed[0].strip() else None
+        if clean and len(clean) > 20:
+            return {
+                "outbound_text": clean,
+                "source": "info_ai_field_trimmed",
+                "block_reason": "field_drift_trimmed",
+            }
+        return {
+            "outbound_text": _INFO_SAFE_FALLBACK,
+            "source": "info_safe_fallback",
+            "block_reason": "field_drift_in_info_path",
+        }
+
+    # --- Guard 3: catalog dump ---
+    if _is_catalog_dump(candidate):
+        return {
+            "outbound_text": _INFO_SAFE_FALLBACK,
+            "source": "info_safe_fallback",
+            "block_reason": "catalog_dump",
+        }
+
+    # --- Guard 4: price correctness ---
+    if is_price_q:
+        ai_price_digits = _extract_numeric_price_from_text(candidate)
+        if ai_price_digits:
+            service_cfg = find_service_config(cfg, service_label, {})
+            config_price_str = service_cfg.get("price") if service_cfg else None
+            config_price_digits = _config_price_digits(config_price_str)
+            if config_price_digits and ai_price_digits != config_price_digits:
+                # AI gave wrong price → correct with config
+                display = (service_cfg or {}).get("display") or service_label or "Bu hizmet"
+                correction_text = (
+                    f"{display} paket fiyatı {config_price_str}. "
+                    "Kapsamı ihtiyaca göre ön görüşmede netleştiriyoruz."
+                )
+                return {
+                    "outbound_text": correction_text,
+                    "source": "info_price_corrected",
+                    "block_reason": "ai_wrong_price",
+                }
+            # AI price matches config (or no config price to compare) → preserve AI
+            return {
+                "outbound_text": candidate,
+                "source": "info_ai_price_verified",
+                "block_reason": None,
+            }
+        else:
+            # AI did NOT give a price figure
+            service_cfg = find_service_config(cfg, service_label, {})
+            if service_cfg:
+                config_price_str = service_cfg.get("price")
+                if config_price_str:
+                    display = service_cfg.get("display") or service_label or "Bu hizmet"
+                    correction_text = (
+                        f"{display} paket fiyatı {config_price_str}. "
+                        "Kapsamı ihtiyaca göre ön görüşmede netleştiriyoruz."
+                    )
+                    return {
+                        "outbound_text": correction_text,
+                        "source": "info_price_supplemented",
+                        "block_reason": "ai_missing_price",
+                    }
+                # Service known, no config price → preserve AI
+                return {
+                    "outbound_text": candidate,
+                    "source": "info_ai_no_config_price",
+                    "block_reason": None,
+                }
+            # Service unknown → clarification question
+            return {
+                "outbound_text": _PRICE_UNKNOWN_SERVICE_FALLBACK,
+                "source": "info_price_service_unknown",
+                "block_reason": "service_unknown_no_price",
+            }
+
+    # --- Guard 5: hallucinated discount / campaign ---
+    if reply_mentions_unconfigured_price_or_discount(candidate):
+        service_cfg = find_service_config(cfg, service_label, {})
+        config_price_str = (service_cfg or {}).get("price")
+        display = (service_cfg or {}).get("display") or service_label
+        if config_price_str and display:
+            correction_text = (
+                f"{display} paket fiyatı {config_price_str}. "
+                "Kapsamı ihtiyaca göre ön görüşmede netleştiriyoruz."
+            )
+        else:
+            correction_text = _PRICE_NO_CONFIG_FALLBACK
+        return {
+            "outbound_text": correction_text,
+            "source": "info_discount_hallucination_blocked",
+            "block_reason": "unconfigured_discount_or_price",
+        }
+
+    # --- All guards passed: preserve AI reply ---
+    return {
+        "outbound_text": candidate,
+        "source": "info_ai_preserved",
+        "block_reason": None,
+    }
+
+
 def run_shadow_pipeline(message_text: str, conversation: dict, memory: dict, extracted: dict, result_dict: dict, old_outbound_text: str | None, commit_changes: bool = False) -> dict:
     ai_reply_candidate = generate_ai_answer_candidate(result_dict)
     entities_result = validate_entities(conversation, extracted)

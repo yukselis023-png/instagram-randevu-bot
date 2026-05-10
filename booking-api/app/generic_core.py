@@ -1656,6 +1656,7 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
         enforce_direct_question = os.environ.get("ANSWER_FIRST_ENFORCE_ACTIVE_DIRECT_QUESTION", "false").lower() == "true"
         enforce_missing_field_prompts = os.environ.get("ANSWER_FIRST_ENFORCE_MISSING_FIELD_PROMPTS", "false").lower() == "true"
         enforce_completed_followups = os.environ.get("ANSWER_FIRST_ENFORCE_COMPLETED_FOLLOWUPS", "false").lower() == "true"
+        enforce_info_answers = os.environ.get("ANSWER_FIRST_ENFORCE_INFO_ANSWERS", "false").lower() == "true"
         
         if shadow_mode in ("shadow", "on") or enforce_direct_question:
             from app.pipeline_wrapper import run_shadow_pipeline
@@ -1723,6 +1724,51 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
                 except Exception as e:
                     logger.exception("phase4a_final_builder_failed message_text=%s", sanitize_text(message_text or "")[:50])
         # --- PHASE 4A END ---
+
+        # --- PHASE 4C — INFO / CONFIG ANSWER FINAL BUILDER ---
+        if enforce_info_answers and not handoff and not appointment_created and not is_confirmed_generic_appointment(conversation):
+            # Applies only to info/config answer paths (not FSM collect, not completed, not reschedule)
+            _info_paths = (
+                "reply:company_capability",
+                "reply:service_overview_config",
+                "reply:service_overview_llm_raw",
+                "reply:preconsultation_explanation",
+                "reply:service_price",
+                "reply:business_fit",
+                "reply:user_business_identity_llm_raw",
+                "reply:user_business_identity_config",
+            )
+            _in_info_path = any(
+                any(dp.startswith(p) for p in _info_paths)
+                for dp in decision_path
+            )
+            if _in_info_path:
+                from app.pipeline_wrapper import build_info_answer_final
+                try:
+                    _ai_candidate_4c = (result_dict.get("reply_text") or "").strip() or reply_text
+                    _svc_label = known_requested_service(conversation, memory)
+                    _is_price_q = is_price_question(message_text)
+                    _wants_bkg = bool(booking_opt_in or intent in ("booking_request", "active_booking"))
+                    _4c_result = build_info_answer_final(
+                        _ai_candidate_4c,
+                        cfg=cfg,
+                        message_text=message_text,
+                        service_label=_svc_label,
+                        is_price_q=_is_price_q,
+                        wants_booking=_wants_bkg,
+                    )
+                    _new_text_4c = _4c_result.get("outbound_text")
+                    _src_4c = _4c_result.get("source", "info_ai_preserved")
+                    if _new_text_4c and _new_text_4c != reply_text:
+                        reply_text = _new_text_4c
+                        final_reply_source = _src_4c
+                        metrics["final_reply_source"] = final_reply_source
+                        decision_path.append(f"enforce:4c_{_src_4c}")
+                    if _4c_result.get("block_reason"):
+                        decision_path.append(f"4c_block:{_4c_result['block_reason']}")
+                except Exception as e:
+                    logger.exception("phase4c_info_answer_failed message_text=%s", sanitize_text(message_text or "")[:50])
+        # --- PHASE 4C END ---
 
         # --- PHASE 4B — COMPLETED FOLLOW-UP ANSWER-FIRST ENFORCEMENT ---
         if enforce_completed_followups and not handoff and not appointment_created:
