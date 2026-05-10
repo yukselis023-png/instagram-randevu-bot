@@ -1449,6 +1449,21 @@ def test_active_recovery_does_not_overwrite_valid_llm_reply(monkeypatch):
 
 
 
+def test_existing_generic_appointment_id_uses_sender_id_fallback(monkeypatch):
+    calls = []
+
+    def fake_find(_conn, user_id, preferred_date=None, preferred_time=None):
+        calls.append({"user_id": user_id, "preferred_date": preferred_date, "preferred_time": preferred_time})
+        return {"id": 777}
+
+    monkeypatch.setattr(gc, "find_active_appointment_for_user", fake_find)
+    conversation = {"sender_id": "sender-fallback", "requested_date": "2026-05-11", "requested_time": "12:00"}
+
+    assert gc.existing_generic_appointment_id(conversation, DummyConn()) == 777
+    assert calls == [{"user_id": "sender-fallback", "preferred_date": "2026-05-11", "preferred_time": "12:00"}]
+
+
+
 def test_service_carryover_does_not_overwrite_valid_llm_field_prompt(monkeypatch):
     os.environ["CHATBOT_ENGINE"] = "generic"
     llm_reply = "Tabii. Ön görüşme için ad soyadınızı alabilir miyim?"

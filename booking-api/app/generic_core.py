@@ -899,11 +899,12 @@ def existing_generic_appointment_id(conversation: dict[str, Any], conn: Any | No
             return int(conversation.get("appointment_id"))
     except Exception:
         pass
-    if conn is not None and conversation.get("instagram_user_id"):
+    lookup_user_id = conversation.get("instagram_user_id") or conversation.get("sender_id")
+    if conn is not None and lookup_user_id:
         try:
             appointment = find_active_appointment_for_user(
                 conn,
-                conversation.get("instagram_user_id"),
+                lookup_user_id,
                 preferred_date=conversation.get("requested_date"),
                 preferred_time=conversation.get("requested_time"),
             )
