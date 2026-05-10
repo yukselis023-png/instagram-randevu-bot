@@ -95,6 +95,31 @@ _MISSING_FIELD_PROMPT_DIRECT: dict[str, str] = {
     "service":         "Hangi hizmeti düşündüğünüzü da paylaşabilirsiniz.",
 }
 
+# Keyword sets: if AI reply already asks for this field, skip the suffix.
+_FIELD_ASK_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "full_name": (
+        "adınızı", "adinizi", "ad soyad", "isminizi", "ismininizi",
+        "soyadınızı", "soyadinizi", "adını", "adini",
+    ),
+    "phone": (
+        "telefon", "numaranızı", "numaranizi", "numara", "no",
+    ),
+    "requested_date": (
+        "gün", "gun", "tarih", "hangi gün", "hangi gun",
+    ),
+    "requested_time": (
+        "saat", "saati", "saatin",
+    ),
+}
+
+
+def _ai_already_asks_field(ai_text: str, field: str) -> bool:
+    """Return True if ai_text already asks for the given missing field."""
+    if not ai_text or field not in _FIELD_ASK_KEYWORDS:
+        return False
+    lowered = ai_text.lower()
+    return any(kw in lowered for kw in _FIELD_ASK_KEYWORDS[field])
+
 _MISSING_FIELD_PROMPT_BOOKING: dict[str, str] = {
     # Direct/assertive — used when wants_booking=True and direct_question=False
     "full_name":       "Kayıt için adınızı ve soyadınızı paylaşabilir misiniz?",
@@ -131,8 +156,8 @@ def build_final_missing_field_prompt(
             return None
         if first_missing and first_missing in _MISSING_FIELD_PROMPT_DIRECT:
             suffix = _MISSING_FIELD_PROMPT_DIRECT[first_missing]
-            # Avoid duplicating if the AI already mentioned it
-            if suffix.lower()[:20] not in base.lower():
+            # Avoid duplicating if the AI already asked for this field
+            if not _ai_already_asks_field(base, first_missing):
                 return f"{base} {suffix}"
         return base
 
