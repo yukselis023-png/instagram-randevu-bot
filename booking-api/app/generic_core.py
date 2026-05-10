@@ -70,6 +70,7 @@ def is_active_booking_direct_clarification_question(message_text: str) -> bool:
         "nereden", "online", "video", "nasil gorusecegiz", "nasıl görüşeceğiz", "nasil gorusuruz", "nasıl görüşürüz", "odeme", "ödeme", "nasil yapiliyor", "nasıl yapılıyor",
         "ne kadar sure", "ne kadar süre", "kac dakika", "kaç dakika", "surecek", "sürecek",
         "sonradan", "sonra yazar", "daha sonra",
+        "arayacaklar", "arayacak misiniz", "beni arayacak"
     )
     has_direct_marker = any(marker in lowered for marker in direct_markers)
     bare_active_clarifiers = (
@@ -77,6 +78,7 @@ def is_active_booking_direct_clarification_question(message_text: str) -> bool:
         "anlamadim", "anlamadım", "ne demek", "bu ne", "bu nasil", "bu nasıl",
         "nasil gorusecegiz", "nasıl görüşeceğiz", "nasil gorusuruz", "nasıl görüşürüz",
         "sonradan", "sonra yazar", "daha sonra",
+        "beni arayacaklar", "arayacaklar"
     )
     if any(marker in lowered for marker in bare_active_clarifiers):
         return True
@@ -1156,6 +1158,32 @@ def is_appointment_confirmation_like_reply(reply: str) -> bool:
     return has_booking_context and has_definite_datetime and has_final_call_phrase
 
 
+def is_appointment_confirmation_like_reply_strict(reply: str) -> bool:
+    """Stricter version used when enforcing direct clarification answers.
+    Requires BOTH a definite datetime AND an explicit booking-created phrase.
+    Avoids false positives like 'sizi arayacak' in direct-question answers.
+    """
+    lowered = sanitize_text(reply or "").lower()
+    if not lowered:
+        return False
+    # Only block if reply explicitly claims a booking was created/scheduled
+    explicit_created = [
+        r"\brandevu(?:nuz|nuzu|niz|nizi)?\b.{0,80}\b(?:olusturdum|olusturuldu|tamamlandi|planlandi|ayarladim|ayarlandi|onaylandi)\b",
+        r"\b(?:on gorusme|gorusme)\b.{0,80}\b(?:kaydiniz|kaydini|randevunuz|randevunuzu)\b.{0,80}\b(?:olusturdum|olusturuldu|tamamlandi|hazir|planlandi|onaylandi|ayarlandi)\b",
+        r"\b(?:on gorusmeniz|gorusmeniz)\b.{0,80}\b(?:olusturuldu|tamamlandi|planlandi|onaylandi|ayarlandi)\b",
+        r"\b(?:kaydiniz|kaydinizi|kayit)\b.{0,80}\b(?:olusturdum|olusturuldu|tamamlandi|onaylandi)\b",
+        r"\bislem\b.{0,40}\btamamlandi\b",
+        r"\b(?:confirmed|scheduled)\b",
+    ]
+    if any(re.search(pattern, lowered) for pattern in explicit_created):
+        return True
+    # Also block if there's a definite datetime AND a call-to-action phrase (real confirmation)
+    has_definite_datetime = bool(re.search(r"\b(?:bugun|yarin|\d{1,2}[:.]\d{2}|saat\s*\d{1,2})\b", lowered))
+    has_booking_context = any(token in lowered for token in ["randevu", "on gorusme", "gorusme", "kayit"])
+    has_final_call_phrase = any(phrase in lowered for phrase in ["gorusmek uzere", "gorusuruz"])
+    return has_definite_datetime and has_booking_context and has_final_call_phrase
+
+
 def build_false_confirmation_guard_reply(conversation: dict[str, Any], memory: dict[str, Any]) -> str:
     state = conversation.get("state") or "collect_datetime"
     if state == "collect_datetime":
@@ -1622,10 +1650,12 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
         metrics["llm_raw_reply_text"] = llm_raw_reply_text
         metrics["final_reply_source"] = final_reply_source
         
-        # --- PHASE 2 SHADOW PIPELINE START ---
+        # --- PHASE 2/3 SHADOW & SCALED PIPELINE START ---
         # Feature flag control
         shadow_mode = os.environ.get("ANSWER_FIRST_PIPELINE", "off")
-        if shadow_mode in ("shadow", "on"):
+        enforce_direct_question = os.environ.get("ANSWER_FIRST_ENFORCE_ACTIVE_DIRECT_QUESTION", "false").lower() == "true"
+        
+        if shadow_mode in ("shadow", "on") or enforce_direct_question:
             from app.pipeline_wrapper import run_shadow_pipeline
             try:
                 shadow_result = run_shadow_pipeline(
@@ -1634,13 +1664,33 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
                     memory=memory, 
                     extracted=extracted, 
                     result_dict=result_dict, 
-                    old_outbound_text=reply_text
+                    old_outbound_text=reply_text,
+                    commit_changes=False
                 )
                 metrics["answer_first_shadow"] = shadow_result
+                
+                # Active Direct Question Enforcement
+                if enforce_direct_question:
+                    curr_state = conversation.get("state", "new")
+                    if curr_state in ("collect_name", "collect_phone", "collect_datetime") and active_direct_clarification:
+                        # Use the raw AI candidate (the LLM answer to the direct question).
+                        # We do NOT rely on the shadow safety guard here because the guard can
+                        # false-positive on replies like "sizi arayacak" which are valid direct
+                        # answers to clarification questions, not fake appointment confirmations.
+                        # We only block if the reply looks like a confirmed appointment (has a
+                        # definite date/time AND a final-call phrase AND a booking keyword).
+                        direct_candidate = shadow_result.get("ai_reply_candidate") or shadow_result.get("new_outbound_text")
+                        if direct_candidate and not is_appointment_confirmation_like_reply_strict(direct_candidate):
+                            reply_text = direct_candidate
+                            final_reply_source = "answer_first_enforced"
+                            metrics["final_reply_source"] = final_reply_source
+                            if "enforce:active_direct_question_answer_first" not in decision_path:
+                                decision_path.append("enforce:active_direct_question_answer_first")
+                                
             except Exception as e:
                 logger.exception("shadow_pipeline_failed message_text=%s", sanitize_text(message_text or "")[:50])
                 metrics["answer_first_shadow"] = {"error": str(e)}
-        # --- PHASE 2 SHADOW PIPELINE END ---
+        # --- PHASE 2/3 SHADOW PIPELINE END ---
 
         update_conversation_memory_after_bot_reply(conversation, reply_text, "|".join(decision_path))
 

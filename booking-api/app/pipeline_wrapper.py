@@ -67,7 +67,7 @@ def build_final_reply_shadow(candidate: str | None, missing: dict, action: dict,
         return "Safe fallback"
     return candidate
 
-def run_shadow_pipeline(message_text: str, conversation: dict, memory: dict, extracted: dict, result_dict: dict, old_outbound_text: str | None) -> dict:
+def run_shadow_pipeline(message_text: str, conversation: dict, memory: dict, extracted: dict, result_dict: dict, old_outbound_text: str | None, commit_changes: bool = False) -> dict:
     ai_reply_candidate = generate_ai_answer_candidate(result_dict)
     entities_result = validate_entities(conversation, extracted)
     state_result = update_state_memory_shadow(conversation, memory, entities_result.get("valid_entities", {}))
