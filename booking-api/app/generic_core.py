@@ -125,21 +125,6 @@ def can_preserve_valid_llm_reply_from_overwrite(reply_text: str | None, *, appoi
 
 
 def build_active_direct_clarification_reply(message_text: str, cfg: dict[str, Any], conversation: dict[str, Any], memory: dict[str, Any]) -> str | None:
-    lowered = sanitize_text(message_text or "").lower()
-    contact_name = sanitize_text(cfg.get("human_contact_name") or "Berkay")
-    service = service_reply_phrase(known_requested_service(conversation, memory))
-    if "odeme" in lowered or "ödeme" in lowered:
-        return "Ödeme detayı ön görüşmede netleşir; uygun olursa havale/EFT veya online ödeme seçenekleri paylaşılır."
-    if any(token in lowered for token in ("nereden", "online", "video", "nasil gorusecegiz", "nasıl görüşeceğiz", "nasil gorusuruz", "nasıl görüşürüz")):
-        return "Görüşme online olarak yapılır; ekibimiz uygun bağlantı veya iletişim bilgisini paylaşır."
-    if any(token in lowered for token in ("kiminle", "kimle", "kim arayacak", "kim gorusecek", "kim görüşecek", "berkay", "anlamadim", "anlamadım")):
-        return f"Ön görüşmeyi ekip arkadaşımız {contact_name} ile yapacaksınız. Bu görüşmede {service} ihtiyacınızı, uygun sistemi ve kurulum sürecini netleştiriyoruz."
-    if any(token in lowered for token in ("sonradan", "sonra yazar", "daha sonra")):
-        return "Tabii, ne zaman isterseniz buradan yazabilirsiniz. Kayda devam etmek isterseniz eksik bilgiyi paylaşmanız yeterli."
-    if any(token in lowered for token in ("ne kadar sure", "ne kadar süre", "kac dakika", "kaç dakika", "surecek", "sürecek")):
-        return "Ön görüşme genelde kısa bir ihtiyaç analizi şeklinde ilerler; süreyi kapsamınıza göre ekip arkadaşımız netleştirir."
-    if any(token in lowered for token in ("detay", "ne demek", "bu ne", "bu nasil", "bu nasıl", "anlat")):
-        return f"Ön görüşmede {service} ihtiyacınızı, mevcut sürecinizi ve size uygun çözüm kapsamını netleştiriyoruz."
     return None
 
 
@@ -477,38 +462,14 @@ def find_service_config(cfg: dict[str, Any], service_label: str | None, memory: 
 
 
 def build_service_price_reply(cfg: dict[str, Any], service_label: str | None, memory: dict[str, Any]) -> str | None:
-    service = find_service_config(cfg, service_label, memory)
-    if not service:
-        return None
-    display = sanitize_text(service.get("display") or service.get("name") or service_label or "Bu hizmet")
-    price = sanitize_text(service.get("price") or "")
-    price_note = sanitize_text(service.get("price_note") or "")
-    summary = sanitize_text(service.get("summary") or "")
-    if not price:
-        return None
-    note = f" ({price_note})" if price_note else ""
-    scope = f" Kapsam: {summary}" if summary else ""
-    return f"{display} için fiyat {price}{note}.{scope}"
+    return None
 
 
 def build_preconsultation_explanation_reply(service_label: str | None) -> str:
-    service = service_reply_phrase(service_label)
-    return f"Ön görüşmede {service} ihtiyacınızı, mevcut sürecinizi, hedefinizi ve uygun çözüm kapsamını netleştiriyoruz. Sonrasında size en mantıklı yol haritasını çıkarıyoruz."
+    return None
 
 
 def build_completed_followup_reply(message_text: str, cfg: dict[str, Any]) -> tuple[str | None, str | None]:
-    lowered = sanitize_text(message_text or "").lower()
-    contact_name = sanitize_text(cfg.get("human_contact_name") or "Berkay")
-    if "odeme" in lowered or "ödeme" in lowered:
-        return "Ödeme detayı ön görüşmede netleşir; uygun olursa havale/EFT veya online ödeme seçenekleri paylaşılır.", "completed_payment_reply"
-    if "nereden" in lowered or "online" in lowered or "video" in lowered:
-        return "Görüşme online olarak yapılır; ekibimiz uygun bağlantı veya iletişim bilgisini paylaşır.", "completed_location_reply"
-    if "berkay" in lowered and any(token in lowered for token in ("arar", "arayacak", "donus", "dönüş", "gorusecek", "görüşecek")):
-        return f"Evet, ekibimiz veya {contact_name} Bey uygunluk durumuna göre sizinle dönüş yapacak.", "completed_contact_reply"
-    if any(token in lowered for token in ("sonradan", "sonra yazar", "sonra yaz", "daha sonra")):
-        return "Tabii, ne zaman isterseniz buradan yazabilirsiniz. Mevcut ön görüşme kaydınız korunuyor.", "completed_later_reply"
-    if any(token in lowered for token in ("tesekkur", "teşekkür", "sagol", "sağol", "tamam")):
-        return "Rica ederiz, istediğiniz zaman buradan yazabilirsiniz.", "completed_closing_reply"
     return None, None
 
 
@@ -679,16 +640,7 @@ def is_service_overview_question(message_text: str, intent: str | None = None) -
 
 
 def build_natural_service_overview_reply(cfg: dict[str, Any]) -> str | None:
-    labels = _collect_natural_service_labels(cfg)
-    if not labels:
-        return None
-    services_text = _join_natural_list(labels)
-    digital_keywords = {"web sitesi", "reklam yönetimi", "sosyal medya", "mesaj/randevu otomasyonu"}
-    if any(label in digital_keywords for label in labels):
-        opener = "Kısaca işletmelerin dijitalde daha profesyonel görünmesini ve daha fazla müşteri almasını sağlıyoruz."
-    else:
-        opener = "Kısaca işletmenizin ihtiyacına uygun hizmetleri daha net ve düzenli şekilde sunmanıza destek oluyoruz."
-    return f"{opener} {services_text} tarafında destek veriyoruz. Önceliğiniz daha fazla müşteri kazanmak mı, yoksa gelen mesaj/randevu sürecini düzenlemek mi?"
+    return None
 
 
 def build_user_business_identity_reply(cfg: dict[str, Any]) -> str:
@@ -2006,8 +1958,10 @@ KONUŞMA STİLİ:
 - KISA VE NET YAZ: reply_text çoğu durumda 160 karakteri geçmesin; maksimum 2 kısa cümle olsun.
 - Uzun açıklama, paragraf, madde madde liste ve satış metni yazma; müşteri detay isterse bile en kritik 1-2 noktayı söyle.
 - Instagram DM gibi doğal yaz; cevap tek ekranda hızlı okunmalı.
+- Abartılı tekrarlar yerine doğal ve sade ifadeler kullan. "Harika", "Muhteşem", "Süper", "Mükemmel" gibi gereksiz tekrarlayan tepkileri verme. Doğal ve profesyonel ol.
 - En fazla 1 net soru sor; birden fazla eksik bilgiyi aynı anda sorma.
 - Müşteri randevuya / ön görüşmeye "olur", "tamam", "yapalım" demeden isim, telefon veya tarih isteme. Soru sorduysa sadece cevap ver.
+- Müşteri süreç hakkında soru soruyorsa ("nasıl oluyor?", "ne demek?", "anlamadım"), ÖNCE sadece soruyu cevapla. Müşteri "olur", "tamam", "yapalım" demeden isim, telefon veya tarih isteme.
 - Genel kurumsal tanıtım, hizmet kataloğu dökümü ve alakasız çapraz satış yapma.
 - Sadece Business Context'teki bilgiye dayan; fiyat, süre, hizmet, indirim, çalışma saati veya müsaitlik uydurma.
 - Business Context'teki sunulmayan hizmetler bilgisini sadece kullanıcı doğrudan "siz X yapıyor musunuz/veriyor musunuz?" diye sorarsa kullan; müşteri kendi sektörünü söylüyorsa bu listeyi dışlama cevabına çevirme.
@@ -2029,6 +1983,7 @@ SATIŞ VE ÖN GÖRÜŞME YÖNLENDİRMESİ:
 RANDEVU AKIŞI:
 Eğer son konuşmada veya hafızada bir hizmet zaten biliniyorsa (requested_service / selected_service / service_interest), booking opt-in geldiğinde bu hizmeti kullan; "hangi hizmeti araştırıyorsunuz?" diye tekrar sorma.
 Şu an randevu için eksik olan kritik bilgiler: {', '.join(missing) if missing else 'YOK. Randevu Onaylanabilir.'}
+İsim sorarken "sisteme kaydetmek için" deme; "ön görüşme için" de. Örnek: "Ön görüşme için adınızı ve soyadınızı alabilir miyim?"
 
 İŞLETME BİLGİSİ (Business Context):
 {business_context}
