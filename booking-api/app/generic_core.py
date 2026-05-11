@@ -868,6 +868,10 @@ def extract_generic_datetime_time(message_text: str) -> str | None:
         hour += 12
     if period == "oglen" and hour == 12:
         hour = 12
+    # 12-saat formatı düzeltmesi: "saat 3" → 15:00, "saat 5" → 17:00
+    if 1 <= hour <= 6 and period not in ("sabah",):
+        if "saat" in lowered or "boşluk" in lowered or "müsait" in lowered:
+            hour += 12
     if 0 <= hour <= 23 and 0 <= minute <= 59:
         return f"{hour:02d}:{minute:02d}"
     return None

@@ -2531,6 +2531,11 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
                 used_llm_extractor,
                 " > ".join(final_path),
             )
+            if not final_reply:
+                final_reply = SAFE_USER_FALLBACK_REPLY
+                final_path.append("final_fallback:guaranteed")
+                logger.warning("no_outbound_generated sender_id=%s, using fallback", payload.sender_id)
+
             metrics["crm_sync_queued"] = queue_crm_sync(
                 background_tasks,
                 conversation,
