@@ -5518,7 +5518,18 @@ def try_acquire_inbound_processing_lock(conn: psycopg.Connection, platform: str,
     with conn.cursor() as cur:
         cur.execute("SELECT pg_try_advisory_xact_lock(hashtext(%s)) AS locked", (lock_key,))
         row = cur.fetchone()
-    return bool(row and row.get("locked"))
+    locked = bool(row and row.get("locked"))
+    if not locked:
+        import time
+        for attempt in range(3):
+            time.sleep(0.5)
+            with conn.cursor() as retry_cur:
+                retry_cur.execute("SELECT pg_try_advisory_xact_lock(hashtext(%s)) AS locked", (lock_key,))
+                retry_row = retry_cur.fetchone()
+                if retry_row and retry_row.get("locked"):
+                    return True
+        logger.warning("sender_lock_busy sender_id=%s platform=%s lock_key=%s", sender_id, platform, lock_key)
+    return locked
 
 
 def has_processed_inbound_message_legacy(conn: psycopg.Connection, sender_id: str, message_id: str | None) -> bool:
