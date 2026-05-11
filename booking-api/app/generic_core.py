@@ -1185,6 +1185,11 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
     }
 
     message_text = sanitize_text(payload.message_text or "")
+    from app.main import logger
+    logger.info("INBOUND_RECEIVED sender_id=%s text=%s platform=%s",
+        payload.sender_id,
+        repr(message_text[:200]) if message_text else "EMPTY",
+        "generic")
     if not message_text:
         return ProcessResult(
             sender_id=payload.sender_id,
