@@ -2442,7 +2442,9 @@ def test_time_extraction_handles_bare_hour_with_date_cue():
 
 
 def test_noon_three_phrases_are_interpreted_as_afternoon_three():
-    assert main.extract_date("Pazar günü öğlen 3") in ["2026-05-03", "2026-05-10"]
+    today = main.datetime.now(main.TZ).date()
+    next_sunday = today + main.timedelta(days=(6 - today.weekday()) % 7)
+    assert main.extract_date("Pazar günü öğlen 3") == next_sunday.isoformat()
     assert main.extract_time_for_state("Pazar günü öğlen 3", "collect_date") == "15:00"
     assert main.extract_time_for_state("Pazar günü öğlen 3", "collect_period") == "15:00"
     assert main.extract_time_for_state("Tamam öğlen 3", "collect_time") == "15:00"
