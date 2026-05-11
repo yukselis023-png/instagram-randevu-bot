@@ -2557,7 +2557,7 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
             )
 
         if should_reset_stale_conversation(conversation, message_text):
-            reset_conversation_for_restart(conversation, clear_identity=True)
+            reset_conversation_for_restart(conversation)
             decision_path.append("reset_stale")
 
         lower_text = message_text.lower()
@@ -2682,20 +2682,6 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
             sanitize_text(payload.sender_id or "").lower(),
             sanitize_text(conversation.get("instagram_user_id") or "").lower(),
         }
-        if extracted_name:
-            cfg_contact = sanitize_text(get_config().get("human_contact_name") or "").lower().strip()
-            if cfg_contact and cfg_contact in extracted_name.lower().split():
-                conversation["state"] = "collect_name"
-                memory = ensure_conversation_memory(conversation)
-                memory["open_loop"] = "collect_name"
-                conversation["memory_state"] = memory
-                sync_conversation_memory_summary(conversation)
-                contact_display = get_config().get("human_contact_name", "Berkay")
-                return finalize_result(
-                    f"{contact_display} Bey bizim ekibimizden. Sizin adınızı ve soyadınızı alabilir miyim?",
-                    message_type="clarify",
-                    decision_label="contact_name_collision",
-                )
         if extracted_name and (not current_name or conversation.get("state") == "collect_name" or username_like_name):
             conversation["full_name"] = extracted_name
         elif not current_name and detected_name:
@@ -5014,7 +5000,7 @@ def build_offer_acceptance_reply(conversation: dict[str, Any]) -> str:
     return f"Tamamdır, kısa bir {booking_label} planlayalım. Ad soyadınızı alayım."
 
 
-def reset_conversation_for_restart(conversation: dict[str, Any], clear_identity: bool = False) -> None:
+def reset_conversation_for_restart(conversation: dict[str, Any], clear_identity: bool = True) -> None:
     conversation["service"] = None
     conversation["requested_date"] = None
     conversation["requested_time"] = None
@@ -5023,15 +5009,19 @@ def reset_conversation_for_restart(conversation: dict[str, Any], clear_identity:
     conversation["appointment_status"] = "collecting"
     conversation["state"] = "new"
     conversation["assigned_human"] = False
+    conversation["appointment_id"] = None
+    conversation["full_name"] = None
+    conversation["phone"] = None
     memory = ensure_conversation_memory(conversation)
     memory["pending_offer"] = None
     memory["offer_status"] = "none"
     memory["open_loop"] = None
     memory["last_bot_question_type"] = None
+    memory["requested_service"] = None
+    memory["selected_service"] = None
+    memory["service_interest"] = None
+    memory["suggested_booking_slots"] = []
     sync_conversation_memory_summary(conversation)
-    if clear_identity:
-        conversation["full_name"] = None
-        conversation["phone"] = None
 
 
 def ensure_conversation_memory(conversation: dict[str, Any]) -> dict[str, Any]:
@@ -11668,10 +11658,6 @@ def apply_ai_first_decision_to_conversation(
     if service_meta:
         conversation["service"] = service_meta.get("display")
     name = titlecase_name(decision.get("extracted_name"))
-    if name:
-        cfg_contact = sanitize_text(get_config().get("human_contact_name") or "").lower().strip()
-        if cfg_contact and cfg_contact in name.lower().strip().split():
-            name = None
     if name and not is_invalid_name_attempt(name, "collect_name"):
         conversation["full_name"] = name
     phone = canonical_phone(decision.get("extracted_phone"))
