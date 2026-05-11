@@ -2413,6 +2413,19 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
         ) -> ProcessResult:
             nonlocal metrics
 
+            # OUTBOUND TEXT FINAL KARARI — tüm alt akışların üzerine yazar
+            _llm_raw = reply_text or ""
+            if appointment_created_value and appointment_id_value:
+                _override = build_confirmation_message(conversation)
+                reply_text = _override
+                decision_path.append("outbound_guarantee:appointment_confirmed")
+            elif not _llm_raw.strip() or _llm_raw.strip().lower() in {"", "none", "null", "no reply", "yok"}:
+                reply_text = SAFE_USER_FALLBACK_REPLY
+                decision_path.append("outbound_guarantee:empty_llm_fallback")
+            elif is_appointment_confirmation_like_reply(_llm_raw) and not (appointment_created_value and appointment_id_value):
+                reply_text = SAFE_USER_FALLBACK_REPLY
+                decision_path.append("outbound_guarantee:false_confirmation_blocked")
+
             compose_enabled = bool(should_polish) and should_ai_compose_reply(
                 message_type,
                 decision_label,
@@ -2664,6 +2677,20 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
             sanitize_text(payload.sender_id or "").lower(),
             sanitize_text(conversation.get("instagram_user_id") or "").lower(),
         }
+        if extracted_name:
+            cfg_contact = sanitize_text(get_config().get("human_contact_name") or "").lower().strip()
+            if cfg_contact and cfg_contact in extracted_name.lower().split():
+                conversation["state"] = "collect_name"
+                memory = ensure_conversation_memory(conversation)
+                memory["open_loop"] = "collect_name"
+                conversation["memory_state"] = memory
+                sync_conversation_memory_summary(conversation)
+                contact_display = get_config().get("human_contact_name", "Berkay")
+                return finalize_result(
+                    f"{contact_display} Bey bizim ekibimizden. Sizin adınızı ve soyadınızı alabilir miyim?",
+                    message_type="clarify",
+                    decision_label="contact_name_collision",
+                )
         if extracted_name and (not current_name or conversation.get("state") == "collect_name" or username_like_name):
             conversation["full_name"] = extracted_name
         elif not current_name and detected_name:
@@ -2856,6 +2883,13 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
                                 metrics["slot_resolution"] = "slot_conflict"
                             else:
                                 raise
+                        except Exception as exc:
+                            logger.exception("appointment_create_failed sender_id=%s error=%s", payload.sender_id, exc)
+                            appointment_created = False
+                            appointment_id = None
+                            final_reply = SAFE_USER_FALLBACK_REPLY
+                            decision_path.append("ai_first_create_appointment_error")
+                            metrics["slot_resolution"] = "create_error"
             return finalize_result(
                 final_reply,
                 handoff=bool(ai_decision.get("handoff_needed")),
@@ -3154,6 +3188,12 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
                                 final_decision = "crm_error_handoff"
                             else:
                                 raise
+                        except Exception as exc:
+                            logger.exception("appointment_create_failed sender_id=%s error=%s", payload.sender_id, exc)
+                            appointment_created = False
+                            appointment_id = None
+                            reply = SAFE_USER_FALLBACK_REPLY
+                            final_decision = "create_appointment_error"
 
 
         return finalize_result(
@@ -10336,13 +10376,21 @@ def call_llm_extractor(message_text: str, conversation: dict[str, Any], history:
     return parsed or {}
 
 
+def clean_llm_json_response(raw_text: str) -> str:
+    text = raw_text.strip()
+    if text.startswith("```json"):
+        text = text[7:]
+    elif text.startswith("```"):
+        text = text[3:]
+    if text.endswith("```"):
+        text = text[:-3]
+    return text.strip()
+
+
 def parse_json_like(content: str) -> dict[str, Any]:
     if not content:
         return {}
-    content = content.strip()
-    if content.startswith("```"):
-        content = re.sub(r"^```(?:json)?", "", content).strip()
-        content = re.sub(r"```$", "", content).strip()
+    content = clean_llm_json_response(content)
     try:
         decoded = json.loads(content)
         if isinstance(decoded, dict):
@@ -11489,7 +11537,8 @@ def build_ai_first_decision(
                 "If the user changes service, extracted_service must use the new service. "
                 "If the user is angry or insults the bot, apologize briefly, avoid repeating old collection prompts, and explain the next useful step. "
                 "Use only the provided service catalog for prices, delivery times, and services. If unsure, say that the team should confirm instead of inventing. "
-                "If booking_intent is true, include one clear next missing field in the reply, not several at once. Keep replies short: usually 1-3 concise sentences. Do not include markdown."
+                "If booking_intent is true, include one clear next missing field in the reply, not several at once. Keep replies short: usually 1-3 concise sentences. Do not include markdown. "
+                "When suggesting or asking for appointment date/time, offer specific options within working hours 10:00-19:00. Instead of vague phrases like 'öğleden sonra', give 2-3 concrete choices like '12:00, 14:00 veya 16:00'."
             ),
         },
         {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
@@ -11603,6 +11652,10 @@ def apply_ai_first_decision_to_conversation(
     if service_meta:
         conversation["service"] = service_meta.get("display")
     name = titlecase_name(decision.get("extracted_name"))
+    if name:
+        cfg_contact = sanitize_text(get_config().get("human_contact_name") or "").lower().strip()
+        if cfg_contact and cfg_contact in name.lower().strip().split():
+            name = None
     if name and not is_invalid_name_attempt(name, "collect_name"):
         conversation["full_name"] = name
     phone = canonical_phone(decision.get("extracted_phone"))
