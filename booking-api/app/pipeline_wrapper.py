@@ -398,23 +398,6 @@ def build_info_answer_final(
                 "block_reason": "service_unknown_no_price",
             }
 
-    # --- Guard 5: hallucinated discount / campaign ---
-    if reply_mentions_unconfigured_price_or_discount(candidate):
-        service_cfg = find_service_config(cfg, service_label, {})
-        config_price_str = (service_cfg or {}).get("price")
-        display = (service_cfg or {}).get("display") or service_label
-        if config_price_str and display:
-            correction_text = (
-                f"{display} paket fiyatı {config_price_str}. "
-                "Kapsamı ihtiyaca göre ön görüşmede netleştiriyoruz."
-            )
-        else:
-            correction_text = _PRICE_NO_CONFIG_FALLBACK
-        return {
-            "outbound_text": correction_text,
-            "source": "info_discount_hallucination_blocked",
-            "block_reason": "unconfigured_discount_or_price",
-        }
 
     # --- All guards passed: preserve AI reply ---
     return {
