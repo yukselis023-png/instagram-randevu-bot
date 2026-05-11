@@ -101,12 +101,12 @@ class TestSuffixDedupeInFinalBuilder:
         # Confirm suffix text is NOT appended
         assert "Planlamak isterseniz" not in result
 
-    # Scenario 2: AI does NOT ask full_name → soft suffix appended
-    def test_full_name_suffix_added_when_ai_silent(self):
+    # Scenario 2: AI does NOT ask full_name → LLM reply returned as-is (no suffix)
+    def test_full_name_no_suffix_when_ai_silent(self):
         ai = "Evet, Berkay Bey veya ekibimiz sizi arayacak."
         result = _build(ai, ["full_name"])
-        assert "Planlamak isterseniz adınızı ve soyadınızı paylaşabilirsiniz." in result
-        assert result.startswith(ai)
+        assert result == ai
+        assert "Planlamak isterseniz" not in result
 
     # Scenario 3: AI already asks phone → no suffix
     def test_phone_suffix_skipped_when_ai_already_asks(self):
@@ -115,11 +115,12 @@ class TestSuffixDedupeInFinalBuilder:
         assert result == ai
         assert "Planlamak isterseniz telefon" not in result
 
-    # Scenario 4: AI does NOT ask phone → suffix added
-    def test_phone_suffix_added_when_ai_silent(self):
+    # Scenario 4: AI does NOT ask phone → LLM reply returned as-is (no suffix)
+    def test_phone_no_suffix_when_ai_silent(self):
         ai = "Tabii, size yardımcı olabiliriz."
         result = _build(ai, ["phone"])
-        assert "Planlamak isterseniz telefon numaranızı paylaşabilirsiniz." in result
+        assert result == ai
+        assert "Planlamak isterseniz" not in result
 
     # Scenario 5: AI already asks date → no suffix
     def test_date_suffix_skipped_when_ai_already_asks(self):
@@ -128,11 +129,12 @@ class TestSuffixDedupeInFinalBuilder:
         assert result == ai
         assert "Uygun bir gün varsa belirtebilirsiniz." not in result
 
-    # Scenario 6: AI does NOT ask date → suffix added
-    def test_date_suffix_added_when_ai_silent(self):
+    # Scenario 6: AI does NOT ask date → LLM reply returned as-is (no suffix)
+    def test_date_no_suffix_when_ai_silent(self):
         ai = "Evet, görüşme düzenleyebiliriz."
         result = _build(ai, ["requested_date"])
-        assert "Uygun bir gün varsa belirtebilirsiniz." in result
+        assert result == ai
+        assert "Uygun bir gün" not in result
 
     # Scenario 7: AI already asks time → no suffix
     def test_time_suffix_skipped_when_ai_already_asks(self):
@@ -141,11 +143,12 @@ class TestSuffixDedupeInFinalBuilder:
         assert result == ai
         assert "Saat tercihini de yazabilirsiniz" not in result
 
-    # Scenario 8: AI does NOT ask time → suffix added
-    def test_time_suffix_added_when_ai_silent(self):
+    # Scenario 8: AI does NOT ask time → LLM reply returned as-is (no suffix)
+    def test_time_no_suffix_when_ai_silent(self):
         ai = "Evet, müsait olduğunuzda görüşebiliriz."
         result = _build(ai, ["requested_time"])
-        assert "Saat tercihini de yazabilirsiniz; örneğin 13:00." in result
+        assert result == ai
+        assert "Saat tercihini" not in result
 
     # Scenario 9: wants_booking=False, direct_question=False → AI reply returned as-is (no change)
     def test_no_booking_no_direct_question_returns_ai_as_is(self):

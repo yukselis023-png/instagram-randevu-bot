@@ -138,31 +138,22 @@ def build_final_missing_field_prompt(
     wants_booking: bool,
 ) -> str | None:
     """
-    Phase 4A Final Reply Builder.
+    Phase 4A Final Reply Builder — LLM artık eksik alanları sormayı biliyor.
 
-    Priority contract:
-    1. Valid AI answer → always preserve it as the base reply.
-    2. If the AI already asks for the missing field → return it unchanged.
-    3. If AI produced no answer → fall back to the booking missing-field prompt.
+    1. Valid AI answer → olduğu gibi döndür, asla suffix ekleme.
+    2. AI cevap üretmediyse (base boş) ve wants_booking=True ise booking prompt'u kullan.
 
     Returns the composed outbound text, or None if no usable reply exists.
     """
-    first_missing = missing_fields[0] if missing_fields else None
     base = (ai_reply_candidate or "").strip()
 
     if not base:
+        first_missing = missing_fields[0] if missing_fields else None
         if wants_booking and not direct_question and first_missing:
             prompt = _MISSING_FIELD_PROMPT_BOOKING.get(first_missing)
             if prompt:
                 return prompt
         return None
-
-    if first_missing and _ai_already_asks_field(base, first_missing):
-        return base
-
-    if (direct_question or wants_booking) and first_missing and first_missing in _MISSING_FIELD_PROMPT_DIRECT:
-        suffix = _MISSING_FIELD_PROMPT_DIRECT[first_missing]
-        return f"{base} {suffix}"
 
     return base
 
