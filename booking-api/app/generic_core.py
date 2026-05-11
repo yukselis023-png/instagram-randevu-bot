@@ -644,10 +644,7 @@ def build_natural_service_overview_reply(cfg: dict[str, Any]) -> str | None:
 
 
 def build_user_business_identity_reply(cfg: dict[str, Any]) -> str:
-    overview = build_natural_service_overview_reply(cfg)
-    if overview:
-        return overview
-    return "İşletmeniz için tanımlı hizmetlerimize göre yardımcı olabiliriz. Önceliğiniz daha fazla müşteri kazanmak mı, yoksa mevcut süreci daha düzenli yönetmek mi?"
+    return None
 
 
 def generic_llm_reply_rejection_reason(reply_text: str | None) -> str | None:
@@ -1226,10 +1223,12 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
         booking_opt_in = is_booking_opt_in(message_text, intent)
         deterministic_reply = False
         if is_company_capability_question(message_text):
-            reply_text = build_company_capability_reply(message_text)
-            final_reply_source = "capability"
-            decision_path.append("reply:company_capability")
-            deterministic_reply = True
+            capability_reply = build_company_capability_reply(message_text)
+            if capability_reply:
+                reply_text = capability_reply
+                final_reply_source = "capability"
+                decision_path.append("reply:company_capability")
+                deterministic_reply = True
         elif is_user_business_identity_message(message_text):
             if persist_user_business_identity_context(message_text, recent_history, conversation, memory):
                 decision_path.append("persist:user_business_identity")

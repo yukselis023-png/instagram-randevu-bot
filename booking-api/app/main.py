@@ -8678,17 +8678,7 @@ def format_company_capability_activity(activity: str) -> str:
 
 
 def build_company_capability_reply(message_text: str) -> str:
-    activity = detect_company_capability_activity(message_text) or "bu hizmeti"
-    activity_label = format_company_capability_activity(activity)
-    if "emlak" in activity or "ev" in activity:
-        return (
-            "Hayır, biz ev veya emlak satmıyoruz. "
-            "DOEL Digital olarak web sitesi, reklam, sosyal medya yönetimi ve otomasyon hizmetleri veriyoruz."
-        )
-    return (
-        f"Hayır, biz {activity_label} yapmıyoruz. "
-        "DOEL Digital olarak web sitesi, reklam, sosyal medya yönetimi ve otomasyon hizmetleri veriyoruz."
-    )
+    return None
 
 
 def reply_answers_company_capability_question(message_text: str, reply_text: str | None) -> bool:
@@ -8939,7 +8929,9 @@ def build_safe_reply_builder(
     decision_label: str | None = None,
 ) -> str:
     if is_company_capability_question(message_text) or (is_user_correction_message(message_text) and detect_company_capability_activity(message_text)):
-        return build_company_capability_reply(message_text)
+        capability_reply = build_company_capability_reply(message_text)
+        if capability_reply:
+            return capability_reply
     if is_service_term_clarification(message_text):
         return False
 
@@ -10983,8 +10975,9 @@ def apply_ai_first_quality_overrides(
     decision_intent = sanitize_text(str(decision.get("intent") or "")).lower()
 
     # 1. user_correction
-    if is_user_correction_message(message_text) and detect_company_capability_activity(message_text):
-        decision["reply_text"] = build_company_capability_reply(message_text)
+    capability_reply = build_company_capability_reply(message_text) if is_user_correction_message(message_text) and detect_company_capability_activity(message_text) else None
+    if capability_reply:
+        decision["reply_text"] = capability_reply
         decision["intent"] = "company_capability_question"
         decision["booking_intent"] = False
         decision["missing_fields"] = []
@@ -11069,12 +11062,14 @@ def apply_ai_first_quality_overrides(
         return decision
 
     if is_company_capability_question(message_text):
-        decision["reply_text"] = build_company_capability_reply(message_text)
-        decision["intent"] = "company_capability_question"
-        decision["booking_intent"] = False
-        decision["missing_fields"] = []
-        decision["should_reply"] = True
-        return decision
+        capability_reply = build_company_capability_reply(message_text)
+        if capability_reply:
+            decision["reply_text"] = capability_reply
+            decision["intent"] = "company_capability_question"
+            decision["booking_intent"] = False
+            decision["missing_fields"] = []
+            decision["should_reply"] = True
+            return decision
         
     if is_referral_intent_message(message_text):
         decision["reply_text"] = build_referral_intent_reply()
