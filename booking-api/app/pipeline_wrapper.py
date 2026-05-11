@@ -140,35 +140,31 @@ def build_final_missing_field_prompt(
     """
     Phase 4A Final Reply Builder.
 
-    Priority contract (from spec):
-    1. direct_question=True  → AI answer first, then optional soft 1-sentence prompt
-    2. direct_question=False + wants_booking=True → net missing field prompt only
-    3. direct_question=False + wants_booking=False → AI answer only, no field prompts
+    Priority contract:
+    1. Valid AI answer → always preserve it as the base reply.
+    2. If the AI already asks for the missing field → return it unchanged.
+    3. If AI produced no answer → fall back to the booking missing-field prompt.
 
-    Returns the composed outbound text, or None if no change is needed.
+    Returns the composed outbound text, or None if no usable reply exists.
     """
     first_missing = missing_fields[0] if missing_fields else None
+    base = (ai_reply_candidate or "").strip()
 
-    if direct_question:
-        # AI answer + optional soft suffix (max 1 sentence, only first missing field)
-        base = (ai_reply_candidate or "").strip()
-        if not base:
-            return None
-        if first_missing and first_missing in _MISSING_FIELD_PROMPT_DIRECT:
-            suffix = _MISSING_FIELD_PROMPT_DIRECT[first_missing]
-            # Avoid duplicating if the AI already asked for this field
-            if not _ai_already_asks_field(base, first_missing):
-                return f"{base} {suffix}"
+    if not base:
+        if wants_booking and not direct_question and first_missing:
+            prompt = _MISSING_FIELD_PROMPT_BOOKING.get(first_missing)
+            if prompt:
+                return prompt
+        return None
+
+    if first_missing and _ai_already_asks_field(base, first_missing):
         return base
 
-    if wants_booking and first_missing:
-        # Net prompt for the first missing field — no AI prefix needed
-        prompt = _MISSING_FIELD_PROMPT_BOOKING.get(first_missing)
-        if prompt:
-            return prompt
+    if (direct_question or wants_booking) and first_missing and first_missing in _MISSING_FIELD_PROMPT_DIRECT:
+        suffix = _MISSING_FIELD_PROMPT_DIRECT[first_missing]
+        return f"{base} {suffix}"
 
-    # wants_booking=False or no missing fields — return AI reply as-is
-    return ai_reply_candidate
+    return base
 
 
 # ============================================================
