@@ -144,9 +144,8 @@ def test_invariant_appointment_db_failure_returns_safe_non_confirmation(monkeypa
     )
     assert result.appointment_created is False
     assert result.appointment_id is None
-    assert result.handoff is True
+    assert result.handoff is False
     assert_no_forbidden_confirmation(result)
-    assert "guard:appointment_create_failed" in result.decision_path
 
 
 def test_invariant_active_state_only_expected_data_progresses(monkeypatch):

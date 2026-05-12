@@ -2053,7 +2053,7 @@ def generic_quality_guard(reply: str, extracted: dict, memory: dict, cfg: dict, 
             extracted["requested_service"] = None
             
     # 2. Prevent Booking confirmed without real fields locally
-    if "Kaydınız oluşturuldu" in reply and (not memory.get("customer_phone") or not memory.get("requested_service")):
+    if reply and "Kaydınız oluşturuldu" in reply and (not memory.get("customer_phone") or not memory.get("requested_service")):
         return "İşlemlerinize devam edebilmem için lütfen bilgileri eksiksiz tamamlayalım.", "prevent_premature_confirm"
 
     if reply_mentions_unconfigured_price_or_discount(reply) and not has_configured_price_for_reply(cfg, extracted, memory):
