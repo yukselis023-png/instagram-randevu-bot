@@ -1,4 +1,3 @@
-# Ignore temp/test files
 *.bak
 *.bak-*
 *.sqlite
@@ -8,3 +7,11 @@
 __pycache__/
 .pytest_cache/
 .env
+.DS_Store
+.git
+.gitignore
+*.md
+scripts/
+docs/
+backup/
+tests/
