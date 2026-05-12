@@ -29,6 +29,15 @@ def test_booking_opt_in_uses_previous_requested_service_and_asks_for_name(monkey
         return store[sender_id]
 
     class DummyConn:
+        def cursor(self):
+            class DummyCursor:
+                def execute(self, *a, **kw): pass
+                def fetchone(self): return None
+                def fetchall(self): return []
+                def __enter__(self): return self
+                def __exit__(self, *a): pass
+            return DummyCursor()
+
         def __enter__(self):
             return self
 
