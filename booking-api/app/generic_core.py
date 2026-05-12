@@ -1849,16 +1849,11 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
 
 def call_llm_json(system_prompt: str, user_text: str) -> dict:
     import requests, os, json, re, time
-    llm_url = os.getenv("LLM_BASE_URL", "https://api.groq.com/openai/v1")
-    llm_key = os.getenv("LLM_API_KEY", "")
-    llm_model = os.getenv("LLM_MODEL", "llama-3.3-70b-versatile")
+    from app.main import LLM_BASE_URL, LLM_API_KEY, LLM_MODEL
+    llm_url = LLM_BASE_URL
+    llm_key = LLM_API_KEY
+    llm_model = LLM_MODEL
     fallback_model = os.getenv("LLM_FALLBACK_MODEL") or os.getenv("LLM_REPLY_ADVISORY_MODEL")
-    if not llm_key:
-        from app.main import LLM_BASE_URL, LLM_API_KEY, LLM_MODEL
-        llm_url = LLM_BASE_URL
-        llm_key = LLM_API_KEY
-        llm_model = LLM_MODEL
-        fallback_model = os.getenv("LLM_FALLBACK_MODEL") or os.getenv("LLM_REPLY_ADVISORY_MODEL")
 
     models = []
     for model in [llm_model, fallback_model]:
