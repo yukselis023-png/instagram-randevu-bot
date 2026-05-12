@@ -6013,7 +6013,7 @@ def try_reschedule_confirmed_appointment(conn: psycopg.Connection, conversation:
 
     if is_live_crm_configured():
         try:
-    booking_kind = get_booking_kind(conversation) or "preconsultation"
+            booking_kind = get_booking_kind(conversation) or "preconsultation"
             if booking_kind == "appointment":
                 live_crm_upsert_appointment(conversation)
             else:
