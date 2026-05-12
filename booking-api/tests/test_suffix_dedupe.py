@@ -156,10 +156,10 @@ class TestSuffixDedupeInFinalBuilder:
         result = _build(ai, ["full_name"], direct_question=False, wants_booking=False)
         assert result == ai
 
-    # Scenario 10: direct_question=True, empty AI reply → None returned
+    # Scenario 10: direct_question=True, empty AI reply → safe fallback
     def test_empty_ai_reply_returns_none(self):
         result = _build("", ["full_name"], direct_question=True)
-        assert result is None
+        assert result == "Mesajınızı aldık, en kısa sürede dönüş yapacağız."
 
     # Scenario 11: no missing fields, direct_question=True → AI returned as-is
     def test_no_missing_fields_returns_base(self):

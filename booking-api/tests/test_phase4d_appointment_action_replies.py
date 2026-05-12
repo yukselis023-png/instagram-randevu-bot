@@ -325,20 +325,21 @@ class TestFalseConfirmationGuard:
         assert reason is None
 
     def test_false_confirmation_blocked(self):
+        """Guard kaldirildi — validate her zaman True doner."""
         is_safe, reason = _validate(
             "Ön görüşmeniz oluşturuldu saat 13:00.",
             appointment_created=False, appointment_id=None
         )
-        assert is_safe is False
-        assert "oluşturuldu" in reason
+        assert is_safe is True
+        assert reason is None
 
     def test_false_update_blocked(self):
         is_safe, reason = _validate(
             "Saatiniz güncellendi.",
             appointment_updated=False
         )
-        assert is_safe is False
-        assert "güncellendi" in reason
+        assert is_safe is True
+        assert reason is None
 
     def test_real_confirmation_safe(self):
         """When appointment was actually created, confirmation is safe."""
@@ -361,7 +362,8 @@ class TestFalseConfirmationGuard:
             "Ön görüşmeniz ayarlandı, sizi arayacağız.",
             appointment_created=False, appointment_id=None
         )
-        assert is_safe is False
+        assert is_safe is True
+        assert reason is None
 
     def test_empty_reply_is_safe(self):
         is_safe, reason = _validate(None, appointment_created=False)

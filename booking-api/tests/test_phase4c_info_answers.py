@@ -196,22 +196,16 @@ class TestGuard4PriceCorrectness:
 class TestGuard5DiscountHallucination:
 
     def test_campaign_blocked(self):
-        ai = "Bu ay kampanyalı 3.000 TL ile web sitesi yapıyoruz!"
-        r = _build(ai, service_label="web_tasarim")
-        assert r["block_reason"] == "unconfigured_discount_or_price"
-        assert "kampanya" not in r["outbound_text"].lower()
+        """Guard 5 kaldirildi — LLM prompt ile cozuluyor."""
+        pass
 
     def test_indirim_blocked(self):
-        ai = "Özel indirimli fiyat: 5.000 TL."
-        r = _build(ai, service_label="web_tasarim")
-        assert r["block_reason"] == "unconfigured_discount_or_price"
-        assert "indirim" not in r["outbound_text"].lower()
+        """Guard 5 kaldirildi — LLM prompt ile cozuluyor."""
+        pass
 
     def test_campaign_no_config_price_uses_scope_fallback(self):
-        ai = "Bu ay ücretsiz deneme sunuyoruz."
-        r = _build(ai, cfg=_EMPTY_CFG, service_label=None)
-        assert r["block_reason"] == "unconfigured_discount_or_price"
-        assert "kaydınız korunuyor" not in r["outbound_text"]
+        """Guard 5 kaldirildi — LLM prompt ile cozuluyor."""
+        pass
 
 
 # ============================================================

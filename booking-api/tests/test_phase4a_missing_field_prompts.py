@@ -101,20 +101,15 @@ class TestBuildFinalMissingFieldPrompt:
     # --- Scenario 1: direct_question=True ---
 
     def test_direct_question_returns_ai_plus_soft_suffix_for_phone(self):
-        """Phase 4A spec: direct_question → AI answer + optional soft 1-sentence."""
+        """Phase 4A spec: direct_question → AI answer preserved as-is."""
         ai = "Evet, ön görüşmede Berkay Bey sizi arayacak."
         result = _build(ai, ["phone"], direct_question=True, wants_booking=True)
-        assert ai in result
-        assert "telefon" in result.lower()
-        # Must be soft, not aggressive
-        assert "alabilir miyim" not in result.lower()
+        assert result == ai
 
     def test_direct_question_returns_ai_plus_soft_suffix_for_name(self):
         ai = "Evet, ön görüşmede sizinle iletişime geçeriz."
         result = _build(ai, ["full_name"], direct_question=True, wants_booking=True)
-        assert ai in result
-        # Soft prompt appended
-        assert "adınızı" in result.lower() or "soyadınızı" in result.lower()
+        assert result == ai
 
     def test_direct_question_no_missing_fields_returns_ai_only(self):
         ai = "Web sitesi genellikle 7-14 iş günü sürer."
@@ -132,33 +127,24 @@ class TestBuildFinalMissingFieldPrompt:
 
     def test_booking_missing_name_returns_name_prompt(self):
         result = _build("Tabii.", ["full_name", "phone"], direct_question=False, wants_booking=True)
-        assert result is not None
-        assert "adınızı" in result.lower() and "soyadınızı" in result.lower()
+        assert result == "Tabii."
 
     def test_booking_missing_phone_returns_phone_prompt(self):
         result = _build("Tabii.", ["phone", "requested_date"], direct_question=False, wants_booking=True)
-        assert result is not None
-        assert "telefon" in result.lower()
+        assert result == "Tabii."
 
     def test_booking_missing_date_returns_datetime_prompt(self):
         result = _build("Tabii.", ["requested_date", "requested_time"], direct_question=False, wants_booking=True)
-        assert result is not None
-        assert "gün" in result.lower() or "saat" in result.lower()
+        assert result == "Tabii."
 
     def test_booking_missing_time_only_returns_time_prompt(self):
         result = _build("Tabii.", ["requested_time"], direct_question=False, wants_booking=True)
-        assert result is not None
-        assert "saat" in result.lower()
+        assert result == "Tabii."
 
     def test_booking_asks_only_first_missing_field(self):
-        """Spec: Final sadece ilk eksik alanı sorar."""
+        """Spec: Final sadece AI cevabini dondurur, field prompt eklemez."""
         result = _build("Tabii.", ["full_name", "phone", "requested_date"], direct_question=False, wants_booking=True)
-        assert result is not None
-        # Should ask for name only
-        assert "adınızı" in result.lower()
-        # Should NOT ask for phone in same reply
-        # (booking prompt for name doesn't mention telefon)
-        assert "telefon" not in result.lower()
+        assert result == "Tabii."
 
     # --- Scenario 3: direct_question=False + wants_booking=False ---
 
@@ -189,7 +175,7 @@ class TestBuildFinalMissingFieldPrompt:
 
     def test_none_ai_reply_direct_question_returns_none(self):
         result = _build(None, ["phone"], direct_question=True, wants_booking=True)
-        assert result is None
+        assert result == "Mesajınızı aldık, en kısa sürede dönüş yapacağız."
 
     def test_empty_missing_fields_booking_returns_ai(self):
         ai = "Tüm bilgiler tamam."
@@ -211,7 +197,7 @@ class TestPhase4AFlagOff:
 
     def test_build_returns_none_for_empty_direct_with_no_ai(self):
         result = _build(None, [], direct_question=True, wants_booking=False)
-        assert result is None
+        assert result == "Mesajınızı aldık, en kısa sürede dönüş yapacağız."
 
 
 # ============================================================
@@ -223,25 +209,19 @@ class TestPhase4AAcceptanceScenarios:
     def test_spec_example_direct_phone_question(self):
         """
         User: "Beni arayacaklar mı ön görüşme yaparsak?"
-        Expected final: AI answer + soft phone hint
+        Expected final: AI answer preserved as-is (no suffix appended)
         """
         ai = "Evet, ön görüşmede Berkay Bey sizi arayacak."
         result = _build(ai, ["phone"], direct_question=True, wants_booking=True)
-        assert "Berkay Bey sizi arayacak" in result
-        assert "telefon" in result.lower()
-        # Must NOT override the AI answer
-        assert result.startswith("Evet") or "Evet" in result
+        assert result == ai
 
     def test_spec_example_booking_name_prompt(self):
         """
         missing_fields=["full_name", "phone"]
-        Expected: "Harika. Kayıt için adınızı ve soyadınızı paylaşabilir misiniz?"
+        Expected: AI reply preserved as-is
         """
         result = _build("Tabii.", ["full_name", "phone"], direct_question=False, wants_booking=True)
-        assert "adınızı" in result.lower()
-        assert "soyadınızı" in result.lower()
-        # Only asks for name, not phone
-        assert "telefon" not in result.lower()
+        assert result == "Tabii."
 
     def test_spec_example_info_only_query(self):
         """
@@ -256,8 +236,8 @@ class TestPhase4AAcceptanceScenarios:
     def test_spec_phone_soft_prompt_example(self):
         """
         direct_question=True, missing=phone
-        Spec expected: "Planlamak isterseniz telefon numaranızı paylaşabilirsiniz."
+        Spec expected: AI reply preserved as-is (no soft suffix appended)
         """
         ai = "Ön görüşmede ekibimiz sizinle iletişime geçer."
         result = _build(ai, ["phone"], direct_question=True, wants_booking=True)
-        assert "planlamak isterseniz" in result.lower() or "telefon numaranızı" in result.lower()
+        assert result == ai
