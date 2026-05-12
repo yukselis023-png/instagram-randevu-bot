@@ -296,6 +296,20 @@ def is_valid_name_candidate(name_text: str | None, *, require_full_name: bool = 
     return True
 
 
+def clean_name_text(raw_name: str | None) -> str | None:
+    """Strip conversational fillers from extracted names."""
+    clean = sanitize_text(raw_name or "").strip()
+    if not clean:
+        return None
+    fillers = ["aslında", "aslinda", "ben", "adım", "adim", "diye", "yani", "iste", "işte", "bey", "hanım", "hanim"]
+    pattern = r"\b(?:" + "|".join(fillers) + r")\b"
+    clean = re.sub(pattern, "", clean, flags=re.IGNORECASE).strip()
+    clean = re.sub(r"\s+", " ", clean).strip()
+    # Also remove trailing/leading commas, dots
+    clean = clean.strip(".,;:!? ")
+    return clean or None
+
+
 def is_phone_like_attempt(message_text: str | None) -> bool:
     return bool(re.search(r"\d", sanitize_text(message_text or "")))
 
@@ -1353,7 +1367,7 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
             booking_opt_in = False
             intent = "direct_answer"
         active_state_is_relevant, active_state_label = active_state_relevance(message_text, state_before_entities, cfg)
-        llm_active_name_candidate = extracted.get("lead_name")
+        llm_active_name_candidate = clean_name_text(extracted.get("lead_name")) or extracted.get("lead_name")
         if (
             str(state_before_entities or "").startswith("collect_")
             and not active_direct_clarification
@@ -1390,6 +1404,7 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
         if is_booking_acknowledgement_message(message_text) or not is_valid_name_candidate(name_candidate, require_full_name=require_full_name):
             name_candidate = None
         if name_candidate:
+            name_candidate = clean_name_text(name_candidate) or name_candidate
             conversation["lead_name"] = name_candidate
             conversation["full_name"] = name_candidate
             decision_path.append("detected:name" if deterministic_name else "extracted:name")
@@ -1978,7 +1993,8 @@ SATIŞ VE ÖN GÖRÜŞME YÖNLENDİRMESİ:
 - Yanıt uzuyorsa kısalt: önce soruyu cevapla, sonra gerekiyorsa tek kısa yönlendirme ekle.
 - İSİM ÇAKIŞMASI KURALI: "{cfg.get('human_contact_name')} Çakmak" tam adı bizim ekip liderimizdir. Müşteri tam olarak "Ali" değil "{cfg.get('human_contact_name')} Çakmak" yazarsa nazikçe "Sizin adınızı ve soyadınızı alabilir miyim?" diye sor. Tek başına "Berkay" normal bir isimdir, engelleme.
 - İSİM DÜZELTME KURALI: Kullanıcı ismini düzeltirse ("Ben X değilim, adım Y"), ÖNCELİKLE özür dile ve düzelttiğini belirt ("Kusura bakmayın, hemen düzeltiyorum [yeni isim] Bey"), SONRA bir sonraki adıma geç. Asla düzeltmeyi atlayıp direkt sonraki soruya geçme.
-- ENTITY ÇIKARIM KURALLARI: lead_name çıkarırken SADECE saf isim ve soyismi al. Konuşma dolgusu, zamir ve bağlaçları ("aslında", "ben", "adım", "diye") KESİNLİKLE dahil etme. Örn: "Ben Ayşe Demir aslında" → lead_name: "Ayşe Demir", "Ayşe Demir Aslında" değil.
+- ENTITY ÇIKARIM KURALLARI (KRİTİK): lead_name çıkarırken SADECE saf isim ve soyismi al. Konuşma dolgusu, zamir ve bağlaçları ("aslında", "ben", "adım", "diye", "yani", "işte") KESİNLİKLE dahil etme. AYNI KURAL phone, requested_date, requested_time için de geçerli: sadece saf veriyi çıkar, ekstra kelime ekleme.
+- KONUŞMA BAĞLAMI KURALI: Her yeni mesajı bağımsız değerlendir. Müşteri yeni bir konu açarsa ("dövme yapıyor musunuz?", "randevuyu iptal et", "indirim var mı?"), öncelikle O konuyu cevapla. Önceki konuşma bağlamını sadece aynı konu devam ediyorsa veya eksik bilgi (isim, telefon, tarih) tamamlamak için kullan. Asla eski konuyu yeni sorunun önüne geçirme.
 
 RANDEVU AKIŞI:
 Eğer son konuşmada veya hafızada bir hizmet zaten biliniyorsa (requested_service / selected_service / service_interest), booking opt-in geldiğinde bu hizmeti kullan; "hangi hizmeti araştırıyorsunuz?" diye tekrar sorma.

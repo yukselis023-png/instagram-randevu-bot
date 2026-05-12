@@ -6013,7 +6013,7 @@ def try_reschedule_confirmed_appointment(conn: psycopg.Connection, conversation:
 
     if is_live_crm_configured():
         try:
-            booking_kind = get_booking_kind(conversation)
+    booking_kind = get_booking_kind(conversation) or "preconsultation"
             if booking_kind == "appointment":
                 live_crm_upsert_appointment(conversation)
             else:
@@ -12350,7 +12350,7 @@ def to_minutes(value: str) -> int:
 
 def create_appointment(conn: psycopg.Connection, conversation: dict[str, Any], username: str | None) -> tuple[int, int]:
     live_crm_ms = 0
-    booking_kind = get_booking_kind(conversation)
+    booking_kind = get_booking_kind(conversation) or "preconsultation"
     if not conversation.get("service"):
         conversation["service"] = LIVE_CRM_PRECONSULTATION_SERVICE if booking_kind == "preconsultation" else DEFAULT_SERVICE_NAME
     local_status = "confirmed" if booking_kind == "appointment" else "preconsultation"
