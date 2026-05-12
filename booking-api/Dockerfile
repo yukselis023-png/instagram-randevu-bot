@@ -12,7 +12,6 @@ RUN apt-get update \
     && pip install --no-cache-dir -r requirements.txt
 
 COPY app /app/app
-COPY ../.env /app/.env
 COPY start.sh /app/start.sh
 RUN chmod +x /app/start.sh
 

@@ -1,9 +1,5 @@
 #!/bin/sh
 set -eu
-# Source .env file if present (sets CRM/LIVE_CRM vars)
-if [ -f /app/.env ]; then
-  export $(grep -v '^#' /app/.env | grep -v '^LLM_BASE_URL' | grep '=' | xargs)
-fi
 PORT_VALUE=${PORT:-8000}
 LLM_BASE_URL_VALUE=${LLM_BASE_URL:-http://127.0.0.1:8045/v1}
 SOCAT_PID=""
