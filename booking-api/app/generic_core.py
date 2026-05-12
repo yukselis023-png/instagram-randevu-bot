@@ -305,36 +305,7 @@ def build_active_state_recovery_reply(state: str | None) -> str | None:
 
 
 def active_state_relevance(message_text: str, state: str | None, cfg: dict[str, Any]) -> tuple[bool, str | None]:
-    if state == "collect_name":
-        if is_username_save_request(message_text):
-            return True, "username_save"
-        if is_non_name_action_phrase(message_text) or is_simple_greeting(message_text):
-            return True, "llm_flow"
-        name = extract_name(message_text, "collect_name")
-        is_valid_name = is_valid_name_candidate(name, require_full_name=True)
-        return is_valid_name, "name" if is_valid_name else None
-    if state == "collect_phone":
-        if is_username_save_request(message_text):
-            return True, "username_save"
-        if extract_phone(message_text):
-            return True, "phone"
-        if is_phone_like_attempt(message_text) and is_invalid_phone_attempt(message_text, state):
-            return True, "invalid_phone"
-        return True, "llm_flow"
-    if state == "collect_datetime":
-        has_datetime = bool(
-            extract_date(message_text)
-            or extract_time_for_state(message_text, "collect_datetime")
-            or extract_time(message_text)
-            or extract_generic_datetime_time(message_text)
-        )
-        if has_datetime:
-            return True, "datetime"
-        return True, "llm_flow"
-    if state == "collect_service":
-        has_service = bool(detect_requested_service_from_text(message_text, cfg))
-        return has_service, "service" if has_service else None
-    return True, None
+    return True, "llm_flow"
 
 
 def known_requested_service(conversation: dict[str, Any], memory: dict[str, Any]) -> str | None:

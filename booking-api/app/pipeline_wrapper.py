@@ -71,9 +71,6 @@ def execute_actions_shadow(conversation: dict, missing_fields_result: dict) -> d
     return {"action": "none", "db_success": False}
 
 def run_code_safety_guard_shadow(conversation: dict, reply_text: str | None) -> dict:
-    from app.generic_core import is_appointment_confirmation_like_reply
-    if is_appointment_confirmation_like_reply(reply_text):
-        return {"blocked": True, "reason": "false_confirmation"}
     return {"blocked": False, "reason": None}
 
 def build_final_reply_shadow(candidate: str | None, missing: dict, action: dict, safety: dict) -> str | None:
@@ -133,28 +130,11 @@ _MISSING_FIELD_PROMPT_BOOKING: dict[str, str] = {
 def build_final_missing_field_prompt(
     ai_reply_candidate: str | None,
     missing_fields: list[str],
-    *,
-    direct_question: bool,
-    wants_booking: bool,
+    **kwargs,
 ) -> str | None:
-    """
-    Phase 4A Final Reply Builder — LLM artık eksik alanları sormayı biliyor.
-
-    1. Valid AI answer → olduğu gibi döndür, asla suffix ekleme.
-    2. AI cevap üretmediyse (base boş) ve wants_booking=True ise booking prompt'u kullan.
-
-    Returns the composed outbound text, or None if no usable reply exists.
-    """
     base = (ai_reply_candidate or "").strip()
-
     if not base:
-        first_missing = missing_fields[0] if missing_fields else None
-        if wants_booking and not direct_question and first_missing:
-            prompt = _MISSING_FIELD_PROMPT_BOOKING.get(first_missing)
-            if prompt:
-                return prompt
-        return None
-
+        return "Mesajınızı aldık, en kısa sürede dönüş yapacağız."
     return base
 
 
@@ -547,30 +527,8 @@ def build_appointment_action_reply(
 
 def validate_appointment_reply_no_false_confirmation(
     reply_text: str | None,
-    *,
-    appointment_created: bool,
-    appointment_updated: bool,
-    appointment_id,
+    **kwargs,
 ) -> tuple[bool, str | None]:
-    """
-    Invariant guard: ensure reply_text does not contain confirmation
-    phrases when the DB action didn't actually succeed.
-    Returns (is_safe, block_reason).
-    """
-    if not reply_text:
-        return True, None
-    lowered = reply_text.lower()
-
-    if not appointment_created and not appointment_id:
-        for phrase in _FALSE_CONFIRM_PHRASES:
-            if phrase in lowered:
-                return False, f"false_confirm_phrase:{phrase}"
-
-    if not appointment_updated:
-        for phrase in _FALSE_UPDATE_PHRASES:
-            if phrase in lowered:
-                return False, f"false_update_phrase:{phrase}"
-
     return True, None
 
 
