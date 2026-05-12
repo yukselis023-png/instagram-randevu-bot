@@ -62,6 +62,8 @@ services:
         value: llama-3.3-70b-versatile
       - key: LLM_FALLBACK_MODEL
         value: llama-3.1-8b-instant
+      - key: ANSWER_FIRST_PIPELINE
+        value: "on"
       - key: CRM_SYNC_ENABLED
         value: "false"
       - key: LIVE_CRM_ENABLED
