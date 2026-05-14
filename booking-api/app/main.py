@@ -24,7 +24,7 @@ from psycopg.rows import dict_row
 TIMEZONE = os.getenv("TIMEZONE", "Europe/Istanbul")
 TZ = ZoneInfo(TIMEZONE)
 APP_BUILD_VERSION = os.getenv("APP_BUILD_VERSION") or os.getenv("RENDER_GIT_COMMIT") or "local"
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://n8n:n8n@postgres:5432/n8n")
+DATABASE_URL = os.getenv("DATABASE_URL")
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(
     level=getattr(logging, LOG_LEVEL, logging.INFO),
@@ -965,6 +965,42 @@ def on_startup() -> None:
 def health() -> dict[str, Any]:
     return {"status": "ok", "time": datetime.now(TZ).isoformat()}
 
+
+
+
+def _safe_db_env_info():
+    raw = os.getenv("DATABASE_URL")
+    if not raw:
+        return {"present": False, "length": 0, "host": None, "dbname": None, "sslmode": None}
+    try:
+        from urllib.parse import urlparse, parse_qs
+        u = urlparse(raw)
+        return {
+            "present": True,
+            "length": len(raw),
+            "scheme": u.scheme,
+            "host": u.hostname,
+            "port": u.port,
+            "dbname": (u.path or "").lstrip("/"),
+            "sslmode": parse_qs(u.query).get("sslmode", [None])[0],
+            "user_present": bool(u.username),
+            "password_present": bool(u.password),
+        }
+    except Exception as exc:
+        return {"present": True, "length": len(raw), "parse_error": str(exc)}
+
+@app.get("/debug-env")
+def debug_env(token: str = ""):
+    if token != os.getenv("ADMIN_CLEANUP_TOKEN", "doel-cleanup-2026"):
+        raise HTTPException(status_code=403, detail="forbidden")
+    return {
+        "database_url": _safe_db_env_info(),
+        "env_keys_with_db": sorted([k for k in os.environ if "DATABASE" in k or k.endswith("_URL")])[:200],
+        "service_name": os.getenv("RENDER_SERVICE_NAME"),
+        "service_id": os.getenv("RENDER_SERVICE_ID"),
+        "instance_id": os.getenv("RENDER_INSTANCE_ID"),
+        "git_commit": os.getenv("RENDER_GIT_COMMIT"),
+    }
 
 @app.get("/version")
 def version() -> dict[str, Any]:
