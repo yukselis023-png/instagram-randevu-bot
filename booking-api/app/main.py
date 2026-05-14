@@ -112,9 +112,10 @@ app = FastAPI(title="Instagram Booking API", version="1.0.0")
 def debug_state(sender_id: str):
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT * FROM conversation_state_v2 WHERE sender_id = %s", (sender_id,))
+            cur.execute("SELECT * FROM conversations WHERE instagram_user_id = %s", (sender_id,))
             row = cur.fetchone()
-            if not row: return {"error": "Not found"}
+            if not row:
+                return {"error": "Not found"}
             from app.main import serialize_row
             data = serialize_row(row)
             return {"state": data}
@@ -3463,11 +3464,26 @@ def upsert_customer_from_conversation(conn: psycopg.Connection, conversation: di
                 last_service, last_contact_at, updated_at
             ) VALUES (%s, %s, %s, %s, %s, %s, NOW(), NOW())
             ON CONFLICT (instagram_user_id) DO UPDATE SET
-                instagram_username = COALESCE(EXCLUDED.instagram_username, customers.instagram_username),
-                full_name = COALESCE(EXCLUDED.full_name, customers.full_name),
-                phone = COALESCE(EXCLUDED.phone, customers.phone),
-                sector = COALESCE(EXCLUDED.sector, customers.sector),
-                last_service = COALESCE(EXCLUDED.last_service, customers.last_service),
+                instagram_username = CASE
+                    WHEN NULLIF(EXCLUDED.instagram_username, '') IS NOT NULL THEN EXCLUDED.instagram_username
+                    ELSE customers.instagram_username
+                END,
+                full_name = CASE
+                    WHEN NULLIF(EXCLUDED.full_name, '') IS NOT NULL THEN EXCLUDED.full_name
+                    ELSE customers.full_name
+                END,
+                phone = CASE
+                    WHEN NULLIF(EXCLUDED.phone, '') IS NOT NULL THEN EXCLUDED.phone
+                    ELSE customers.phone
+                END,
+                sector = CASE
+                    WHEN NULLIF(EXCLUDED.sector, '') IS NOT NULL THEN EXCLUDED.sector
+                    ELSE customers.sector
+                END,
+                last_service = CASE
+                    WHEN NULLIF(EXCLUDED.last_service, '') IS NOT NULL THEN EXCLUDED.last_service
+                    ELSE customers.last_service
+                END,
                 last_contact_at = NOW(),
                 updated_at = NOW()
             RETURNING *

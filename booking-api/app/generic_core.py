@@ -23,7 +23,7 @@ from app.main import (
     is_invalid_phone_attempt, extract_date, extract_time_for_state, extract_time, create_appointment,
     build_confirmation_message, try_reschedule_confirmed_appointment, find_active_appointment_for_user,
     detect_customer_subsector, customer_sector_for_subsector, normalize_date_string, normalize_time_string,
-    validate_slot, format_human_date, get_booking_label
+    validate_slot, format_human_date, get_booking_label, TZ
 )
 
 logger = logging.getLogger(__name__)
@@ -386,8 +386,7 @@ def remember_requested_service(conversation: dict[str, Any], memory: dict[str, A
     memory["requested_service"] = clean
     memory["selected_service"] = clean
     memory["service_interest"] = clean
-    if not sanitize_text(conversation.get("service") or ""):
-        conversation["service"] = clean
+    conversation["service"] = clean
     return clean
 
 
@@ -1955,7 +1954,7 @@ def invoke_generic_llm(message_text: str, conversation: dict, memory: dict, hist
     if not conversation.get("phone"): missing.append("Telefon Numarası")
     if not conversation.get("requested_date") or not conversation.get("requested_time"): missing.append("Tarih ve Saat")
     
-    today = datetime.date.today().strftime('%Y-%m-%d')
+    today = datetime.datetime.now(TZ).date().strftime('%Y-%m-%d')
     system_prompt = f"""Sen {cfg.get('business_name')} firmasının Instagram DM asistanısın. Türkçe, doğal ve kısa yaz. BUGÜNÜN TARİHİ: {today}. Tarih gerekiyorsa YYYY-MM-DD hesapla.
 
 BUSINESS CONTEXT:
