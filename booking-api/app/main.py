@@ -24,7 +24,24 @@ from psycopg.rows import dict_row
 TIMEZONE = os.getenv("TIMEZONE", "Europe/Istanbul")
 TZ = ZoneInfo(TIMEZONE)
 APP_BUILD_VERSION = os.getenv("APP_BUILD_VERSION") or os.getenv("RENDER_GIT_COMMIT") or "local"
-DATABASE_URL = os.getenv("DATABASE_URL")
+RAW_DATABASE_URL = os.getenv("DATABASE_URL")
+
+def _normalize_database_url(raw: str | None) -> str | None:
+    if not raw:
+        return None
+    from urllib.parse import urlparse, urlunparse, parse_qsl, urlencode
+    u = urlparse(raw)
+    host = u.hostname or ""
+    # Render currently injects private hostname into this public/free web service; DNS fails.
+    # Force known public host + ssl for this DB.
+    if host == "dpg-d7f6h48sfn5c73dab9p0-a":
+        netloc = u.netloc.replace(host, "dpg-d7f6h48sfn5c73dab9p0-a.oregon-postgres.render.com")
+        q = dict(parse_qsl(u.query))
+        q.setdefault("sslmode", "require")
+        return urlunparse((u.scheme, netloc, u.path, u.params, urlencode(q), u.fragment))
+    return raw
+
+DATABASE_URL = _normalize_database_url(RAW_DATABASE_URL)
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(
     level=getattr(logging, LOG_LEVEL, logging.INFO),
@@ -969,7 +986,7 @@ def health() -> dict[str, Any]:
 
 
 def _safe_db_env_info():
-    raw = os.getenv("DATABASE_URL")
+    raw = DATABASE_URL
     if not raw:
         return {"present": False, "length": 0, "host": None, "dbname": None, "sslmode": None}
     try:
@@ -995,6 +1012,7 @@ def debug_env(token: str = ""):
         raise HTTPException(status_code=403, detail="forbidden")
     return {
         "database_url": _safe_db_env_info(),
+        "raw_database_url": (lambda: {"present": bool(RAW_DATABASE_URL), "length": len(RAW_DATABASE_URL or "")})(),
         "env_keys_with_db": sorted([k for k in os.environ if "DATABASE" in k or k.endswith("_URL")])[:200],
         "service_name": os.getenv("RENDER_SERVICE_NAME"),
         "service_id": os.getenv("RENDER_SERVICE_ID"),
