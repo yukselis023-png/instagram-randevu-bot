@@ -934,8 +934,11 @@ class CampaignCreateRequest(BaseModel):
 
 @app.on_event("startup")
 def on_startup() -> None:
-    wait_for_database()
-    run_migrations()
+    try:
+        wait_for_database()
+        run_migrations()
+    except Exception:  # noqa: BLE001
+        logger.exception("startup_database_unavailable_continue")
     if is_live_crm_configured():
         try:
             headers, user_id = live_crm_auth_session()
