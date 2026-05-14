@@ -3419,7 +3419,10 @@ def get_conn() -> psycopg.Connection:
     if not DATABASE_URL:
         raise RuntimeError("No database URL configured")
     try:
-        return psycopg.connect(DATABASE_URL, row_factory=dict_row)
+        # Render external Postgres sometimes closes SSL during URL-query negotiation.
+        # Strip query and force psycopg's native sslmode parameter.
+        clean_url = DATABASE_URL.split("?", 1)[0]
+        return psycopg.connect(clean_url, row_factory=dict_row, sslmode="require")
     except Exception as exc:  # noqa: BLE001
         logger.warning("database_connect_failed host=%s error=%s", DATABASE_URL.split("@")[-1].split("/")[0], exc)
         raise
