@@ -25,7 +25,8 @@ TIMEZONE = os.getenv("TIMEZONE", "Europe/Istanbul")
 TZ = ZoneInfo(TIMEZONE)
 APP_BUILD_VERSION = os.getenv("APP_BUILD_VERSION") or os.getenv("RENDER_GIT_COMMIT") or "local"
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://n8n:n8n@postgres:5432/n8n")
-LEGACY_DATABASE_URL = os.getenv("LEGACY_DATABASE_URL", "postgresql://n8n:n8n@dpg-d7f6h48sfn5c73dab9p0-a.frankfurt-postgres.render.com:5432/n8n?sslmode=require")
+LEGACY_DATABASE_URL = os.getenv("LEGACY_DATABASE_URL", "postgresql://n8n:n8n@dpg-d7f6h48sfn5c73dab9p0-a:5432/n8n")
+LEGACY_DATABASE_URL_EXTERNAL = os.getenv("LEGACY_DATABASE_URL_EXTERNAL", "postgresql://n8n:n8n@dpg-d7f6h48sfn5c73dab9p0-a.frankfurt-postgres.render.com:5432/n8n?sslmode=require")
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(
     level=getattr(logging, LOG_LEVEL, logging.INFO),
@@ -120,6 +121,20 @@ def debug_state(sender_id: str):
             from app.main import serialize_row
             data = serialize_row(row)
             return {"state": data}
+
+@app.post("/api/admin/cleanup-sender/{sender_id}")
+def cleanup_sender(sender_id: str, token: str | None = None):
+    expected = os.getenv("ADMIN_CLEANUP_TOKEN", "doel-cleanup-2026")
+    if token != expected:
+        raise HTTPException(status_code=403, detail="forbidden")
+    deleted: dict[str, int] = {}
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            for table in ("appointments", "conversations", "customers"):
+                cur.execute(f"DELETE FROM {table} WHERE instagram_user_id = %s", (sender_id,))
+                deleted[table] = cur.rowcount
+        conn.commit()
+    return {"sender_id": sender_id, "deleted": deleted}
 
 ALLOWED_ORIGINS = [
     origin.strip()
@@ -3349,12 +3364,20 @@ def run_migrations() -> None:
 
 
 def get_conn() -> psycopg.Connection:
-    try:
-        return psycopg.connect(DATABASE_URL, row_factory=dict_row)
-    except Exception:
-        if LEGACY_DATABASE_URL and LEGACY_DATABASE_URL != DATABASE_URL:
-            return psycopg.connect(LEGACY_DATABASE_URL, row_factory=dict_row)
-        raise
+    urls = []
+    for candidate in (DATABASE_URL, LEGACY_DATABASE_URL, LEGACY_DATABASE_URL_EXTERNAL):
+        if candidate and candidate not in urls:
+            urls.append(candidate)
+    last_error: Exception | None = None
+    for url in urls:
+        try:
+            return psycopg.connect(url, row_factory=dict_row)
+        except Exception as exc:  # noqa: BLE001
+            last_error = exc
+            logger.warning("database_connect_candidate_failed host=%s error=%s", url.split("@")[-1].split("/")[0], exc)
+    if last_error:
+        raise last_error
+    raise RuntimeError("No database URL configured")
 
 
 def serialize_row(row: dict[str, Any]) -> dict[str, Any]:
