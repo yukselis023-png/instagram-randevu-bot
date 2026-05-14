@@ -25,8 +25,6 @@ TIMEZONE = os.getenv("TIMEZONE", "Europe/Istanbul")
 TZ = ZoneInfo(TIMEZONE)
 APP_BUILD_VERSION = os.getenv("APP_BUILD_VERSION") or os.getenv("RENDER_GIT_COMMIT") or "local"
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://n8n:n8n@postgres:5432/n8n")
-LEGACY_DATABASE_URL = os.getenv("LEGACY_DATABASE_URL", "postgresql://n8n:n8n@dpg-d7f6h48sfn5c73dab9p0-a:5432/n8n")
-LEGACY_DATABASE_URL_EXTERNAL = os.getenv("LEGACY_DATABASE_URL_EXTERNAL", "postgresql://n8n:n8n@dpg-d7f6h48sfn5c73dab9p0-a.frankfurt-postgres.render.com:5432/n8n?sslmode=require")
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(
     level=getattr(logging, LOG_LEVEL, logging.INFO),
@@ -3364,20 +3362,13 @@ def run_migrations() -> None:
 
 
 def get_conn() -> psycopg.Connection:
-    urls = []
-    for candidate in (DATABASE_URL, LEGACY_DATABASE_URL, LEGACY_DATABASE_URL_EXTERNAL):
-        if candidate and candidate not in urls:
-            urls.append(candidate)
-    last_error: Exception | None = None
-    for url in urls:
-        try:
-            return psycopg.connect(url, row_factory=dict_row)
-        except Exception as exc:  # noqa: BLE001
-            last_error = exc
-            logger.warning("database_connect_candidate_failed host=%s error=%s", url.split("@")[-1].split("/")[0], exc)
-    if last_error:
-        raise last_error
-    raise RuntimeError("No database URL configured")
+    if not DATABASE_URL:
+        raise RuntimeError("No database URL configured")
+    try:
+        return psycopg.connect(DATABASE_URL, row_factory=dict_row)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("database_connect_failed host=%s error=%s", DATABASE_URL.split("@")[-1].split("/")[0], exc)
+        raise
 
 
 def serialize_row(row: dict[str, Any]) -> dict[str, Any]:
