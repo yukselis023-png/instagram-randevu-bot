@@ -25,6 +25,7 @@ TIMEZONE = os.getenv("TIMEZONE", "Europe/Istanbul")
 TZ = ZoneInfo(TIMEZONE)
 APP_BUILD_VERSION = os.getenv("APP_BUILD_VERSION") or os.getenv("RENDER_GIT_COMMIT") or "local"
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://n8n:n8n@postgres:5432/n8n")
+LEGACY_DATABASE_URL = os.getenv("LEGACY_DATABASE_URL", "postgresql://n8n:n8n@dpg-d7f6h48sfn5c73dab9p0-a.frankfurt-postgres.render.com/n8n")
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(
     level=getattr(logging, LOG_LEVEL, logging.INFO),
@@ -3345,7 +3346,12 @@ def run_migrations() -> None:
 
 
 def get_conn() -> psycopg.Connection:
-    return psycopg.connect(DATABASE_URL, row_factory=dict_row)
+    try:
+        return psycopg.connect(DATABASE_URL, row_factory=dict_row)
+    except Exception:
+        if LEGACY_DATABASE_URL and LEGACY_DATABASE_URL != DATABASE_URL:
+            return psycopg.connect(LEGACY_DATABASE_URL, row_factory=dict_row)
+        raise
 
 
 def serialize_row(row: dict[str, Any]) -> dict[str, Any]:
