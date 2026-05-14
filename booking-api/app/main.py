@@ -3470,24 +3470,24 @@ def upsert_customer_from_conversation(conn: psycopg.Connection, conversation: di
                 last_service, last_contact_at, updated_at
             ) VALUES (%s, %s, %s, %s, %s, %s, NOW(), NOW())
             ON CONFLICT (instagram_user_id) DO UPDATE SET
-                instagram_username = CASE
-                    WHEN NULLIF(EXCLUDED.instagram_username, '') IS NOT NULL THEN EXCLUDED.instagram_username
-                    ELSE customers.instagram_username
-                END,
+                instagram_username = COALESCE(NULLIF(EXCLUDED.instagram_username, ''), customers.instagram_username),
                 full_name = CASE
-                    WHEN NULLIF(EXCLUDED.full_name, '') IS NOT NULL THEN EXCLUDED.full_name
+                    WHEN NULLIF(EXCLUDED.full_name, '') IS NOT NULL
+                         AND EXCLUDED.full_name IS DISTINCT FROM customers.full_name
+                    THEN EXCLUDED.full_name
                     ELSE customers.full_name
                 END,
                 phone = CASE
-                    WHEN NULLIF(EXCLUDED.phone, '') IS NOT NULL THEN EXCLUDED.phone
+                    WHEN NULLIF(EXCLUDED.phone, '') IS NOT NULL
+                         AND EXCLUDED.phone IS DISTINCT FROM customers.phone
+                    THEN EXCLUDED.phone
                     ELSE customers.phone
                 END,
-                sector = CASE
-                    WHEN NULLIF(EXCLUDED.sector, '') IS NOT NULL THEN EXCLUDED.sector
-                    ELSE customers.sector
-                END,
+                sector = COALESCE(NULLIF(EXCLUDED.sector, ''), customers.sector),
                 last_service = CASE
-                    WHEN NULLIF(EXCLUDED.last_service, '') IS NOT NULL THEN EXCLUDED.last_service
+                    WHEN NULLIF(EXCLUDED.last_service, '') IS NOT NULL
+                         AND EXCLUDED.last_service IS DISTINCT FROM customers.last_service
+                    THEN EXCLUDED.last_service
                     ELSE customers.last_service
                 END,
                 last_contact_at = NOW(),
