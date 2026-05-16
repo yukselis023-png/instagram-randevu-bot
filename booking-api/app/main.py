@@ -2814,6 +2814,16 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
             if should_trace_decline_memory(message_text, conversation, llm_data):
                 log_decline_memory_trace("after_user_memory_update", payload.sender_id, trace_id, conversation, extra={"llm_objection_type": llm_data.get("objection_type")})
             decision_path.append(REPLY_ENGINE)
+            if sanitize_text(conversation.get("state") or "") in {"collect_datetime", "collect_date", "collect_time", "collect_period"}:
+                slot_options = collect_next_booking_slot_options(conn, conversation, limit=3)
+                if not slot_options:
+                    slot_options = [
+                        {"date": (datetime.now(TZ).date() + timedelta(days=3)).isoformat(), "time": "13:00"},
+                        {"date": (datetime.now(TZ).date() + timedelta(days=3)).isoformat(), "time": "15:00"},
+                        {"date": (datetime.now(TZ).date() + timedelta(days=6)).isoformat(), "time": "14:00"},
+                    ]
+                conversation["available_slots"] = [format_booking_slot_option(slot) for slot in slot_options[:3]]
+                remember_booking_slot_options(conversation, slot_options[:3])
             ai_decision = build_ai_first_decision(message_text, conversation, recent_history, llm_data)
             if ignored_llm_booking_datetime:
                 ai_decision["requested_date"] = None
@@ -2913,12 +2923,27 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
                         decision_path.append("ai_first_booking_slot_taken")
                         metrics["slot_resolution"] = "slot_taken"
                     else:
-                        # VIBE CODING: Python burada appointment oluşturmaz ve müşteri cevabı üretmez.
-                        # Tüm bilgiler DB state içinde korunur; final karar/cevap LLM akışına bırakılır.
-                        appointment_created = False
-                        appointment_id = None
-                        decision_path.append("ai_first_booking_create_deferred_to_llm")
-                        metrics["slot_resolution"] = "deferred_to_llm"
+                        conversation["state"] = "completed"
+                        conversation["appointment_status"] = "confirmed"
+                        try:
+                            created_id, live_crm_ms = create_appointment(conn, conversation, username)
+                            appointment_created = True
+                            appointment_id = created_id
+                            conversation["appointment_id"] = created_id
+                            metrics["live_crm_sync_ms"] = live_crm_ms
+                            decision_path.append("ai_first_silent_appointment_created")
+                            metrics["slot_resolution"] = "created_silently"
+                        except Exception as exc:  # noqa: BLE001
+                            logger.error("Silent appointment creation failed: %s", exc)
+                            conversation["state"] = "human_handoff"
+                            conversation["appointment_status"] = "handoff"
+                            conversation["assigned_human"] = True
+                            appointment_created = False
+                            appointment_id = None
+                            final_reply = "Randevu kaydını tamamlamak için ekibimize aktarıyorum; kısa süre içinde kontrol edip size dönüş sağlayacağız."
+                            ai_decision["handoff_needed"] = True
+                            decision_path.append("ai_first_silent_appointment_failed")
+                            metrics["slot_resolution"] = "silent_creation_failed"
             return finalize_result(
                 final_reply,
                 handoff=bool(ai_decision.get("handoff_needed")),
@@ -10476,6 +10501,7 @@ def build_ai_first_prompt_payload(
         "recent_history": history or [],
         "extractor_hint": llm_data or {},
         "message": message_text,
+        "available_slots": conversation.get("available_slots") or [],
     }
 
 
@@ -11526,7 +11552,8 @@ def build_ai_first_decision(
                 "If the user is angry or insults the bot, apologize briefly, avoid repeating old collection prompts, and explain the next useful step. "
                 "Use only the provided service catalog for prices, delivery times, and services. If unsure, say that the team should confirm instead of inventing. "
                 "If booking_intent is true, include one clear next missing field in the reply, not several at once. Keep replies short: usually 1-3 concise sentences. Do not include markdown. "
-                "When suggesting or asking for appointment date/time, offer specific options within working hours 10:00-19:00. Instead of vague phrases like 'öğleden sonra', give 2-3 concrete choices like '12:00, 14:00 veya 16:00'."
+                "When suggesting or asking for appointment date/time, offer specific options within working hours 10:00-19:00. Instead of vague phrases like 'öğleden sonra', give 2-3 concrete choices like '12:00, 14:00 veya 16:00'. "
+                "RANDEVU SLOTLARI KURALLARI: If payload.available_slots is provided, only offer slots from that list. Ask with two concrete options, never open-ended 'hangi gün müsaitsiniz'. If user gives a relative date/time like 'yarın öğlen' or 'cumartesi 15:00', accept it when extractable; do not stubbornly ask for exact format. If date/time already exists and user corrects name/phone, apologize/correct and do not ask date/time again."
             ),
         },
         {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
