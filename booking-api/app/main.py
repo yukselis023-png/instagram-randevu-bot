@@ -70,7 +70,9 @@ SLOT_DURATION_MINUTES = int(os.getenv("SLOT_DURATION_MINUTES", "60"))
 SLOT_BUFFER_MINUTES = int(os.getenv("SLOT_BUFFER_MINUTES", "10"))
 APPOINTMENT_LOOKAHEAD_DAYS = int(os.getenv("APPOINTMENT_LOOKAHEAD_DAYS", "30"))
 AI_FIRST_BOOKING_SLOT_LIMIT = int(os.getenv("AI_FIRST_BOOKING_SLOT_LIMIT", "4"))
-LLM_BASE_URL = "https://mambo-evaluation-heavy-penalties.trycloudflare.com/v1"
+LLM_BASE_URL = os.getenv("LLM_BASE_URL", "").strip().rstrip("/")
+if LLM_BASE_URL and not LLM_BASE_URL.endswith("/v1"):
+    LLM_BASE_URL = f"{LLM_BASE_URL}/v1"
 LLM_API_KEY = os.getenv("LLM_API_KEY", "").strip()
 LLM_MODEL = os.getenv("LLM_MODEL", "llama-3.3-70b-versatile")
 LLM_FALLBACK_MODEL = os.getenv("LLM_FALLBACK_MODEL", "llama-3.1-8b-instant")
