@@ -1146,8 +1146,44 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
         "message_type": "reply"
     }
 
-    message_text = sanitize_text(payload.message_text or "")
     from app.main import logger
+    raw_ts = None
+    if payload.raw_event and isinstance(payload.raw_event, dict):
+        raw_ts = payload.raw_event.get("timestamp") or payload.raw_event.get("created_time")
+    if raw_ts:
+        try:
+            if isinstance(raw_ts, (int, float)):
+                message_time = datetime.datetime.fromtimestamp(raw_ts, tz=datetime.timezone.utc)
+            else:
+                raw_ts_str = str(raw_ts).strip()
+                if raw_ts_str.isdigit():
+                    ts_number = int(raw_ts_str)
+                    if ts_number > 10_000_000_000:
+                        ts_number = ts_number / 1000
+                    message_time = datetime.datetime.fromtimestamp(ts_number, tz=datetime.timezone.utc)
+                else:
+                    message_time = datetime.datetime.fromisoformat(raw_ts_str.replace("Z", "+00:00"))
+                    if message_time.tzinfo is None:
+                        message_time = message_time.replace(tzinfo=datetime.timezone.utc)
+            now_time = datetime.datetime.now(datetime.timezone.utc)
+            if (now_time - message_time) > datetime.timedelta(minutes=10):
+                logger.warning("Anti-spam: Ignoring old inbound message. Msg time: %s, Now: %s", message_time, now_time)
+                metrics["ignored"] = "old_inbound_anti_spam"
+                metrics["total_ms"] = elapsed_ms(request_started_at)
+                return ProcessResult(
+                    sender_id=payload.sender_id,
+                    should_reply=False,
+                    reply_text=None,
+                    handoff=False,
+                    conversation_state="ignored_old_inbound",
+                    normalized={},
+                    metrics=metrics,
+                    decision_path=["ignored:anti_spam_old_ts"]
+                )
+        except Exception as e:
+            logger.error("Failed to parse timestamp for anti-spam check: %s", e)
+
+    message_text = sanitize_text(payload.message_text or "")
     logger.info("INBOUND_RECEIVED sender_id=%s text=%s platform=%s",
         payload.sender_id,
         repr(message_text[:200]) if message_text else "EMPTY",
