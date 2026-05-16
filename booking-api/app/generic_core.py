@@ -1509,12 +1509,26 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
             elif not has_date or not has_time:
                 conversation["state"] = "collect_datetime"
             elif should_create_appointment:
-                # VIBE CODING: FSM sadece state/DB alanlarını günceller; müşteri cevabı ve
-                # appointment oluşturma kararı LLM final akışına bırakılır.
-                appointment_created = False
-                appointment_id = None
-                conversation["state"] = previous_state
-                decision_path.append("fsm:appointment_create_deferred_to_llm")
+                conversation["state"] = "completed"
+                conversation["appointment_status"] = "confirmed"
+                try:
+                    created = create_appointment(conn, conversation, username)
+                    appointment_id = int(created[0] if isinstance(created, tuple) else created)
+                    appointment_created = True
+                    conversation["appointment_id"] = appointment_id
+                    handoff = False
+                    decision_path.append("fsm:silent_appointment_created")
+                except Exception as exc:  # noqa: BLE001
+                    logger.error("Silent appointment creation failed: %s", exc)
+                    conversation["state"] = "human_handoff"
+                    conversation["appointment_status"] = "handoff"
+                    conversation["assigned_human"] = True
+                    appointment_created = False
+                    appointment_id = None
+                    handoff = True
+                    reply_text = "Randevu kaydını tamamlamak için ekibimize aktarıyorum; kısa süre içinde kontrol edip size dönüş sağlayacağız."
+                    final_reply_source = "fsm_guard"
+                    decision_path.append("fsm:silent_appointment_failed")
             else:
                 appointment_created = False
                 appointment_id = None
