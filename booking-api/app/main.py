@@ -11766,8 +11766,9 @@ def upsert_conversation(conn: psycopg.Connection, conversation: dict[str, Any]) 
                 last_customer_message,
                 llm_notes,
                 memory_state,
+                appointment_id,
                 updated_at
-            ) VALUES (%s, %s, %s, %s, %s, %s::date, %s::time, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, NOW())
+            ) VALUES (%s, %s, %s, %s, %s, %s::date, %s::time, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, NOW())
             ON CONFLICT (instagram_user_id) DO UPDATE SET
                 instagram_username = EXCLUDED.instagram_username,
                 full_name = EXCLUDED.full_name,
@@ -11783,6 +11784,7 @@ def upsert_conversation(conn: psycopg.Connection, conversation: dict[str, Any]) 
                 last_customer_message = EXCLUDED.last_customer_message,
                 llm_notes = EXCLUDED.llm_notes,
                 memory_state = EXCLUDED.memory_state,
+                appointment_id = EXCLUDED.appointment_id,
                 updated_at = NOW()
             """,
             (
@@ -11801,6 +11803,7 @@ def upsert_conversation(conn: psycopg.Connection, conversation: dict[str, Any]) 
                 conversation.get("last_customer_message"),
                 conversation.get("llm_notes"),
                 json.dumps(ensure_conversation_memory(conversation), ensure_ascii=False),
+                conversation.get("appointment_id"),
             ),
         )
     conn.commit()
