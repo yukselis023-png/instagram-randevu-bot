@@ -1469,23 +1469,17 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
         
         active_fsm_applies = curr_state.startswith("collect_") and active_state_is_relevant and active_state_label != "llm_flow"
         if suppress_active_field_updates and not active_direct_clarification:
+            # VIBE CODING: FSM has no mouth. Preserve LLM reply; only state/DB may change.
             if is_simple_greeting(message_text) or is_active_salutation_message(message_text):
                 intent = "direct_answer"
-                if is_booking_field_collection_reply(reply_text):
-                    reply_text = "Merhaba, buradayım. Nasıl yardımcı olabilirim?"
-                    final_reply_source = "fsm"
-                    decision_path.append("fsm:active_greeting_safe_reply")
-                else:
-                    decision_path.append("fsm:active_greeting_preserve_llm_reply")
+                decision_path.append("fsm:active_greeting_preserve_llm_reply")
             elif (
                 curr_state == "collect_name"
                 and not conversation.get("full_name")
                 and is_collect_name_continue_signal(message_text)
             ):
-                reply_text = "Harika. Kayıt oluşturabilmem için adınızı ve soyadınızı alabilir miyim?"
-                final_reply_source = "fsm"
                 intent = "direct_answer"
-                decision_path.append("fsm:collect_name_continue_prompt")
+                decision_path.append("fsm:collect_name_continue_preserve_llm")
             else:
                 recovery_reply = build_active_state_recovery_reply(curr_state)
                 if recovery_reply:
@@ -1493,10 +1487,7 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
                         intent = "direct_answer"
                         decision_path.append("fsm:active_state_recovery_preserved_llm")
                     else:
-                        reply_text = recovery_reply
-                        final_reply_source = "fsm"
-                        intent = "direct_answer"
-                        decision_path.append("fsm:active_state_recovery_reply")
+                        decision_path.append("fsm:active_state_recovery_deferred_to_llm")
         if not handoff and active_state_label != "llm_flow" and not suppress_active_field_updates and (booking_opt_in or intent in ["booking_request", "active_booking"] or active_fsm_applies):
             carried_service = remember_requested_service(conversation, memory, known_requested_service(conversation, memory))
             has_service = bool(carried_service)
@@ -1538,36 +1529,13 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
             and service_for_booking
             and conversation.get("state") in {"collect_name", "collect_phone"}
         ):
-            if final_reply_source == "llm_raw" and reply_asks_for_collection_state(reply_text, conversation.get("state")):
-                decision_path.append("fsm:service_carryover_preserved_llm")
-            else:
-                carryover_reply = build_service_carryover_booking_reply(service_for_booking, conversation.get("state"))
-                if carryover_reply:
-                    reply_text = carryover_reply
-                    final_reply_source = "fsm"
-                    decision_path.append("fsm:service_carryover_booking")
+            decision_path.append("fsm:service_carryover_deferred_to_llm")
         elif (curr_state.startswith("collect_") and active_state_is_relevant and not active_direct_clarification and (is_llm_error_reply(reply_text) or state_changed_by_fsm or invalid_phone_prompt or active_state_label in {"name_ack", "username_save"})):
-            active_prompt = build_active_booking_prompt_reply(conversation, memory)
-            if active_prompt:
-                if (
-                    state_changed_by_fsm
-                    and not invalid_phone_prompt
-                    and not is_llm_error_reply(reply_text)
-                    and reply_asks_for_collection_state(reply_text, conversation.get("state"))
-                ):
-                    decision_path.append("fsm:active_booking_prompt_preserved_llm")
-                else:
-                    reply_text = active_prompt
-                    final_reply_source = "fsm"
-                    decision_path.append("fsm:active_booking_prompt")
+            decision_path.append("fsm:active_booking_prompt_deferred_to_llm")
 
         if active_direct_clarification and (is_llm_error_reply(reply_text) or is_booking_field_collection_reply(reply_text)):
-            direct_reply = build_active_direct_clarification_reply(message_text, cfg, conversation, memory)
-            if direct_reply:
-                reply_text = direct_reply
-                final_reply_source = "fsm_direct_answer"
-                intent = "direct_answer"
-                decision_path.append("fsm:active_direct_clarification_reply")
+            intent = "direct_answer"
+            decision_path.append("fsm:active_direct_clarification_deferred_to_llm")
 
         # 4. FINAL QUALITY GUARD (Post FSM Check)
         reply_text, guard_label = generic_quality_guard(reply_text, extracted, memory, cfg, message_text)
