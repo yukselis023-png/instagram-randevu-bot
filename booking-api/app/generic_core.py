@@ -1512,7 +1512,7 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
                 conversation["state"] = "completed"
                 conversation["appointment_status"] = "confirmed"
                 try:
-                    created = create_appointment(conn, conversation, username)
+                    created = create_appointment(conn, conversation, payload.instagram_username)
                     appointment_id = int(created[0] if isinstance(created, tuple) else created)
                     appointment_created = True
                     conversation["appointment_id"] = appointment_id
@@ -1529,6 +1529,7 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
                     reply_text = "Randevu kaydını tamamlamak için ekibimize aktarıyorum; kısa süre içinde kontrol edip size dönüş sağlayacağız."
                     final_reply_source = "fsm_guard"
                     decision_path.append("fsm:silent_appointment_failed")
+                    decision_path.append("guard:appointment_create_failed")
             else:
                 appointment_created = False
                 appointment_id = None
