@@ -195,6 +195,7 @@ CREATE TABLE IF NOT EXISTS conversations (
     last_customer_message TEXT,
     llm_notes TEXT,
     memory_state JSONB NOT NULL DEFAULT '{}'::jsonb,
+    appointment_id BIGINT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -3301,6 +3302,7 @@ def run_migrations() -> None:
             cur.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS booking_kind TEXT")
             cur.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS preferred_period TEXT")
             cur.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS memory_state JSONB NOT NULL DEFAULT '{}'::jsonb")
+            cur.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS appointment_id BIGINT")
             cur.execute("ALTER TABLE appointments ADD COLUMN IF NOT EXISTS attendance_status TEXT NOT NULL DEFAULT 'scheduled'")
             cur.execute("ALTER TABLE appointments ADD COLUMN IF NOT EXISTS attendance_marked_at TIMESTAMPTZ")
             cur.execute("ALTER TABLE appointments ADD COLUMN IF NOT EXISTS approval_status TEXT")
