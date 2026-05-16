@@ -2910,51 +2910,12 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
                         decision_path.append("ai_first_booking_slot_taken")
                         metrics["slot_resolution"] = "slot_taken"
                     else:
-                        try:
-                            appointment_id, crm_ms = create_appointment(conn, conversation, payload.instagram_username)
-                            metrics["crm_ms"] = crm_ms
-                            active_appointment = find_active_appointment_for_user(
-                                conn,
-                                conversation.get("instagram_user_id"),
-                                preferred_date=conversation.get("requested_date"),
-                                preferred_time=conversation.get("requested_time"),
-                            )
-                            if active_appointment:
-                                conversation["requested_date"] = active_appointment.get("appointment_date") or conversation.get("requested_date")
-                                conversation["requested_time"] = active_appointment.get("appointment_time") or conversation.get("requested_time")
-                                conversation["appointment_status"] = "confirmed"
-                                conversation["state"] = "completed"
-                                appointment_created = True
-                                final_reply = build_confirmation_message(conversation)
-                                decision_path.append("ai_first_booking_created")
-                                metrics["slot_resolution"] = "created"
-                            else:
-                                conversation["state"] = "human_handoff"
-                                conversation["assigned_human"] = True
-                                final_reply = (
-                                    "Kaydınızı oluştururken teknik bir tutarsızlık algıladım; yanlış onay vermemek için sizi yetkili ekibimize yönlendiriyorum. "
-                                    f"İsterseniz {build_contact_text()} üzerinden de bize ulaşabilirsiniz."
-                                )
-                                decision_path.append("ai_first_booking_integrity_handoff")
-                                metrics["slot_resolution"] = "integrity_handoff"
-                        except HTTPException as exc:
-                            if exc.status_code == 409 and isinstance(exc.detail, dict) and exc.detail.get("type") == "slot_conflict":
-                                conversation["requested_time"] = None
-                                conversation["state"] = "collect_time"
-                                alternatives = suggest_alternatives(conn, conversation["requested_date"], conversation.get("requested_time"), conversation.get("service"))
-                                alt_text = ", ".join(alternatives) if alternatives else "başka bir uygun saat"
-                                final_reply = f"Seçtiğiniz saat dolmuş görünüyor. Uygun alternatif: {alt_text}. Hangisi size uyar?"
-                                decision_path.append("ai_first_booking_slot_conflict")
-                                metrics["slot_resolution"] = "slot_conflict"
-                            else:
-                                raise
-                        except Exception as exc:
-                            logger.exception("appointment_create_failed sender_id=%s error=%s", payload.sender_id, exc)
-                            appointment_created = False
-                            appointment_id = None
-                            final_reply = SAFE_USER_FALLBACK_REPLY
-                            decision_path.append("ai_first_create_appointment_error")
-                            metrics["slot_resolution"] = "create_error"
+                        # VIBE CODING: Python burada appointment oluşturmaz ve müşteri cevabı üretmez.
+                        # Tüm bilgiler DB state içinde korunur; final karar/cevap LLM akışına bırakılır.
+                        appointment_created = False
+                        appointment_id = None
+                        decision_path.append("ai_first_booking_create_deferred_to_llm")
+                        metrics["slot_resolution"] = "deferred_to_llm"
             return finalize_result(
                 final_reply,
                 handoff=bool(ai_decision.get("handoff_needed")),
@@ -3179,86 +3140,11 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
                         )
                         final_decision = "slot_taken"
                     else:
-                        try:
-                            appointment_id, crm_ms = create_appointment(conn, conversation, payload.instagram_username)
-                            metrics["crm_ms"] = crm_ms
-                            active_appointment = find_active_appointment_for_user(
-                                conn,
-                                conversation.get("instagram_user_id"),
-                                preferred_date=conversation.get("requested_date"),
-                                preferred_time=conversation.get("requested_time"),
-                            )
-                            if not active_appointment:
-                                conversation["state"] = "human_handoff"
-                                conversation["assigned_human"] = True
-                                reply = (
-                                    "Kaydinizi olustururken teknik bir tutarsizlik algiladim; yanlis onay vermemek icin sizi yetkili ekibimize yonlendiriyorum. "
-                                    f"Isterseniz {build_contact_text()} uzerinden de bize ulasabilirsiniz."
-                                )
-                                final_decision = "booking_integrity_handoff"
-                            else:
-                                conversation["requested_date"] = active_appointment.get("appointment_date") or conversation.get("requested_date")
-                                conversation["requested_time"] = active_appointment.get("appointment_time") or conversation.get("requested_time")
-                                conversation["appointment_status"] = "confirmed"
-                                conversation["state"] = "completed"
-                                appointment_created = True
-                                should_polish_reply = False
-                                reply = build_confirmation_message(conversation)
-                                final_decision = "appointment_created"
-                        except HTTPException as exc:
-                            if exc.status_code == 409 and isinstance(exc.detail, dict) and exc.detail.get("type") == "existing_customer_appointment":
-                                existing_date = exc.detail.get("date")
-                                existing_time = str(exc.detail.get("time") or "")[:5]
-                                active_appointment = find_active_appointment_for_user(
-                                    conn,
-                                    conversation.get("instagram_user_id"),
-                                    preferred_date=existing_date,
-                                    preferred_time=existing_time,
-                                )
-                                if not active_appointment:
-                                    conversation["state"] = "human_handoff"
-                                    conversation["assigned_human"] = True
-                                    reply = (
-                                        "Aktif kaydinizi dogrularken teknik bir tutarsizlik algiladim; yanlis yonlendirme yapmamak icin sizi yetkili ekibimize yonlendiriyorum. "
-                                        f"Isterseniz {build_contact_text()} uzerinden de bize ulasabilirsiniz."
-                                    )
-                                    final_decision = "booking_integrity_handoff"
-                                else:
-                                    conversation["requested_date"] = active_appointment.get("appointment_date") or existing_date or conversation.get("requested_date")
-                                    conversation["requested_time"] = active_appointment.get("appointment_time") or existing_time or conversation.get("requested_time")
-                                    conversation["appointment_status"] = "confirmed"
-                                    conversation["state"] = "completed"
-                                    reply = (
-                                        f"Sistemimizde zaten {get_confirmed_appointment_summary(conversation)} için aktif bir {get_booking_label(conversation)} kaydınız görünüyor. "
-                                        "Yeni bir kayıt açmak yerine mevcut kaydı baz alıyorum. Tarih veya saat değişikliği isterseniz sizi yetkili ekibimize yönlendirebilirim."
-                                    )
-                                    final_decision = "existing_customer_appointment"
-                            elif exc.status_code == 409 and isinstance(exc.detail, dict) and exc.detail.get("type") == "slot_conflict":
-                                conversation["requested_time"] = None
-                                conversation["state"] = "collect_time"
-                                alternatives = suggest_alternatives(conn, conversation["requested_date"], conversation.get("requested_time"), conversation.get("service"))
-                                if alternatives:
-                                    alt_text = ", ".join(alternatives)
-                                    reply = f"Seçtiğiniz saat tam o sırada dolmuş. Uygun alternatifler: {alt_text}. Hangisi size uyar?"
-                                else:
-                                    reply = "Seçtiğiniz saat maalesef doldu. Başka bir saat belirtir misiniz?"
-                                final_decision = "slot_conflict_race"
-                            elif exc.status_code == 503:
-                                conversation["state"] = "human_handoff"
-                                conversation["assigned_human"] = True
-                                reply = (
-                                    "Şu an CRM bağlantısında geçici bir sorun görünüyor; bu yüzden yanlış kayıt oluşturmamak için sizi yetkili ekibimize yönlendiriyorum. "
-                                    f"İsterseniz {build_contact_text()} üzerinden de bize ulaşabilirsiniz."
-                                )
-                                final_decision = "crm_error_handoff"
-                            else:
-                                raise
-                        except Exception as exc:
-                            logger.exception("appointment_create_failed sender_id=%s error=%s", payload.sender_id, exc)
-                            appointment_created = False
-                            appointment_id = None
-                            reply = SAFE_USER_FALLBACK_REPLY
-                            final_decision = "create_appointment_error"
+                        # VIBE CODING: Legacy FSM appointment creation/customer reply disabled.
+                        # Python keeps collected fields in conversation only; LLM final flow owns reply + confirmation.
+                        appointment_created = False
+                        appointment_id = None
+                        final_decision = "appointment_create_deferred_to_llm"
 
 
         return finalize_result(

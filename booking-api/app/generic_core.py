@@ -1518,28 +1518,12 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
             elif not has_date or not has_time:
                 conversation["state"] = "collect_datetime"
             elif should_create_appointment:
-                conversation["state"] = "completed"
-                conversation["appointment_status"] = "confirmed"
-                try:
-                    appointment_id, _live_crm_ms = create_appointment(conn, conversation, payload.instagram_username)
-                    appointment_created = True
-                    conversation["appointment_id"] = appointment_id
-                    decision_path.append("action:appointment_confirmed")
-                except Exception as exc:  # noqa: BLE001
-                    logger.exception("generic_appointment_create_failed sender_id=%s", conversation.get("instagram_user_id"))
-                    appointment_created = False
-                    appointment_id = None
-                    conversation["state"] = "collect_datetime"
-                    conversation["appointment_status"] = "pending_review"
-                    conversation["assigned_human"] = True
-                    memory = ensure_conversation_memory(conversation)
-                    memory["human_review_reason"] = "appointment_create_failed"
-                    memory["safety_block_reason"] = sanitize_text(str(exc))[:300]
-                    conversation["memory_state"] = memory
-                    handoff = True
-                    reply_text = "Randevu kaydını şu an kesinleştiremedim; bilgilerinizi ekibin kontrol etmesi için not aldım."
-                    final_reply_source = "fsm_guard"
-                    decision_path.append("guard:appointment_create_failed")
+                # VIBE CODING: FSM sadece state/DB alanlarını günceller; müşteri cevabı ve
+                # appointment oluşturma kararı LLM final akışına bırakılır.
+                appointment_created = False
+                appointment_id = None
+                conversation["state"] = previous_state
+                decision_path.append("fsm:appointment_create_deferred_to_llm")
             else:
                 appointment_created = False
                 appointment_id = None
@@ -1548,9 +1532,7 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
 
         service_for_booking = known_requested_service(conversation, memory)
         if appointment_created:
-            reply_text = build_confirmation_message(conversation)
-            final_reply_source = "fsm"
-            decision_path.append("fsm:confirmation_reply")
+            decision_path.append("fsm:confirmation_reply_deferred_to_llm")
         elif (
             booking_opt_in
             and service_for_booking
@@ -1744,7 +1726,6 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
                     appointment_id=appointment_id,
                 )
                 if not _is_safe:
-                    reply_text = "Randevu kaydını şu an kesinleştiremedim; bilgilerinizi ekibin kontrol etmesi için not aldım."
                     final_reply_source = "4d_false_confirm_blocked"
                     metrics["final_reply_source"] = final_reply_source
                     decision_path.append(f"4d_invariant_block:{_block_reason}")

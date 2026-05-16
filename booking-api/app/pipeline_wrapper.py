@@ -37,31 +37,10 @@ def update_state_memory_shadow(conversation: dict, memory: dict, valid_entities:
     return {"updated": bool(valid_entities)}
 
 def check_missing_fields(conversation: dict, memory: dict) -> dict:
-    """
-    Produce canonical missing_fields list for the Final Builder.
-    Order matters: full_name → phone → requested_date → requested_time → service
-    The Final Builder asks only the FIRST missing field.
-    """
-    missing = []
-
-    if not (conversation.get("full_name") or conversation.get("lead_name")):
-        missing.append("full_name")
-
-    if not conversation.get("phone"):
-        missing.append("phone")
-
-    if not conversation.get("requested_date"):
-        missing.append("requested_date")
-
-    if not conversation.get("requested_time"):
-        missing.append("requested_time")
-
-    if not conversation.get("service") and not memory.get("requested_service"):
-        missing.append("service")
-
+    # VIBE CODING: Python asla kendi başına appointment oluşturma kararı vermez.
     return {
-        "missing_fields": missing,
-        "can_create_appointment": len(missing) == 0,
+        "missing_fields": [],
+        "can_create_appointment": False,
         "can_update_appointment": False
     }
 
