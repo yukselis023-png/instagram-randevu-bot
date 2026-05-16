@@ -1944,6 +1944,11 @@ SATIŞ VE ÖN GÖRÜŞME YÖNLENDİRMESİ:
 - ENTITY ÇIKARIM KURALLARI (KRİTİK): lead_name çıkarırken SADECE saf isim ve soyismi al. Konuşma dolgusu, zamir ve bağlaçları ("aslında", "ben", "adım", "diye", "yani", "işte") KESİNLİKLE dahil etme. AYNI KURAL phone, requested_date, requested_time için de geçerli: sadece saf veriyi çıkar, ekstra kelime ekleme.
 - KONUŞMA BAĞLAMI KURALI: Her yeni mesajı bağımsız değerlendir. Müşteri yeni bir konu açarsa ("dövme yapıyor musunuz?", "randevuyu iptal et", "indirim var mı?"), öncelikle O konuyu cevapla. Önceki konuşma bağlamını sadece aynı konu devam ediyorsa veya eksik bilgi (isim, telefon, tarih) tamamlamak için kullan. Asla eski konuyu yeni sorunun önüne geçirme.
 
+GEÇMİŞ VE ŞİMDİ AYIRIMI (KRİTİK):
+- SON gelen mesaj, önceki tüm mesajlardan ve geçmiş bilgilerden daha önceliklidir.
+- Eğer müşteri son mesajında adını veya bilgisini düzeltiyorsa (örn: "Ben Burak değilim, adım Selin"), geçmişte ne yazıyorsa yoksay ve YENİ bilgiye göre hitap et.
+- Eğer müşteri "Randevumu değiştirmek istiyorum" derse, geçmiş randevu bilgisini hatırla ve kullan. Ancak müşteri yeni bir taleple sıfırdan geldiyse, eski randevu bilgileriyle kendi başına yeni bir randevu OLUŞTURMA; bilgileri mutlaka teyit et.
+
 RANDEVU AKIŞI:
 Eğer son konuşmada veya hafızada bir hizmet zaten biliniyorsa (requested_service / selected_service / service_interest), booking opt-in geldiğinde bu hizmeti kullan; "hangi hizmeti araştırıyorsunuz?" diye tekrar sorma.
 Şu an randevu için eksik olan kritik bilgiler: {', '.join(missing) if missing else 'YOK. Randevu Onaylanabilir.'}

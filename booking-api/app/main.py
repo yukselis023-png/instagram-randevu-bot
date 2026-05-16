@@ -147,11 +147,14 @@ def cleanup_sender(sender_id: str, token: str | None = None):
     deleted: dict[str, int] = {}
     with get_conn() as conn:
         with conn.cursor() as cur:
-            for table in ("appointments", "conversations", "customers"):
-                cur.execute(f"DELETE FROM {table} WHERE instagram_user_id = %s", (sender_id,))
-                deleted[table] = cur.rowcount
+            # Smart cleanup: reset only active conversation brain and DM logs.
+            # Preserve CRM/customer identity and appointment history for memory/reschedule flows.
+            cur.execute("DELETE FROM message_logs WHERE instagram_user_id = %s", (sender_id,))
+            deleted["message_logs"] = cur.rowcount
+            cur.execute("DELETE FROM conversations WHERE instagram_user_id = %s", (sender_id,))
+            deleted["conversations"] = cur.rowcount
         conn.commit()
-    return {"sender_id": sender_id, "deleted": deleted}
+    return {"sender_id": sender_id, "deleted": deleted, "preserved": ["customers", "appointments"]}
 
 ALLOWED_ORIGINS = [
     origin.strip()
