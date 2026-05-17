@@ -2815,16 +2815,25 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
             if should_trace_decline_memory(message_text, conversation, llm_data):
                 log_decline_memory_trace("after_user_memory_update", payload.sender_id, trace_id, conversation, extra={"llm_objection_type": llm_data.get("objection_type")})
             decision_path.append(REPLY_ENGINE)
-            if sanitize_text(conversation.get("state") or "") in {"collect_datetime", "collect_date", "collect_time", "collect_period"}:
+            state_for_slots = sanitize_text(conversation.get("state") or "")
+            should_prepare_slots_for_llm = state_for_slots in {"collect_datetime", "collect_date", "collect_time", "collect_period"}
+            if (
+                not should_prepare_slots_for_llm
+                and conversation.get("service")
+                and conversation.get("full_name")
+                and has_booking_contact_method(conversation)
+                and not normalize_date_string(conversation.get("requested_date"))
+                and not normalize_time_string(conversation.get("requested_time"))
+                and (explicit_booking_intent or state_before_update in {"collect_name", "collect_phone"})
+            ):
+                should_prepare_slots_for_llm = True
+            if should_prepare_slots_for_llm:
                 slot_options = collect_next_booking_slot_options(conn, conversation, limit=3)
-                if not slot_options:
-                    slot_options = [
-                        {"date": (datetime.now(TZ).date() + timedelta(days=3)).isoformat(), "time": "13:00"},
-                        {"date": (datetime.now(TZ).date() + timedelta(days=3)).isoformat(), "time": "15:00"},
-                        {"date": (datetime.now(TZ).date() + timedelta(days=6)).isoformat(), "time": "14:00"},
-                    ]
-                conversation["available_slots"] = [format_booking_slot_option(slot) for slot in slot_options[:3]]
-                remember_booking_slot_options(conversation, slot_options[:3])
+                if slot_options:
+                    conversation["available_slots"] = [format_booking_slot_option(slot) for slot in slot_options[:3]]
+                    remember_booking_slot_options(conversation, slot_options[:3])
+                else:
+                    conversation.pop("available_slots", None)
             ai_decision = build_ai_first_decision(message_text, conversation, recent_history, llm_data)
             if ignored_llm_booking_datetime:
                 ai_decision["requested_date"] = None
@@ -11555,7 +11564,7 @@ def build_ai_first_decision(
                 "Use only the provided service catalog for prices, delivery times, and services. If unsure, say that the team should confirm instead of inventing. "
                 "If booking_intent is true, include one clear next missing field in the reply, not several at once. Keep replies short: usually 1-3 concise sentences. Do not include markdown. "
                 "When suggesting or asking for appointment date/time, offer specific options within working hours 10:00-19:00. Instead of vague phrases like 'öğleden sonra', give 2-3 concrete choices like '12:00, 14:00 veya 16:00'. "
-                "RANDEVU SLOTLARI KURALLARI: If payload.available_slots is provided, only offer slots from that list. Ask with two concrete options, never open-ended 'hangi gün müsaitsiniz'. If user gives a relative date/time like 'yarın öğlen' or 'cumartesi 15:00', accept it when extractable; do not stubbornly ask for exact format. If date/time already exists and user corrects name/phone, apologize/correct and do not ask date/time again."
+                "RANDEVU SLOTLARI KURALLARI: If payload.available_slots is provided, only offer slots from that list. Never invent availability and never use vague phrases like 'yarın öğlen' or 'öğleden sonra'. Ask naturally in Turkish, e.g. 'Ahmet Bey için en yakın uygun seçenekler 18 Mayıs 12:00, 18 Mayıs 14:00 veya 19 Mayıs 11:00 görünüyor; hangisi sizin için uygun olur?' Never open-ended 'hangi gün müsaitsiniz'. If user gives a relative date/time like 'yarın öğlen' or 'cumartesi 15:00', accept it when extractable; do not stubbornly ask for exact format. If date/time already exists and user corrects name/phone, apologize/correct and do not ask date/time again."
             ),
         },
         {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
