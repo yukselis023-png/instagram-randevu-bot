@@ -23,7 +23,8 @@ from app.main import (
     is_invalid_phone_attempt, extract_date, extract_time_for_state, extract_time, create_appointment,
     build_confirmation_message, try_reschedule_confirmed_appointment, find_active_appointment_for_user,
     detect_customer_subsector, customer_sector_for_subsector, normalize_date_string, normalize_time_string,
-    validate_slot, format_human_date, get_booking_label, TZ
+    validate_slot, format_human_date, get_booking_label, TZ,
+    collect_next_booking_slot_options, format_booking_slot_option, remember_booking_slot_options
 )
 
 logger = logging.getLogger(__name__)
@@ -1226,6 +1227,36 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
             conversation["full_name"] = conversation.get("lead_name")
         sanitize_conversation_state(conversation)
         memory = ensure_conversation_memory(conversation)
+        if inbound_platform == "instagram_dm":
+            memory["contact_channel"] = "instagram_dm"
+            conversation["memory_state"] = memory
+        # LLM'e cevap öncesi sadece context hazırla; PY müşteri metnini yazmaz.
+        pre_llm_state = str(conversation.get("state") or "")
+        pre_llm_name = None
+        if pre_llm_state == "collect_name" and not is_username_save_request(message_text):
+            pre_llm_name = extract_name(message_text, "collect_name")
+            if pre_llm_name and is_valid_name_candidate(pre_llm_name, require_full_name=True):
+                pre_llm_name = clean_name_text(pre_llm_name) or pre_llm_name
+                conversation["lead_name"] = pre_llm_name
+                conversation["full_name"] = pre_llm_name
+        if (
+            pre_llm_state in {"collect_name", "collect_phone", "collect_datetime", "collect_date", "collect_time", "collect_period"}
+            and known_requested_service(conversation, memory)
+            and (conversation.get("full_name") or conversation.get("lead_name"))
+            and not normalize_date_string(conversation.get("requested_date"))
+            and not normalize_time_string(conversation.get("requested_time"))
+        ):
+            try:
+                slot_options = collect_next_booking_slot_options(conn, conversation, limit=3)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("generic_pre_llm_slot_context_failed sender_id=%s error=%s", payload.sender_id, exc)
+                slot_options = []
+            if slot_options:
+                conversation["available_slots"] = [format_booking_slot_option(slot) for slot in slot_options[:3]]
+                remember_booking_slot_options(conversation, slot_options[:3])
+                memory = ensure_conversation_memory(conversation)
+            else:
+                conversation.pop("available_slots", None)
         sync_conversation_memory_summary(conversation)
 
         processing_lock_acquired = try_acquire_inbound_processing_lock(conn, inbound_platform, payload.sender_id, inbound_message_id)
@@ -1946,6 +1977,8 @@ def invoke_generic_llm(message_text: str, conversation: dict, memory: dict, hist
     # Minimize context parsing, formatting user messages
     recent = "\\n".join([f"{msg.get('direction', 'IN').upper()}: {msg.get('message_text', '')}" for msg in history[-10:]])
     
+    available_slots = conversation.get("available_slots") or []
+    slot_context = "\nMÜSAİT RANDEVU SLOTLARI (CRM'DE KESİN BOŞ):\n" + "\n".join(f"- {slot}" for slot in available_slots) if available_slots else "\nMÜSAİT RANDEVU SLOTLARI: Sistem şu an kesin boş slot listesi vermedi. Saat uydurma; net slot yoksa ekibin kontrol edeceğini söyle."
     # Exposing missing booking fields to explicitly direct the AI on what to ask if it proceeds to 'active_booking'
     missing = []
     if not known_requested_service(conversation, memory): missing.append("Hizmet Türü")
@@ -1982,12 +2015,13 @@ SATIŞ VE ÖN GÖRÜŞME YÖNLENDİRMESİ:
 - Müşteri hizmete olumlu ilgi gösterirse sadece bilgi verme; karar vermesini kolaylaştıran kısa bir sonraki adım öner.
 - "Evet", "Tamam", "Anladım", "Mantıklı", "Olur", "Görüşelim", "Planlayalım", "İyi olur" gibi olumlu sinyaller, önceki mesajlarda hizmet ilgisi varsa kısa ön görüşmeye yönlendirme için uygundur.
 - Açık uçlu ve müşteriye yük bindiren soruları azalt; mümkünse "Size en uygun çözümü netleştirmek için kısa bir ön görüşme planlayabiliriz." gibi net ve nazik kapanış kullan.
-- İsim alındıktan sonra tarih/saat sorulacaksa "hangi gün müsaitsiniz?" gibi çok açık uçlu sorma; Business Context'te çalışma saatleri varsa ona göre seçenekli sor, yoksa güvenli örnek ver: "Size yarın öğlen veya öğleden sonra tarafı uygun olur mu?"
+- İsim alındıktan sonra tarih/saat sorulacaksa "hangi gün müsaitsiniz?", "yarın öğlen" veya "öğleden sonra" gibi belirsiz sorma. Sadece sistemin verdiği MÜSAİT RANDEVU SLOTLARI listesindeki kesin saatleri doğal dille öner.
 
 RANDEVU SLOTLARI KURALLARI (KRİTİK):
-- Eğer sistem sana MÜSAİT RANDEVU SLOTLARI listesi verdiyse, SADECE o saatlerden ikisini seçerek müşteriye seçenekli soru sor.
-  DOĞRU: "Ön görüşme için salı 13:00 veya cuma 15:00 size uygun mu gibi?"
+- Eğer sistem sana MÜSAİT RANDEVU SLOTLARI listesi verdiyse, SADECE o saatlerden 2-3 tanesini seçerek müşteriye seçenekli soru sor.
+  DOĞRU: "Ahmet Bey için en yakın uygun seçenekler salı 13:00 veya cuma 15:00 görünüyor; hangisi sizin için uygun olur?"
   YANLIŞ: "Hangi gün müsaitsiniz?" (Asla açık uçlu sorma!)
+  YANLIŞ: "Yarın öğlen mi yoksa öğleden sonra mı uygun?" (Belirsiz saat sorma!)
   YANLIŞ: "Yarın 10:00 müsait mi?" (Eğer listede yoksa teklif etme!)
 - Müşteri dolu bir saat söylerse, nazikçe belirt ve listedeki boş saatleri teklif et: "Maalesef 15:00 dolu, ancak 14:00 veya 16:00 müsait. Uygun mu?"
 - Eğer liste boşsa, "Uygunluğumuzu kontrol edip size döneceğiz" de ve ekibe bırak.
@@ -2019,6 +2053,7 @@ Eğer son konuşmada veya hafızada bir hizmet zaten biliniyorsa (requested_serv
 
 İŞLETME BİLGİSİ (Business Context):
 {business_context}
+{slot_context}
 
 SON KONUŞMA GEÇMİŞİ:
 {recent}
