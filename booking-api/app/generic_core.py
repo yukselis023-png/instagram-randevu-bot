@@ -804,19 +804,7 @@ def duplicate_process_result(
 
 
 def strip_leading_greeting_for_non_greeting(message_text: str, reply_text: str | None) -> str:
-    text = (reply_text or "").strip()
-    if not text:
-        return ""
-    # Keep tone calm: remove exaggerated leading reactions from LLM replies.
-    text = re.sub(
-        r"^(?:harika|muhteşem|muhtesem|süper|super|mükemmel|mukemmel|şahane|sahane|çok iyi|cok iyi)[!,.\s]+",
-        "",
-        text,
-        flags=re.IGNORECASE,
-    ).strip()
-    if text:
-        text = text[0].upper() + text[1:]
-    return text
+    return reply_text or ""
 
 
 def build_service_carryover_booking_reply(service_label: str | None, state: str | None) -> str | None:
