@@ -10261,6 +10261,7 @@ def polish_reply_text(
         "8. Fiyat sorarsa güvenli taslak veya business config içindeki fiyatı tam ve doğrudan yaz; asla yarım fiyat veya uydurma rakam yazma.",
         "9. Sadece sorulan hizmet veya son mesajdaki konu hakkında yaz; alakasız çapraz satış yapma.",
         "10. Randevu onayında context'ten gelen bilgileri birebir kullan, uydurma.",
+        "11. Abartılı tepki verme; Harika, Muhteşem, Süper, Mükemmel, Şahane, Çok iyi gibi coşkulu açılışlar kullanma. Kullanıcı onay verdiyse direkt sonraki adıma geç.",
     ])
 
     user_parts = [
@@ -10294,7 +10295,7 @@ def polish_reply_text(
                 "content": (
                     f"You write exactly one very short Turkish Instagram DM reply for {BUSINESS_NAME}. "
                     "Use Turkish characters: ç, ğ, ı, ö, ş, ü. Plain text only. No markdown. No emojis. "
-                    "Keep it to one short natural sentence. Reply like a real human."
+                    "Keep it to one short natural sentence. Reply like a calm real human. Do not start with Harika, Muhteşem, Süper, Mükemmel, Şahane or Çok iyi."
                 ),
             },
             {
@@ -10320,7 +10321,7 @@ def polish_reply_text(
                 "role": "system",
                 "content": (
                     "Aşağıdaki Türkçe mesajı müşteriye gönderilecek çok kısa, doğal bir Instagram DM cevabı olarak yeniden yaz. "
-                    "Türkçe karakter kullan. Düz metin kullan. Emojisiz ol. Tek cümle tercih et."
+                    "Türkçe karakter kullan. Düz metin kullan. Emojisiz ol. Tek cümle tercih et. Harika, Muhteşem, Süper, Mükemmel, Şahane veya Çok iyi ile başlama."
                 ),
             },
             {

@@ -804,7 +804,19 @@ def duplicate_process_result(
 
 
 def strip_leading_greeting_for_non_greeting(message_text: str, reply_text: str | None) -> str:
-    return reply_text or ""
+    text = (reply_text or "").strip()
+    if not text:
+        return ""
+    # Keep tone calm: remove exaggerated leading reactions from LLM replies.
+    text = re.sub(
+        r"^(?:harika|muhteşem|muhtesem|süper|super|mükemmel|mukemmel|şahane|sahane|çok iyi|cok iyi)[!,.\s]+",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    ).strip()
+    if text:
+        text = text[0].upper() + text[1:]
+    return text
 
 
 def build_service_carryover_booking_reply(service_label: str | None, state: str | None) -> str | None:
@@ -1965,7 +1977,8 @@ KONUŞMA STİLİ:
 - KISA VE NET YAZ: reply_text çoğu durumda 160 karakteri geçmesin; maksimum 2 kısa cümle olsun.
 - Uzun açıklama, paragraf, madde madde liste ve satış metni yazma; müşteri detay isterse bile en kritik 1-2 noktayı söyle.
 - Instagram DM gibi doğal yaz; cevap tek ekranda hızlı okunmalı.
-- Abartılı tekrarlar yerine doğal ve sade ifadeler kullan. "Harika", "Muhteşem", "Süper", "Mükemmel" gibi gereksiz tekrarlayan tepkileri verme. Doğal ve profesyonel ol.
+- Abartılı tepki verme. "Harika", "Muhteşem", "Süper", "Mükemmel", "Şahane", "Çok iyi" gibi coşkulu açılışları kullanma.
+- Kullanıcı sadece onay veriyorsa veya önceki soruya cevap veriyorsa tepki cümlesi yazma; doğrudan sonraki adımı sor ya da net cevabı ver. Örnek: "Ön görüşme için arkadaşınızın adını ve soyadını alabilir miyim?"
 - En fazla 1 net soru sor; birden fazla eksik bilgiyi aynı anda sorma.
 - Müşteri randevuya / ön görüşmeye "olur", "tamam", "yapalım" demeden isim, telefon veya tarih isteme. Soru sorduysa sadece cevap ver.
 - Müşteri süreç hakkında soru soruyorsa ("nasıl oluyor?", "ne demek?", "anlamadım"), ÖNCE sadece soruyu cevapla. Müşteri "olur", "tamam", "yapalım" demeden isim, telefon veya tarih isteme.
@@ -1997,7 +2010,7 @@ TARİH VE DÜZELTME KURALLARI:
 - Tarih ve saat alındığında, görüşmeyi kabul ettiğini gösteren güvenli ve kararlı bir kapanış yap.
 - ASLA "Müsaitliği kontrol edeceğim", "Size döneceğim", "Bakıp haber vereceğim" gibi pasif ve şüphe uyandıran ifadeler kullanma. Sen bu süreci yönetiyorsun.
 - "Randevunuz oluşturuldu/onaylandı" gibi kesin sistem mesajları verme (Bunu arka plan sistemi yapacak).
-- DOĞRU ÖRNEK: "Harika, yarın saat 14:00 için ön görüşmenizi not aldım. Detayları sizinle paylaşacağım."
+- DOĞRU ÖRNEK: "Yarın saat 14:00 için ön görüşmenizi not aldım. Detayları sizinle paylaşacağım."
 - YANLIŞ ÖRNEK: "Müsaitliği kontrol edip size döneceğim."
 - Her yanıtta en fazla 1 soru sor; cevaplar kısa, doğal, profesyonel ve Instagram DM dilinde kalsın.
 - Yanıt uzuyorsa kısalt: önce soruyu cevapla, sonra gerekiyorsa tek kısa yönlendirme ekle.
