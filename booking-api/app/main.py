@@ -6047,8 +6047,7 @@ def try_reschedule_confirmed_appointment(conn: psycopg.Connection, conversation:
         )
 
     conn.commit()
-    booking_label = get_booking_label(conversation)
-    return True, f"{format_human_date(detected_date)} saat {detected_time} icin {booking_label} kaydiniz guncellendi.", "appointment_rescheduled"
+    return True, f"Tamamdır, görüşme kaydınızı {format_human_date(detected_date)} saat {detected_time} olarak güncelledim.", "appointment_rescheduled"
 
 
 def build_open_loop_resume_reply(conversation: dict[str, Any]) -> str | None:

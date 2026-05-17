@@ -992,8 +992,7 @@ def update_existing_appointment_from_pending_reschedule(
     except Exception:
         pass
 
-    booking_label = get_booking_label(conversation)
-    return True, f"{format_human_date(detected_date)} saat {detected_time} için {booking_label} kaydınız güncellendi.", "appointment_rescheduled"
+    return True, f"Tamamdır, görüşme kaydınızı {format_human_date(detected_date)} saat {detected_time} olarak güncelledim.", "appointment_rescheduled"
 
 
 def handle_confirmed_generic_reschedule(
