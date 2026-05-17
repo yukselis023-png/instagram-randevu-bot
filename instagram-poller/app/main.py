@@ -223,6 +223,36 @@ def extract_message_id(message: dict[str, Any]) -> str:
     return str(message.get("item_id") or message.get("id") or message.get("pk") or "")
 
 
+def _first_text_value(value: Any) -> str:
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, dict):
+        for key in ("text", "title", "subtitle", "caption", "description", "url"):
+            candidate = _first_text_value(value.get(key))
+            if candidate:
+                return candidate
+        for nested in value.values():
+            candidate = _first_text_value(nested)
+            if candidate:
+                return candidate
+    if isinstance(value, list):
+        for item in value:
+            candidate = _first_text_value(item)
+            if candidate:
+                return candidate
+    return ""
+
+
+def extract_processable_text(message: dict[str, Any]) -> str:
+    direct_text = str(message.get("text") or "").strip()
+    if direct_text:
+        return direct_text
+    for key in ("link", "reel_share", "clip", "xma", "story_share", "media_share", "placeholder"):
+        candidate = _first_text_value(message.get(key))
+        if candidate:
+            return candidate
+    return ""
+
 
 def as_int(value: Any) -> int:
     try:
@@ -657,7 +687,7 @@ def process_message(cl: Client, state: PollerState, thread: dict[str, Any], mess
     sender_id = str(message.get("user_id") or "")
     thread_id = str(thread.get("thread_id") or thread.get("id") or thread.get("thread_v2_id") or "")
     item_type = str(message.get("item_type") or "")
-    text = (message.get("text") or "").strip()
+    text = extract_processable_text(message)
 
     if not message_id:
         logger.info("Skipping message without id thread_id=%s sender_id=%s", thread_id, sender_id)
@@ -686,7 +716,9 @@ def process_message(cl: Client, state: PollerState, thread: dict[str, Any], mess
 
     if item_type != "text":
         audio_url = extract_voice_audio_url(message)
-        if audio_url:
+        if text:
+            logger.info("Processing non-text message with extracted text message_id=%s thread_id=%s type=%s text=%s", message_id, thread_id, item_type, text[:160])
+        elif audio_url:
             source_kind = "voice"
             processed_text, transcription_error = transcribe_voice_message(cl, audio_url)
             if processed_text:
@@ -720,7 +752,13 @@ def process_message(cl: Client, state: PollerState, thread: dict[str, Any], mess
                 save_state(state)
                 return
         else:
-            logger.info("Skipping non-text message %s in thread %s (type=%s)", message_id, thread_id, item_type)
+            logger.info(
+                "Skipping non-text message %s in thread %s (type=%s keys=%s)",
+                message_id,
+                thread_id,
+                item_type,
+                sorted(str(k) for k in message.keys())[:30],
+            )
             state.add(message_id)
             save_state(state)
             return
