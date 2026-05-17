@@ -2433,6 +2433,7 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
         reconcile_confirmed_conversation(conn, conversation)
         sanitize_conversation_state(conversation)
         ensure_conversation_memory(conversation)
+        mark_instagram_dm_contact(conversation)
         sync_conversation_memory_summary(conversation)
         if should_trace_decline_memory(message_text, conversation):
             log_decline_memory_trace("next_inbound_load", payload.sender_id, trace_id, conversation)
@@ -2821,7 +2822,7 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
                 not should_prepare_slots_for_llm
                 and conversation.get("service")
                 and conversation.get("full_name")
-                and has_booking_contact_method(conversation)
+                and (has_booking_contact_method(conversation) or inbound_platform == "instagram_dm")
                 and not normalize_date_string(conversation.get("requested_date"))
                 and not normalize_time_string(conversation.get("requested_time"))
                 and (explicit_booking_intent or state_before_update in {"collect_name", "collect_phone"})
