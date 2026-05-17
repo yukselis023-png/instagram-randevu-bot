@@ -343,20 +343,23 @@ def fetch_threads(cl: Client) -> list[dict[str, Any]]:
         )
         add_thread_list(pending_threads, "pending")
 
-    if not threads_by_id:
-        recent_limit = max(3, min(IG_THREAD_FETCH_LIMIT, 5))
-        recent_threads = fetch_raw_threads(
-            cl,
-            "direct_v2/inbox/",
-            {
-                "visual_message_return_type": "unseen",
-                "thread_message_limit": str(IG_MESSAGE_FETCH_LIMIT),
-                "persistentBadging": "true",
-                "limit": str(recent_limit),
-                "is_prefetching": "false",
-            },
-        )
-        add_thread_list(recent_threads, "recent")
+    # Always include recent inbox threads, not only when unread/pending is empty.
+    # Instagram Web/browser usage can mark a DM as read before this poller sees it;
+    # unread-only polling then misses the user's text entirely. Recent polling keeps
+    # active/read conversations visible while processed_message_ids prevents repeats.
+    recent_limit = max(5, min(IG_THREAD_FETCH_LIMIT, 10))
+    recent_threads = fetch_raw_threads(
+        cl,
+        "direct_v2/inbox/",
+        {
+            "visual_message_return_type": "unseen",
+            "thread_message_limit": str(IG_MESSAGE_FETCH_LIMIT),
+            "persistentBadging": "true",
+            "limit": str(recent_limit),
+            "is_prefetching": "false",
+        },
+    )
+    add_thread_list(recent_threads, "recent")
 
     threads = list(threads_by_id.values())
     threads.sort(key=lambda thread: max(thread_latest_item_ts(thread), as_int(thread.get("last_activity_at"))), reverse=True)
