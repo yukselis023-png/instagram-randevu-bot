@@ -47,6 +47,79 @@ def run_generic_message(monkeypatch, message, llm_result, config, conversation=N
     return result, conversation
 
 
+def test_generic_prompt_never_asks_for_friend_name(monkeypatch):
+    captured = {}
+
+    def fake_llm(system_prompt, user_text):
+        captured["system_prompt"] = system_prompt
+        return {"intent": "booking_request", "reply_text": "Ön görüşme için adınızı ve soyadınızı alabilir miyim?", "extracted_entities": {}, "requires_human": False}
+
+    monkeypatch.setattr(gc, "get_config", lambda: {"business_name": "DOEL Digital", "service_catalog": [{"display": "Web Tasarim", "name": "Web Tasarim"}]})
+    monkeypatch.setattr(gc, "call_llm_json", fake_llm)
+    result = gc.invoke_generic_llm(
+        "Evet iyi olur",
+        {"sender_id": "generic-test", "state": "new", "memory_state": {"requested_service": "Web Tasarim"}},
+        {"requested_service": "Web Tasarim"},
+        [],
+    )
+
+    assert "arkadaşınızın adını" not in captured["system_prompt"]
+    assert "arkadasinizin adini" not in gc.sanitize_text(captured["system_prompt"]).lower()
+    assert "adınızı ve soyadınızı" in result["reply_text"]
+
+
+def test_generic_igdm_sets_contact_channel_and_supplies_slots_after_name(monkeypatch):
+    os.environ["CHATBOT_ENGINE"] = "generic"
+    conversation = {
+        "sender_id": "67000808415",
+        "state": "collect_name",
+        "service": "Web Tasarim",
+        "memory_state": {"requested_service": "Web Tasarim"},
+    }
+    captured = {}
+
+    class Slot:
+        date = "2026-05-19"
+        time = "10:00"
+
+    def fake_slots(_conn, conv, limit=3):
+        return [{"date": "2026-05-19", "time": "10:00"}, {"date": "2026-05-19", "time": "11:00"}, {"date": "2026-05-19", "time": "13:00"}]
+
+    def fake_llm(system_prompt, user_text):
+        captured["system_prompt"] = system_prompt
+        return {
+            "intent": "active_booking",
+            "reply_text": "Memnun oldum Ahmet Bey. Ön görüşme için 19 Mayıs 10:00, 11:00 veya 13:00 seçeneklerinden hangisi uygundur?",
+            "extracted_entities": {"lead_name": "Ahmet Vatansever", "requested_service": "Web Tasarim"},
+            "requires_human": False,
+        }
+
+    monkeypatch.setattr(gc, "get_conn", lambda: DummyConn())
+    monkeypatch.setattr(gc, "get_or_create_conversation", lambda *args, **kwargs: conversation)
+    monkeypatch.setattr(gc, "try_acquire_inbound_processing_lock", lambda *args, **kwargs: True)
+    monkeypatch.setattr(gc, "has_processed_inbound_message", lambda *args, **kwargs: False)
+    monkeypatch.setattr(gc, "save_message_log", lambda *args, **kwargs: None)
+    monkeypatch.setattr(gc, "get_recent_message_history", lambda *args, **kwargs: [])
+    monkeypatch.setattr(gc, "upsert_conversation", lambda *args, **kwargs: None)
+    monkeypatch.setattr(gc, "upsert_customer_from_conversation", lambda *args, **kwargs: None)
+    monkeypatch.setattr(gc, "schedule_customer_automation_events", lambda *args, **kwargs: None)
+    monkeypatch.setattr(gc, "queue_crm_sync", lambda *args, **kwargs: None)
+    monkeypatch.setattr(gc, "get_config", lambda: {"business_name": "DOEL Digital", "service_catalog": [{"display": "Web Tasarim", "name": "Web Tasarim"}]})
+    monkeypatch.setattr(gc, "collect_next_booking_slot_options", fake_slots)
+    monkeypatch.setattr(gc, "call_llm_json", fake_llm)
+
+    result = gc.process_instagram_message_generic(
+        IncomingMessage(sender_id="67000808415", instagram_username="bwrkkay", message_text="Ahmet Vatansever", raw_event={"platform": "igdm", "message_id": "m1"}),
+        BackgroundTasks(),
+    )
+
+    assert conversation["memory_state"]["contact_channel"] == "instagram_dm"
+    assert conversation["available_slots"] == ["19.05.2026 10:00", "19.05.2026 11:00", "19.05.2026 13:00"]
+    assert "MÜSAİT RANDEVU SLOTLARI" in captured["system_prompt"]
+    assert "19.05.2026 10:00" in captured["system_prompt"]
+    assert result.conversation_state == "collect_phone"
+
+
 def test_generic_inbound_save_uses_durable_dedupe_payload(monkeypatch):
     os.environ["CHATBOT_ENGINE"] = "generic"
     conversation = {"sender_id": "67000808415", "state": "new", "memory_state": {}}

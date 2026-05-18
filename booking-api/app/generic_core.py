@@ -1227,7 +1227,7 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
             conversation["full_name"] = conversation.get("lead_name")
         sanitize_conversation_state(conversation)
         memory = ensure_conversation_memory(conversation)
-        if inbound_platform == "instagram_dm":
+        if inbound_platform in {"instagram_dm", "instagram_private_api", "igdm"}:
             memory["contact_channel"] = "instagram_dm"
             conversation["memory_state"] = memory
         # LLM'e cevap öncesi sadece context hazırla; PY müşteri metnini yazmaz.
@@ -1999,7 +1999,7 @@ KONUŞMA STİLİ:
 - Uzun açıklama, paragraf, madde madde liste ve satış metni yazma; müşteri detay isterse bile en kritik 1-2 noktayı söyle.
 - Instagram DM gibi doğal yaz; cevap tek ekranda hızlı okunmalı.
 - Abartılı tepki verme. "Harika", "Muhteşem", "Süper", "Mükemmel", "Şahane", "Çok iyi" gibi coşkulu açılışları kullanma.
-- Kullanıcı sadece onay veriyorsa veya önceki soruya cevap veriyorsa tepki cümlesi yazma; doğrudan sonraki adımı sor ya da net cevabı ver. Örnek: "Ön görüşme için arkadaşınızın adını ve soyadını alabilir miyim?"
+- Kullanıcı sadece onay veriyorsa veya önceki soruya cevap veriyorsa tepki cümlesi yazma; doğrudan sonraki adımı sor ya da net cevabı ver. Örnek: "Ön görüşme için adınızı ve soyadınızı alabilir miyim?"
 - En fazla 1 net soru sor; birden fazla eksik bilgiyi aynı anda sorma.
 - Müşteri randevuya / ön görüşmeye "olur", "tamam", "yapalım" demeden isim, telefon veya tarih isteme. Soru sorduysa sadece cevap ver.
 - Müşteri süreç hakkında soru soruyorsa ("nasıl oluyor?", "ne demek?", "anlamadım"), ÖNCE sadece soruyu cevapla. Müşteri "olur", "tamam", "yapalım" demeden isim, telefon veya tarih isteme.
@@ -2050,6 +2050,7 @@ RANDEVU AKIŞI:
 Eğer son konuşmada veya hafızada bir hizmet zaten biliniyorsa (requested_service / selected_service / service_interest), booking opt-in geldiğinde bu hizmeti kullan; "hangi hizmeti araştırıyorsunuz?" diye tekrar sorma.
 Şu an randevu için eksik olan kritik bilgiler: {', '.join(missing) if missing else 'YOK. Randevu Onaylanabilir.'}
 İsim sorarken "sisteme kaydetmek için" deme; "ön görüşme için" de. Örnek: "Ön görüşme için adınızı ve soyadınızı alabilir miyim?"
+Eğer müşteri bir arkadaşı/tanıdığı için yazıyorsa bile DM'deki kişinin adını iste; üçüncü kişinin adını isteme. Örnek: "Ön görüşmeyi planlayabilmem için sizin adınızı ve soyadınızı alabilir miyim?"
 
 İŞLETME BİLGİSİ (Business Context):
 {business_context}

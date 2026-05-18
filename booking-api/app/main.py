@@ -5444,7 +5444,7 @@ def normalize_inbound_platform(value: str | None) -> str:
     cleaned = sanitize_text(value or "").lower()
     if not cleaned:
         return "instagram"
-    if "private" in cleaned or "instagrapi" in cleaned or cleaned in {"poller", "poller_private_api"}:
+    if "private" in cleaned or "instagrapi" in cleaned or cleaned in {"poller", "poller_private_api", "igdm", "instagram_dm"}:
         return "instagram_private_api"
     if "graph" in cleaned or cleaned in {"meta", "webhook", "n8n"}:
         return "instagram_graph"
