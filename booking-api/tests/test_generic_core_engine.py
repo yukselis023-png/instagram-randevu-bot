@@ -66,6 +66,7 @@ def test_generic_prompt_keeps_name_request_contextual_not_rule_bloated(monkeypat
     prompt = captured["system_prompt"]
     assert "Bağlama göre görüşmeye katılacak kişinin adını iste" in prompt
     assert "Dövmeci arkadaşı için web sitesi yaptırmak" in prompt
+    assert '"consultation_attendee": "third_party"' in prompt
     assert "arkadaşı/tanıdığı" not in prompt
     assert "müşteri kendisi için" not in prompt
     assert "Ön görüşme yapacak kişinin" in result["reply_text"]

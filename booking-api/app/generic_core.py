@@ -360,6 +360,22 @@ def known_requested_service(conversation: dict[str, Any], memory: dict[str, Any]
     value = sanitize_text(conversation.get("service") or "")
     return value or None
 
+def infer_consultation_attendee_context(memory: dict[str, Any], history: list[dict] | None = None) -> dict[str, str] | None:
+    """Return compact context only; never customer-facing wording."""
+    text_parts = [sanitize_text(str(memory.get("customer_goal") or ""))]
+    for msg in (history or [])[-6:]:
+        if str(msg.get("direction") or "").lower() in {"in", "incoming"}:
+            text_parts.append(sanitize_text(str(msg.get("message_text") or "")))
+    lowered = " ".join(text_parts).lower()
+    third_party_tokens = (
+        "arkadas", "arkadaş", "arkadasim", "arkadaşım", "arkadasima", "arkadaşıma",
+        "abim", "ablam", "kardesim", "kardeşim", "kuzen", "esim", "eşim",
+        "babam", "annem", "tanidigim", "tanıdığım", "musterim", "müşterim",
+    )
+    if any(token in lowered for token in third_party_tokens):
+        return {"consultation_attendee": "third_party", "attendee_evidence": "customer refers to another person in context"}
+    return None
+
 
 def detect_requested_service_from_text(message_text: str, cfg: dict[str, Any]) -> str | None:
     lowered = sanitize_text(message_text or "").lower()
@@ -1362,6 +1378,11 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
 
         if "persist:user_business_identity" not in decision_path and persist_user_business_identity_context(message_text, recent_history, conversation, memory):
             decision_path.append("persist:user_business_identity")
+        attendee_context = infer_consultation_attendee_context(memory, recent_history)
+        if attendee_context:
+            memory.update(attendee_context)
+            conversation["memory_state"] = memory
+            decision_path.append("context:consultation_attendee")
 
         if stale_active_booking_state:
             booking_opt_in = False
@@ -1979,9 +2000,12 @@ def invoke_generic_llm(message_text: str, conversation: dict, memory: dict, hist
     
     known_context = {
         key: memory.get(key)
-        for key in ["customer_goal", "requested_service", "selected_service", "service_interest", "customer_sector", "customer_subsector", "contact_channel"]
+        for key in ["customer_goal", "requested_service", "selected_service", "service_interest", "customer_sector", "customer_subsector", "contact_channel", "consultation_attendee", "attendee_evidence"]
         if memory.get(key)
     }
+    inferred_attendee_context = infer_consultation_attendee_context(memory, history)
+    if inferred_attendee_context:
+        known_context.update(inferred_attendee_context)
     available_slots = conversation.get("available_slots") or []
     slot_context = "\nMÜSAİT RANDEVU SLOTLARI (CRM'DE KESİN BOŞ):\n" + "\n".join(f"- {slot}" for slot in available_slots) if available_slots else "\nMÜSAİT RANDEVU SLOTLARI: Sistem şu an kesin boş slot listesi vermedi. Saat uydurma; net slot yoksa ekibin kontrol edeceğini söyle."
     # Exposing missing booking fields to explicitly direct the AI on what to ask if it proceeds to 'active_booking'
