@@ -24,7 +24,8 @@ from app.main import (
     build_confirmation_message, try_reschedule_confirmed_appointment, find_active_appointment_for_user,
     detect_customer_subsector, customer_sector_for_subsector, normalize_date_string, normalize_time_string,
     validate_slot, format_human_date, get_booking_label, TZ,
-    collect_next_booking_slot_options, format_booking_slot_option, remember_booking_slot_options
+    collect_next_booking_slot_options, format_booking_slot_option, remember_booking_slot_options,
+    normalize_booking_slot_option
 )
 
 logger = logging.getLogger(__name__)
@@ -376,6 +377,17 @@ def infer_consultation_attendee_context(memory: dict[str, Any], history: list[di
         return {"consultation_attendee": "third_party", "attendee_evidence": "customer refers to another person in context"}
     return None
 
+
+def infer_date_from_suggested_slot_time(conversation: dict[str, Any], time_value: str | None) -> str | None:
+    normalized_time = normalize_time_string(time_value)
+    if not normalized_time:
+        return None
+    memory = ensure_conversation_memory(conversation)
+    for item in memory.get("suggested_booking_slots") or []:
+        slot = normalize_booking_slot_option(item)
+        if slot and slot.get("time") == normalized_time:
+            return slot.get("date")
+    return None
 
 def detect_requested_service_from_text(message_text: str, cfg: dict[str, Any]) -> str | None:
     lowered = sanitize_text(message_text or "").lower()
@@ -1527,6 +1539,11 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
                 datetime.datetime.strptime(time_candidate, "%H:%M")
                 conversation["requested_time"] = time_candidate
                 decision_path.append("detected:time" if direct_time else "extracted:time")
+                if not conversation.get("requested_date"):
+                    inferred_slot_date = infer_date_from_suggested_slot_time(conversation, time_candidate)
+                    if inferred_slot_date:
+                        conversation["requested_date"] = inferred_slot_date
+                        decision_path.append("inferred:date_from_suggested_slot")
             except Exception:
                 pass
         if extracted.get("customer_goal"):
