@@ -399,8 +399,9 @@ def infer_date_from_available_slot_time(conn: Any, conversation: dict[str, Any],
     except Exception:  # noqa: BLE001
         return None
     exact = [slot for slot in slots if normalize_time_string(slot.get("time")) == normalized_time]
-    if len(exact) == 1:
-        remember_booking_slot_options(conversation, exact)
+    if exact:
+        exact.sort(key=lambda slot: str(slot.get("date") or ""))
+        remember_booking_slot_options(conversation, [exact[0]])
         return exact[0].get("date")
     return None
 
