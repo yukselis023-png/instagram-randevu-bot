@@ -1977,6 +1977,11 @@ def invoke_generic_llm(message_text: str, conversation: dict, memory: dict, hist
     # Minimize context parsing, formatting user messages
     recent = "\\n".join([f"{msg.get('direction', 'IN').upper()}: {msg.get('message_text', '')}" for msg in history[-10:]])
     
+    known_context = {
+        key: memory.get(key)
+        for key in ["customer_goal", "requested_service", "selected_service", "service_interest", "customer_sector", "customer_subsector", "contact_channel"]
+        if memory.get(key)
+    }
     available_slots = conversation.get("available_slots") or []
     slot_context = "\nMÜSAİT RANDEVU SLOTLARI (CRM'DE KESİN BOŞ):\n" + "\n".join(f"- {slot}" for slot in available_slots) if available_slots else "\nMÜSAİT RANDEVU SLOTLARI: Sistem şu an kesin boş slot listesi vermedi. Saat uydurma; net slot yoksa ekibin kontrol edeceğini söyle."
     # Exposing missing booking fields to explicitly direct the AI on what to ask if it proceeds to 'active_booking'
@@ -1991,6 +1996,9 @@ def invoke_generic_llm(message_text: str, conversation: dict, memory: dict, hist
 
 BUSINESS CONTEXT:
 {business_context}
+
+BİLİNEN KONUŞMA BAĞLAMI:
+{json.dumps(known_context, ensure_ascii=False) if known_context else '{}'}
 
 KONUŞMA STİLİ:
 - En son müşteri mesajını merkeze al; önce o mesaja doğrudan cevap ver.

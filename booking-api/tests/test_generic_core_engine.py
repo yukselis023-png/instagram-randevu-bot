@@ -58,13 +58,14 @@ def test_generic_prompt_keeps_name_request_contextual_not_rule_bloated(monkeypat
     monkeypatch.setattr(gc, "call_llm_json", fake_llm)
     result = gc.invoke_generic_llm(
         "Evet iyi olur",
-        {"sender_id": "generic-test", "state": "new", "memory_state": {"requested_service": "Web Tasarim"}},
-        {"requested_service": "Web Tasarim"},
+        {"sender_id": "generic-test", "state": "new", "memory_state": {"requested_service": "Web Tasarim", "customer_goal": "Dövmeci arkadaşı için web sitesi yaptırmak"}},
+        {"requested_service": "Web Tasarim", "customer_goal": "Dövmeci arkadaşı için web sitesi yaptırmak"},
         [{"direction": "in", "message_text": "Arkadaşımla konuştum o da websitesi yaptırmak istiyormuş dövmeci"}],
     )
 
     prompt = captured["system_prompt"]
     assert "Bağlama göre görüşmeye katılacak kişinin adını iste" in prompt
+    assert "Dövmeci arkadaşı için web sitesi yaptırmak" in prompt
     assert "arkadaşı/tanıdığı" not in prompt
     assert "müşteri kendisi için" not in prompt
     assert "Ön görüşme yapacak kişinin" in result["reply_text"]
