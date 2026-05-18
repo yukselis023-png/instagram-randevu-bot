@@ -23,7 +23,7 @@ from app.main import (
     is_invalid_phone_attempt, extract_date, extract_time_for_state, extract_time, create_appointment,
     build_confirmation_message, try_reschedule_confirmed_appointment, find_active_appointment_for_user,
     detect_customer_subsector, customer_sector_for_subsector, normalize_date_string, normalize_time_string,
-    validate_slot, format_human_date, get_booking_label, TZ,
+    validate_slot, find_existing_appointment, suggest_alternatives, format_human_date, get_booking_label, TZ,
     collect_next_booking_slot_options, format_booking_slot_option, remember_booking_slot_options,
     normalize_booking_slot_option
 )
@@ -388,6 +388,56 @@ def infer_date_from_suggested_slot_time(conversation: dict[str, Any], time_value
         if slot and slot.get("time") == normalized_time:
             return slot.get("date")
     return None
+
+CALENDAR_ESCAPE_PATTERNS = (
+    "takvimi doğrudan görem",
+    "takvimi dogrudan gorem",
+    "takvimi görem",
+    "takvimi gorem",
+    "müsaitliği kontrol edip",
+    "musaitligi kontrol edip",
+    "müsait saatleri kontrol edip",
+    "musait saatleri kontrol edip",
+    "uygunluğu kontrol edip",
+    "uygunlugu kontrol edip",
+    "berkay'a aktarıyorum",
+    "berkay'a aktariyorum",
+    "ekibimize aktarıyorum",
+    "ekibimize aktariyorum",
+    "ekibe iletiyorum",
+    "size dönüş yapacağız",
+    "size donus yapacagiz",
+    "döneceğiz",
+    "donecegiz",
+)
+
+def is_calendar_escape_reply(reply_text: str | None) -> bool:
+    cleaned = sanitize_text(reply_text or "").lower()
+    return any(pattern in cleaned for pattern in CALENDAR_ESCAPE_PATTERNS)
+
+def suggested_slot_options(conversation: dict[str, Any]) -> list[dict[str, str]]:
+    memory = ensure_conversation_memory(conversation)
+    slots: list[dict[str, str]] = []
+    for item in memory.get("suggested_booking_slots") or []:
+        slot = normalize_booking_slot_option(item)
+        if slot and slot not in slots:
+            slots.append(slot)
+    return slots
+
+def build_calendar_authority_prompt(conversation: dict[str, Any]) -> str | None:
+    slots = suggested_slot_options(conversation)
+    if slots:
+        name = conversation.get("full_name") or conversation.get("lead_name") or "görüşme"
+        first = str(name).split()[0] if str(name).strip() else "görüşme"
+        option_text = ", ".join(slot["time"] for slot in slots[:3])
+        return f"{first} Bey için uygun seçenekler {option_text}. Hangisi uygun olur?"
+    return None
+
+def build_slot_conflict_reply(conversation: dict[str, Any], requested_time: str, alternatives: list[str]) -> str:
+    alt_text = ", ".join(alternatives[:3])
+    if alt_text:
+        return f"Maalesef {requested_time} dolu. Uygun seçenekler {alt_text}. Hangisi uygun olur?"
+    return "Maalesef o saat dolu. Şu an yakın uygun saat bulamadım; farklı bir gün veya saat yazarsanız hemen kontrol edeyim."
 
 def detect_requested_service_from_text(message_text: str, cfg: dict[str, Any]) -> str | None:
     lowered = sanitize_text(message_text or "").lower()
@@ -1562,7 +1612,12 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
         question_intents = {"service_question", "price_question", "direct_answer", "fallback"}
         is_question_intent = intent in question_intents
         has_question_mark = "?" in message_text
-        should_create_appointment = bool(user_provided_booking_info and not is_question_intent and not has_question_mark)
+        has_date_or_time_selection = bool(conversation.get("requested_date") and conversation.get("requested_time") and msg_provided_date)
+        should_create_appointment = bool(
+            user_provided_booking_info
+            and not is_question_intent
+            and (not has_question_mark or has_date_or_time_selection)
+        )
 
         # 3. BOOKING FINITE STATE MACHINE (Only if booking intent or inside active flow)
         appointment_created = False
@@ -1613,27 +1668,56 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
             elif not has_date or not has_time:
                 conversation["state"] = "collect_datetime"
             elif should_create_appointment:
-                conversation["state"] = "completed"
-                conversation["appointment_status"] = "confirmed"
-                try:
-                    created = create_appointment(conn, conversation, payload.instagram_username)
-                    appointment_id = int(created[0] if isinstance(created, tuple) else created)
-                    appointment_created = True
-                    conversation["appointment_id"] = appointment_id
-                    handoff = False
-                    decision_path.append("fsm:silent_appointment_created")
-                except Exception as exc:  # noqa: BLE001
-                    logger.error("Silent appointment creation failed: %s", exc)
-                    conversation["state"] = "human_handoff"
-                    conversation["appointment_status"] = "handoff"
-                    conversation["assigned_human"] = True
+                slot_error = validate_slot(conversation.get("requested_date"), conversation.get("requested_time"))
+                if slot_error:
+                    conversation["state"] = "collect_datetime"
                     appointment_created = False
                     appointment_id = None
-                    handoff = True
-                    reply_text = "Randevu kaydını tamamlamak için ekibimize aktarıyorum; kısa süre içinde kontrol edip size dönüş sağlayacağız."
-                    final_reply_source = "fsm_guard"
-                    decision_path.append("fsm:silent_appointment_failed")
-                    decision_path.append("guard:appointment_create_failed")
+                    reply_text = slot_error
+                    final_reply_source = "calendar_authority"
+                    decision_path.append("calendar:slot_validation_failed")
+                else:
+                    requested_date_norm = normalize_date_string(conversation.get("requested_date"))
+                    requested_time_norm = normalize_time_string(conversation.get("requested_time"))
+                    try:
+                        conflict = find_existing_appointment(conn, requested_date_norm, requested_time_norm, conversation.get("service"))
+                    except AttributeError:
+                        conflict = None
+                    if conflict:
+                        alternatives = suggest_alternatives(conn, requested_date_norm, requested_time_norm, conversation.get("service"))
+                        conversation["state"] = "collect_datetime"
+                        conversation["appointment_status"] = "collecting"
+                        conversation["requested_time"] = None
+                        appointment_created = False
+                        appointment_id = None
+                        handoff = False
+                        reply_text = build_slot_conflict_reply(conversation, requested_time_norm or "bu saat", alternatives)
+                        final_reply_source = "calendar_authority"
+                        decision_path.append("calendar:slot_conflict")
+                    else:
+                        conversation["state"] = "completed"
+                        conversation["appointment_status"] = "confirmed"
+                        try:
+                            created = create_appointment(conn, conversation, payload.instagram_username)
+                            appointment_id = int(created[0] if isinstance(created, tuple) else created)
+                            appointment_created = True
+                            conversation["appointment_id"] = appointment_id
+                            handoff = False
+                            reply_text = build_confirmation_message(conversation)
+                            final_reply_source = "calendar_authority"
+                            decision_path.append("fsm:silent_appointment_created")
+                        except Exception as exc:  # noqa: BLE001
+                            logger.error("Silent appointment creation failed: %s", exc)
+                            conversation["state"] = "human_handoff"
+                            conversation["appointment_status"] = "handoff"
+                            conversation["assigned_human"] = True
+                            appointment_created = False
+                            appointment_id = None
+                            handoff = True
+                            reply_text = "Randevu kaydını şu an kesinleştiremedim; bilgilerinizi ekibin kontrol etmesi için not aldım."
+                            final_reply_source = "calendar_authority"
+                            decision_path.append("fsm:silent_appointment_failed")
+                            decision_path.append("guard:appointment_create_failed")
             else:
                 appointment_created = False
                 appointment_id = None
@@ -1685,6 +1769,17 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
             reply_text = build_false_confirmation_guard_reply(conversation, memory)
             final_reply_source = "fsm_guard"
             decision_path.append("guard:block_false_appointment_confirmation")
+
+        if not appointment_created and is_calendar_escape_reply(reply_text):
+            calendar_reply = build_calendar_authority_prompt(conversation)
+            if calendar_reply:
+                reply_text = calendar_reply
+                final_reply_source = "calendar_authority"
+                handoff = False
+                conversation["assigned_human"] = False
+                if conversation.get("state") == "human_handoff":
+                    conversation["state"] = "collect_datetime"
+                decision_path.append("guard:block_calendar_escape_reply")
 
         fallback_reasons = []
         if intent == "fallback":
@@ -2085,13 +2180,13 @@ RANDEVU SLOTLARI KURALLARI (KRİTİK):
   YANLIŞ: "Yarın öğlen mi yoksa öğleden sonra mı uygun?" (Belirsiz saat sorma!)
   YANLIŞ: "Yarın 10:00 müsait mi?" (Eğer listede yoksa teklif etme!)
 - Müşteri dolu bir saat söylerse, nazikçe belirt ve listedeki boş saatleri teklif et: "Maalesef 15:00 dolu, ancak 14:00 veya 16:00 müsait. Uygun mu?"
-- Eğer liste boşsa, "Uygunluğumuzu kontrol edip size döneceğiz" de ve ekibe bırak.
+- Eğer liste yoksa veya boşsa, takvim hakkında tahmin yürütme; sadece eksik bilgiyi sor. "Takvimi göremiyorum", "ekibe aktarıyorum", "kontrol edip döneceğiz" deme.
 
 TARİH VE DÜZELTME KURALLARI:
 - Müşteri "yarın öğlen", "cumartesi 15:00" gibi göreceli tarih/saat söylerse, bunu KABUL ET. "Uygun gün ve saati net yazın" diyerek inat etme.
 - Eğer müşteri tarih ve saati zaten verdiyse ve sonradan ismini/telefonunu düzeltmek isterse, düzeltmeyi hemen yap ve özür dile. Tarih/saati tekrar sorma, akışa devam et.
 - Tarih ve saat alındığında, görüşmeyi kabul ettiğini gösteren güvenli ve kararlı bir kapanış yap.
-- ASLA "Müsaitliği kontrol edeceğim", "Size döneceğim", "Bakıp haber vereceğim" gibi pasif ve şüphe uyandıran ifadeler kullanma. Sen bu süreci yönetiyorsun.
+- ASLA "Takvimi göremiyorum", "Müsaitliği kontrol edeceğim", "Size döneceğim", "Bakıp haber vereceğim", "Berkay'a aktarıyorum" gibi pasif ve şüphe uyandıran ifadeler kullanma. Takvim kararını sistem verir; sen sadece sonucu doğal dille söylersin.
 - "Randevunuz oluşturuldu/onaylandı" gibi kesin sistem mesajları verme (Bunu arka plan sistemi yapacak).
 - DOĞRU ÖRNEK: "Yarın saat 14:00 için ön görüşmenizi not aldım. Detayları sizinle paylaşacağım."
 - YANLIŞ ÖRNEK: "Müsaitliği kontrol edip size döneceğim."

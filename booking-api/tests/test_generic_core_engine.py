@@ -91,6 +91,43 @@ def test_generic_blocks_premature_name_prompt_before_opt_in(monkeypatch):
     assert "guard:block_premature_booking_field_prompt" in result.decision_path
 
 
+def test_generic_blocks_calendar_escape_when_slots_known(monkeypatch):
+    conversation = {
+        "sender_id": "generic-test-calendar-escape",
+        "state": "collect_datetime",
+        "service": "Web Tasarim",
+        "full_name": "Serkan Recber",
+        "lead_name": "Serkan Recber",
+        "phone": "+905555555555",
+        "memory_state": {
+            "requested_service": "Web Tasarim",
+            "suggested_booking_slots": [
+                {"date": "2026-05-19", "time": "13:00"},
+                {"date": "2026-05-19", "time": "15:00"},
+            ],
+        },
+    }
+
+    result, conversation = run_generic_message(
+        monkeypatch,
+        "Sen yap",
+        {
+            "intent": "active_booking",
+            "reply_text": "Takvimi doğrudan göremediğim için konuyu hemen Berkay'a aktarıyorum.",
+            "extracted_entities": {},
+            "requires_human": False,
+        },
+        {"business_name": "DOEL Digital", "service_catalog": [{"display": "Web Tasarim", "name": "Web Tasarim"}]},
+        conversation=conversation,
+    )
+
+    assert "Takvimi" not in result.outbound_text
+    assert "Berkay" not in result.outbound_text
+    assert "13:00" in result.outbound_text and "15:00" in result.outbound_text
+    assert result.handoff is False
+    assert "guard:block_calendar_escape_reply" in result.decision_path
+
+
 def test_generic_infers_date_when_user_selects_suggested_time(monkeypatch):
     created = {}
     conversation = {
@@ -132,6 +169,49 @@ def test_generic_infers_date_when_user_selects_suggested_time(monkeypatch):
     assert result.appointment_created is True
     assert result.appointment_id == 123
     assert "inferred:date_from_suggested_slot" in result.decision_path
+
+
+def test_generic_creates_when_user_asks_if_suggested_slot_works(monkeypatch):
+    created = {}
+    conversation = {
+        "sender_id": "generic-test-slot-question",
+        "state": "collect_datetime",
+        "service": "Web Tasarim",
+        "full_name": "Serkan Recber",
+        "lead_name": "Serkan Recber",
+        "phone": "+905555555555",
+        "memory_state": {
+            "requested_service": "Web Tasarim",
+            "suggested_booking_slots": [
+                {"date": "2026-05-19", "time": "15:00"},
+            ],
+        },
+    }
+
+    def fake_create(_conn, conv, username=None):
+        created.update(conv)
+        return 456
+
+    monkeypatch.setattr(gc, "create_appointment", fake_create)
+    monkeypatch.setattr(gc, "find_existing_appointment", lambda *a, **k: None)
+    result, conversation = run_generic_message(
+        monkeypatch,
+        "15:00 olur mu?",
+        {
+            "intent": "active_booking",
+            "reply_text": "15:00 için kontrol edip döneyim.",
+            "extracted_entities": {},
+            "requires_human": False,
+        },
+        {"business_name": "DOEL Digital", "service_catalog": [{"display": "Web Tasarim", "name": "Web Tasarim"}]},
+        conversation=conversation,
+    )
+
+    assert result.appointment_created is True
+    assert result.appointment_id == 456
+    assert conversation["state"] == "completed"
+    assert conversation["requested_date"] == "2026-05-19"
+    assert conversation["requested_time"] == "15:00"
 
 
 def test_generic_igdm_sets_contact_channel_and_supplies_slots_after_name(monkeypatch):
