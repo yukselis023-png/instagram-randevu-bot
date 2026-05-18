@@ -1656,6 +1656,7 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
             not appointment_created
             and not active_booking_state
             and not booking_opt_in
+            and conversation.get("state", "new") == "new"
             and is_booking_field_collection_reply(reply_text)
         ):
             service_label = service_reply_phrase(known_requested_service(conversation, memory))
