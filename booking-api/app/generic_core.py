@@ -95,7 +95,7 @@ def is_booking_field_collection_reply(reply_text: str | None) -> bool:
     lowered = sanitize_text(reply_text or "").lower()
     if not lowered:
         return False
-    asks_name = any(token in lowered for token in ("ad soyad", "adinizi", "adınızı", "isminizi", "ismininizi", "isminizi öğren", "isminizi ogren", "ismininizi öğren", "ismininizi ogren", "isim soyisim"))
+    asks_name = any(token in lowered for token in ("ad soyad", "ad soyadı", "adinizi", "adınızı", "adini", "adını", "adı ve soyadı", "ad ve soyad", "isminizi", "ismininizi", "ismini", "ismini öğren", "ismini ogren", "isminizi öğren", "isminizi ogren", "ismininizi öğren", "ismininizi ogren", "isim soyisim"))
     asks_phone = "telefon" in lowered and any(token in lowered for token in ("alabilir", "paylas", "paylaş", "yazar", "rica"))
     asks_datetime = any(token in lowered for token in ("uygun gun", "uygun gün", "uygun saat", "hangi saat", "gun ve saat", "gün ve saat"))
     return asks_name or asks_phone or asks_datetime
@@ -1651,6 +1651,17 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
             elif is_llm_error_reply(reply_text):
                 final_reply_source = "fallback"
             decision_path.append(f"guard:{guard_label}")
+
+        if (
+            not appointment_created
+            and not active_booking_state
+            and not booking_opt_in
+            and is_booking_field_collection_reply(reply_text)
+        ):
+            service_label = service_reply_phrase(known_requested_service(conversation, memory))
+            reply_text = f"{service_label.capitalize()} için kısa bir ön görüşmede ihtiyacı netleştirebiliriz. İsterseniz planlayalım mı?"
+            final_reply_source = "fsm_guard"
+            decision_path.append("guard:block_premature_booking_field_prompt")
 
         if is_appointment_confirmation_like_reply(reply_text) and (not appointment_created or not appointment_id):
             reply_text = build_false_confirmation_guard_reply(conversation, memory)

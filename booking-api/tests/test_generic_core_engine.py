@@ -72,6 +72,25 @@ def test_generic_prompt_keeps_name_request_contextual_not_rule_bloated(monkeypat
     assert "Ön görüşme yapacak kişinin" in result["reply_text"]
 
 
+def test_generic_blocks_premature_name_prompt_before_opt_in(monkeypatch):
+    result, conversation = run_generic_message(
+        monkeypatch,
+        "Arkadaşımla konuştum o da websitesi yaptırmak istiyormuş dövmeci",
+        {
+            "intent": "booking_request",
+            "reply_text": "Ön görüşme için arkadaşınızın adını ve soyadını alabilir miyim?",
+            "extracted_entities": {"requested_service": "Web Tasarim", "customer_goal": "arkadaşı için web sitesi yaptırmak"},
+            "requires_human": False,
+        },
+        {"business_name": "DOEL Digital", "service_catalog": [{"display": "Web Tasarim", "name": "Web Tasarim"}]},
+        conversation={"sender_id": "generic-test", "state": "new", "memory_state": {}},
+    )
+
+    assert "ad" not in result.reply_text.lower()
+    assert "planlayalım mı" in result.reply_text.lower()
+    assert "guard:block_premature_booking_field_prompt" in result.decision_path
+
+
 def test_generic_igdm_sets_contact_channel_and_supplies_slots_after_name(monkeypatch):
     os.environ["CHATBOT_ENGINE"] = "generic"
     conversation = {
