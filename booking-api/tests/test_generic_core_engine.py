@@ -47,12 +47,12 @@ def run_generic_message(monkeypatch, message, llm_result, config, conversation=N
     return result, conversation
 
 
-def test_generic_prompt_never_asks_for_friend_name(monkeypatch):
+def test_generic_prompt_understands_referral_attendee_context(monkeypatch):
     captured = {}
 
     def fake_llm(system_prompt, user_text):
         captured["system_prompt"] = system_prompt
-        return {"intent": "booking_request", "reply_text": "Ön görüşme için adınızı ve soyadınızı alabilir miyim?", "extracted_entities": {}, "requires_human": False}
+        return {"intent": "booking_request", "reply_text": "Ön görüşme yapacak kişinin adını ve soyadını alabilir miyim?", "extracted_entities": {}, "requires_human": False}
 
     monkeypatch.setattr(gc, "get_config", lambda: {"business_name": "DOEL Digital", "service_catalog": [{"display": "Web Tasarim", "name": "Web Tasarim"}]})
     monkeypatch.setattr(gc, "call_llm_json", fake_llm)
@@ -60,12 +60,12 @@ def test_generic_prompt_never_asks_for_friend_name(monkeypatch):
         "Evet iyi olur",
         {"sender_id": "generic-test", "state": "new", "memory_state": {"requested_service": "Web Tasarim"}},
         {"requested_service": "Web Tasarim"},
-        [],
+        [{"direction": "in", "message_text": "Arkadaşımla konuştum o da websitesi yaptırmak istiyormuş dövmeci"}],
     )
 
-    assert "arkadaşınızın adını" not in captured["system_prompt"]
-    assert "arkadasinizin adini" not in gc.sanitize_text(captured["system_prompt"]).lower()
-    assert "adınızı ve soyadınızı" in result["reply_text"]
+    assert "görüşmeyi kimin yapacağı bağlamını anla" in captured["system_prompt"]
+    assert "arkadaşı/tanıdığı için yazıyorsa ön görüşmeye katılacak o kişinin adını iste" in captured["system_prompt"]
+    assert "Ön görüşme yapacak kişinin" in result["reply_text"]
 
 
 def test_generic_igdm_sets_contact_channel_and_supplies_slots_after_name(monkeypatch):
