@@ -389,6 +389,28 @@ def infer_date_from_suggested_slot_time(conversation: dict[str, Any], time_value
             return slot.get("date")
     return None
 
+
+def infer_date_from_available_slot_time(conn: Any, conversation: dict[str, Any], time_value: str | None) -> str | None:
+    normalized_time = normalize_time_string(time_value)
+    if not normalized_time:
+        return None
+    try:
+        slots = collect_next_booking_slot_options(conn, conversation, preferred_time=normalized_time, limit=6)
+    except Exception:  # noqa: BLE001
+        return None
+    exact = [slot for slot in slots if normalize_time_string(slot.get("time")) == normalized_time]
+    if len(exact) == 1:
+        remember_booking_slot_options(conversation, exact)
+        return exact[0].get("date")
+    return None
+
+
+def has_booking_contact_for_fsm(conversation: dict[str, Any]) -> bool:
+    if conversation.get("phone"):
+        return True
+    memory = ensure_conversation_memory(conversation)
+    return sanitize_text(str(memory.get("contact_channel") or "")).lower() == "instagram_dm"
+
 CALENDAR_ESCAPE_PATTERNS = (
     "takvimi doğrudan görem",
     "takvimi dogrudan gorem",
@@ -1591,9 +1613,17 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
                 decision_path.append("detected:time" if direct_time else "extracted:time")
                 if not conversation.get("requested_date"):
                     inferred_slot_date = infer_date_from_suggested_slot_time(conversation, time_candidate)
+                    if not inferred_slot_date:
+                        try:
+                            inferred_slot_date = infer_date_from_available_slot_time(conn, conversation, time_candidate)
+                        except Exception:  # noqa: BLE001
+                            inferred_slot_date = None
+                        if inferred_slot_date:
+                            decision_path.append("inferred:date_from_available_slot")
                     if inferred_slot_date:
                         conversation["requested_date"] = inferred_slot_date
-                        decision_path.append("inferred:date_from_suggested_slot")
+                        if "inferred:date_from_available_slot" not in decision_path:
+                            decision_path.append("inferred:date_from_suggested_slot")
             except Exception:
                 pass
         if extracted.get("customer_goal"):
@@ -1650,20 +1680,20 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
         if not handoff and active_state_label != "llm_flow" and not suppress_active_field_updates and (booking_opt_in or intent in ["booking_request", "active_booking"] or active_fsm_applies):
             carried_service = remember_requested_service(conversation, memory, known_requested_service(conversation, memory))
             has_service = bool(carried_service)
-            has_phone = bool(conversation.get("phone"))
+            has_contact = has_booking_contact_for_fsm(conversation)
             has_name = bool(conversation.get("full_name") or conversation.get("lead_name"))
             has_date = bool(conversation.get("requested_date"))
             has_time = bool(conversation.get("requested_time"))
 
             previous_state = conversation.get("state", "new")
-            if invalid_phone_attempt and not has_phone:
+            if invalid_phone_attempt and not has_contact:
                 conversation["state"] = "collect_phone"
                 invalid_phone_prompt = True
             elif not has_service:
                 conversation["state"] = "collect_service"
             elif not has_name:
                 conversation["state"] = "collect_name"
-            elif not has_phone:
+            elif not has_contact:
                 conversation["state"] = "collect_phone"
             elif not has_date or not has_time:
                 conversation["state"] = "collect_datetime"

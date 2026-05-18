@@ -263,7 +263,7 @@ def test_generic_igdm_sets_contact_channel_and_supplies_slots_after_name(monkeyp
     assert conversation["available_slots"] == ["19.05.2026 10:00", "19.05.2026 11:00", "19.05.2026 13:00"]
     assert "MÜSAİT RANDEVU SLOTLARI" in captured["system_prompt"]
     assert "19.05.2026 10:00" in captured["system_prompt"]
-    assert result.conversation_state == "collect_phone"
+    assert result.conversation_state == "collect_datetime"
 
 
 def test_generic_inbound_save_uses_durable_dedupe_payload(monkeypatch):
@@ -2397,3 +2397,36 @@ def test_config_driven_identity_reply_has_no_sector_specific_hardcode():
     assert "dovmeci" not in normalized
     assert "tattoo" not in normalized
     assert gc.reply_question_count(reply) <= 1
+
+def test_generic_creates_when_user_picks_unsuggested_but_available_time(monkeypatch):
+    conversation = {
+        "sender_id": "generic-test-free-15",
+        "state": "collect_datetime",
+        "service": "Web Tasarim",
+        "full_name": "Serkan Recber",
+        "lead_name": "Serkan Recber",
+        "memory_state": {"requested_service": "Web Tasarim", "contact_channel": "instagram_dm", "suggested_booking_slots": [
+            {"date": "2026-05-19", "time": "10:00"},
+            {"date": "2026-05-19", "time": "11:00"},
+            {"date": "2026-05-19", "time": "12:00"},
+        ]},
+    }
+
+    monkeypatch.setattr(gc, "collect_next_booking_slot_options", lambda *a, **k: [{"date": "2026-05-19", "time": "15:00"}])
+    monkeypatch.setattr(gc, "find_existing_appointment", lambda *a, **k: None)
+    monkeypatch.setattr(gc, "create_appointment", lambda *a, **k: 789)
+
+    result, conversation = run_generic_message(
+        monkeypatch,
+        "15:00 olur mu?",
+        {"intent": "active_booking", "reply_text": "15:00 için kontrol edeyim.", "extracted_entities": {}, "requires_human": False},
+        {"business_name": "DOEL Digital", "service_catalog": [{"display": "Web Tasarim", "name": "Web Tasarim"}]},
+        conversation=conversation,
+    )
+
+    assert conversation["requested_date"] == "2026-05-19"
+    assert conversation["requested_time"] == "15:00"
+    assert conversation["state"] == "completed"
+    assert result.appointment_created is True
+    assert result.appointment_id == 789
+    assert ("inferred:date_from_available_slot" in result.decision_path) or ("inferred:date_from_suggested_slot" in result.decision_path)
