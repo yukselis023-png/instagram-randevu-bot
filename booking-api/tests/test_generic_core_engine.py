@@ -47,7 +47,7 @@ def run_generic_message(monkeypatch, message, llm_result, config, conversation=N
     return result, conversation
 
 
-def test_generic_prompt_understands_referral_attendee_context(monkeypatch):
+def test_generic_prompt_keeps_name_request_contextual_not_rule_bloated(monkeypatch):
     captured = {}
 
     def fake_llm(system_prompt, user_text):
@@ -63,8 +63,10 @@ def test_generic_prompt_understands_referral_attendee_context(monkeypatch):
         [{"direction": "in", "message_text": "Arkadaşımla konuştum o da websitesi yaptırmak istiyormuş dövmeci"}],
     )
 
-    assert "görüşmeyi kimin yapacağı bağlamını anla" in captured["system_prompt"]
-    assert "arkadaşı/tanıdığı için yazıyorsa ön görüşmeye katılacak o kişinin adını iste" in captured["system_prompt"]
+    prompt = captured["system_prompt"]
+    assert "Bağlama göre görüşmeye katılacak kişinin adını iste" in prompt
+    assert "arkadaşı/tanıdığı" not in prompt
+    assert "müşteri kendisi için" not in prompt
     assert "Ön görüşme yapacak kişinin" in result["reply_text"]
 
 

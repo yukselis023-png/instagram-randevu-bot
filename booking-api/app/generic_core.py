@@ -2049,8 +2049,7 @@ GEÇMİŞ VE ŞİMDİ AYIRIMI (KRİTİK):
 RANDEVU AKIŞI:
 Eğer son konuşmada veya hafızada bir hizmet zaten biliniyorsa (requested_service / selected_service / service_interest), booking opt-in geldiğinde bu hizmeti kullan; "hangi hizmeti araştırıyorsunuz?" diye tekrar sorma.
 Şu an randevu için eksik olan kritik bilgiler: {', '.join(missing) if missing else 'YOK. Randevu Onaylanabilir.'}
-İsim sorarken "sisteme kaydetmek için" deme; "ön görüşme için" de. Örnek: "Ön görüşme için adınızı ve soyadınızı alabilir miyim?"
-İsim sorarken görüşmeyi kimin yapacağı bağlamını anla: müşteri kendisi için yazıyorsa kendi adını, arkadaşı/tanıdığı için yazıyorsa ön görüşmeye katılacak o kişinin adını iste. Örnek: "Ön görüşme yapacak kişinin adını ve soyadını alabilir miyim?"
+İsim sorarken "sisteme kaydetmek için" deme; "ön görüşme için" de. Bağlama göre görüşmeye katılacak kişinin adını iste.
 
 İŞLETME BİLGİSİ (Business Context):
 {business_context}
