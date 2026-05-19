@@ -1328,7 +1328,7 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
             conversation["full_name"] = conversation.get("lead_name")
         sanitize_conversation_state(conversation)
         memory = ensure_conversation_memory(conversation)
-        if inbound_platform in {"instagram_dm", "instagram_private_api", "igdm"}:
+        if inbound_platform in {"instagram", "instagram_dm", "instagram_private_api", "igdm"}:
             memory["contact_channel"] = "instagram_dm"
             conversation["memory_state"] = memory
         # LLM'e cevap öncesi sadece context hazırla; PY müşteri metnini yazmaz.
