@@ -61,7 +61,7 @@ services:
       - key: ANSWER_FIRST_PIPELINE
         value: "on"
       - key: LLM_BASE_URL
-        value: "https://intent-association-radar-route.trycloudflare.com/v1"
+        value: "https://singer-location-wines-massage.trycloudflare.com/v1"
       - key: CRM_SYNC_ENABLED
         value: "true"
       - key: LIVE_CRM_ENABLED
