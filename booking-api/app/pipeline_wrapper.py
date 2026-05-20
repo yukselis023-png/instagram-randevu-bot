@@ -37,11 +37,19 @@ def update_state_memory_shadow(conversation: dict, memory: dict, valid_entities:
     return {"updated": bool(valid_entities)}
 
 def check_missing_fields(conversation: dict, memory: dict) -> dict:
-    # VIBE CODING: Python asla kendi başına appointment oluşturma kararı vermez.
+    required = ["full_name", "phone", "requested_date", "requested_time", "service"]
+    values = dict(conversation or {})
+    if not values.get("full_name") and values.get("lead_name"):
+        values["full_name"] = values.get("lead_name")
+    if not values.get("service"):
+        values["service"] = (memory or {}).get("requested_service") or (memory or {}).get("selected_service") or (memory or {}).get("service_interest")
+    missing = [field for field in required if not values.get(field)]
+    can_create = not missing and not conversation.get("appointment_id")
+    can_update = not missing and bool(conversation.get("appointment_id"))
     return {
-        "missing_fields": [],
-        "can_create_appointment": False,
-        "can_update_appointment": False
+        "missing_fields": missing,
+        "can_create_appointment": can_create,
+        "can_update_appointment": can_update,
     }
 
 def execute_actions_shadow(conversation: dict, missing_fields_result: dict) -> dict:

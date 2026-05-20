@@ -140,8 +140,8 @@ def test_generic_infers_date_when_user_selects_suggested_time(monkeypatch):
         "memory_state": {
             "requested_service": "Web Tasarim",
             "suggested_booking_slots": [
-                {"date": "2026-05-19", "time": "13:00"},
-                {"date": "2026-05-19", "time": "14:00"},
+                {"date": "2026-05-21", "time": "13:00"},
+                {"date": "2026-05-21", "time": "14:00"},
             ],
         },
     }
@@ -164,7 +164,7 @@ def test_generic_infers_date_when_user_selects_suggested_time(monkeypatch):
         conversation=conversation,
     )
 
-    assert conversation["requested_date"] == "2026-05-19"
+    assert conversation["requested_date"] == "2026-05-21"
     assert conversation["requested_time"] == "14:00"
     assert result.appointment_created is True
     assert result.appointment_id == 123
@@ -183,7 +183,7 @@ def test_generic_creates_when_user_asks_if_suggested_slot_works(monkeypatch):
         "memory_state": {
             "requested_service": "Web Tasarim",
             "suggested_booking_slots": [
-                {"date": "2026-05-19", "time": "15:00"},
+                {"date": "2026-05-21", "time": "15:00"},
             ],
         },
     }
@@ -210,7 +210,7 @@ def test_generic_creates_when_user_asks_if_suggested_slot_works(monkeypatch):
     assert result.appointment_created is True
     assert result.appointment_id == 456
     assert conversation["state"] == "completed"
-    assert conversation["requested_date"] == "2026-05-19"
+    assert conversation["requested_date"] == "2026-05-21"
     assert conversation["requested_time"] == "15:00"
 
 
@@ -2430,3 +2430,20 @@ def test_generic_creates_when_user_picks_unsuggested_but_available_time(monkeypa
     assert result.appointment_created is True
     assert result.appointment_id == 789
     assert ("inferred:date_from_available_slot" in result.decision_path) or ("inferred:date_from_suggested_slot" in result.decision_path)
+
+def test_extract_name_with_phone_date_time_same_message():
+    from app.main import extract_name
+
+    msg = "Merhaba web tasarım için ön görüşme istiyorum. Adım Ayşe Yılmaz 1, telefonum 0555 660 0001. Yarın 10:00 uygun mu?"
+
+    assert extract_name(msg, "new") == "Ayse Yilmaz"
+
+
+def test_service_capacity_aliases_share_canonical_slug():
+    from app.main import resolve_service_capacity_slug
+
+    assert resolve_service_capacity_slug("Otomasyon") == "otomasyon-ai"
+    assert resolve_service_capacity_slug("Otomasyon & Yapay Zeka Çözümleri") == "otomasyon-ai"
+    assert resolve_service_capacity_slug("Web") == "web-tasarim"
+    assert resolve_service_capacity_slug("Web Tasarım") == "web-tasarim"
+
