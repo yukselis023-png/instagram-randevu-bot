@@ -71,6 +71,8 @@ SLOT_BUFFER_MINUTES = int(os.getenv("SLOT_BUFFER_MINUTES", "10"))
 APPOINTMENT_LOOKAHEAD_DAYS = int(os.getenv("APPOINTMENT_LOOKAHEAD_DAYS", "30"))
 AI_FIRST_BOOKING_SLOT_LIMIT = int(os.getenv("AI_FIRST_BOOKING_SLOT_LIMIT", "4"))
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "").strip().rstrip("/")
+if "intent-association-radar-route.trycloudflare.com" in LLM_BASE_URL:
+    LLM_BASE_URL = "https://singer-location-wines-massage.trycloudflare.com/v1"
 if LLM_BASE_URL and not LLM_BASE_URL.endswith("/v1"):
     LLM_BASE_URL = f"{LLM_BASE_URL}/v1"
 LLM_API_KEY = os.getenv("LLM_API_KEY", "").strip()
