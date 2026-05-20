@@ -418,8 +418,8 @@ CREATE INDEX IF NOT EXISTS idx_customer_work_items_customer_id ON customer_work_
 """
 
 NAME_PATTERNS = [
-    re.compile(r"(?:benim\s+adım(?:\s+soyadım)?|adım(?:\s+soyadım)?|ad\s*soyad(?:ım)?|ismim|isim\s*soyisim|adım\s*:)\s+([a-zçğıöşü\s]{2,60})", re.IGNORECASE),
-    re.compile(r"(?:ismim\s+de|müşteri\s+adı|musteri\s+adi)\s+([a-zçğıöşü\s]{2,60})", re.IGNORECASE),
+    re.compile(r"\b(?:benim\s+adım(?:\s+soyadım)?|adım(?:\s+soyadım)?|ad\s*soyad(?:ım)?|ismim|isim\s*soyisim|adım\s*:)\s+([a-zçğıöşü\s]{2,60})", re.IGNORECASE),
+    re.compile(r"\b(?:ismim\s+de|müşteri\s+adı|musteri\s+adi)\s+([a-zçğıöşü\s]{2,60})", re.IGNORECASE),
 ]
 MONTH_NAME_MAP = {
     "ocak": 1,
@@ -6750,7 +6750,7 @@ def extract_date(text: str) -> str | None:
     today = datetime.now(TZ).date()
 
     month_named = re.search(
-        r"(\d1,2})\s+(ocak|şubat|subat|mart|nisan|mayıs|mayis|haziran|temmuz|ağustos|agustos|eylül|eylul|ekim|kasım|kasim|aralık|aralik)(?:\s+(\d2,4}))?",
+        r"\b(\d{1,2})\s+(ocak|subat|mart|nisan|mayis|haziran|temmuz|agustos|eylul|ekim|kasim|aralik)(?:\s+(\d{2,4}))?\b",
         lowered,
         re.IGNORECASE,
     )
