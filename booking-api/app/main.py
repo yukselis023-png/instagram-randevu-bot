@@ -5859,14 +5859,20 @@ def try_cancel_confirmed_appointment(conn: psycopg.Connection, conversation: dic
         conn.rollback()
         return False, "Randevu iptalini kaydederken bir sorun oldu. Lütfen tekrar yazar mısınız?", "appointment_cancel_failed"
 
+    appointment_id = updated["id"] if isinstance(updated, dict) else updated[0]
+    appointment_date = updated["appointment_date"] if isinstance(updated, dict) else updated[1]
+    appointment_time = updated["appointment_time"] if isinstance(updated, dict) else updated[2]
+
     conversation["appointment_status"] = "cancelled"
     conversation["state"] = "completed"
     conversation["assigned_human"] = False
     memory = ensure_conversation_memory(conversation)
     memory["open_loop"] = "completed"
-    memory["cancelled_appointment_id"] = int(updated["id"])
+    memory["cancelled_appointment_id"] = int(appointment_id)
     conn.commit()
-    return True, f"Tabii, {format_human_date(updated['appointment_date'])} saat {normalize_time_string(updated['appointment_time'])} için olan ön görüşme randevunuzu iptal ettim. Dilediğiniz zaman tekrar planlayabiliriz.", "appointment_cancelled"
+    human_date = format_human_date(str(appointment_date))
+    human_time = normalize_time_string(str(appointment_time)) or str(appointment_time)[:5]
+    return True, f"Tabii, {human_date} saat {human_time} için olan ön görüşme randevunuzu iptal ettim. Dilediğiniz zaman tekrar planlayabiliriz.", "appointment_cancelled"
 
 
 def wants_change_after_confirmation(message_text: str, conversation: dict[str, Any]) -> bool:
