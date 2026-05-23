@@ -1334,7 +1334,7 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
         or ((payload.raw_event or {}).get("trace_id") if isinstance(payload.raw_event, dict) else "")
         or inbound_dedupe_key
         or inbound_message_id
-        or payload.sender_id
+        or ""
     )
     metrics["inbound_platform"] = inbound_platform
     metrics["inbound_dedupe_key"] = inbound_dedupe_key
