@@ -21,7 +21,7 @@ from app.main import (
     is_company_capability_question, build_company_capability_reply, is_user_business_identity_message, is_simple_greeting,
     is_business_fit_question, recommendation_engine, extract_name, extract_phone,
     is_invalid_phone_attempt, extract_date, extract_time_for_state, extract_time, create_appointment,
-    build_confirmation_message, try_reschedule_confirmed_appointment, find_active_appointment_for_user,
+    build_confirmation_message, try_reschedule_confirmed_appointment, try_cancel_confirmed_appointment, find_active_appointment_for_user,
     detect_customer_subsector, customer_sector_for_subsector, normalize_date_string, normalize_time_string,
     validate_slot, find_existing_appointment, suggest_alternatives, format_human_date, get_booking_label, TZ,
     collect_next_booking_slot_options, format_booking_slot_option, remember_booking_slot_options,
@@ -981,6 +981,13 @@ def existing_generic_appointment_id(conversation: dict[str, Any], conn: Any | No
     return None
 
 
+def is_explicit_cancel_request(message_text: str) -> bool:
+    lowered = sanitize_text(message_text or "").lower()
+    subject = any(token in lowered for token in ["randevu", "gorusme", "görüşme", "on gorusme", "ön görüşme", "kayit", "kayıt"])
+    action = any(token in lowered for token in ["iptal", "vazgec", "vazgeç", "cancel", "canceled", "cancelled"])
+    return subject and action
+
+
 def is_explicit_reschedule_request(message_text: str) -> bool:
     lowered = sanitize_text(message_text or "").lower()
     subject = any(token in lowered for token in ["randevu", "gorusme", "görüşme", "on gorusme", "ön görüşme", "saat"])
@@ -1129,6 +1136,21 @@ def handle_confirmed_generic_reschedule(
             conversation["state"] = "collect_datetime"
         conversation["memory_state"] = memory
         return None
+    if is_explicit_cancel_request(message_text):
+        try:
+            cancelled, reply, label = try_cancel_confirmed_appointment(conn, conversation, message_text)
+        except Exception:
+            cancelled, reply, label = False, "", None
+        if cancelled:
+            return {"handled": True, "reply_text": reply, "handoff": False, "appointment_id": existing_id, "decision_label": label or "appointment_cancelled"}
+        return {
+            "handled": True,
+            "reply_text": reply or "Randevu iptal talebinizi aldım; kaydı iptal ederken sorun yaşadım, ekibe iletiyorum.",
+            "handoff": True,
+            "appointment_id": existing_id,
+            "decision_label": label or "appointment_cancel_handoff",
+        }
+
     pending_reschedule = bool(memory.get("reschedule_requested_date") or memory.get("reschedule_requested_time"))
     pending_confirm = memory.get("open_loop") == "generic_reschedule_confirmation_pending" or pending_reschedule
     if pending_confirm and is_reschedule_confirmation_acceptance(message_text):
