@@ -2793,6 +2793,22 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
             if rescheduled:
                 return finalize_result(reply, message_type="appointment", should_polish=False, decision_label=reschedule_label or "appointment_rescheduled", appointment_created_value=True)
             return finalize_result(reply, message_type="appointment", should_polish=False, decision_label="appointment_reschedule_followup")
+        has_full_new_booking_payload_for_confirmed = bool(
+            extract_name(message_text, conversation.get("state") or "new")
+            and extract_phone(message_text)
+            and (extracted.get("service") or conversation.get("service"))
+            and extract_date(message_text)
+            and (extract_time_for_state(message_text, "collect_datetime") or extract_time(message_text))
+        )
+        if has_full_new_booking_payload_for_confirmed:
+            memory["open_loop"] = None
+            memory["reschedule_requested_date"] = None
+            memory["reschedule_requested_time"] = None
+            conversation["appointment_status"] = "collecting"
+            conversation["state"] = "collect_datetime"
+            conversation["memory_state"] = memory
+            has_confirmed_booking = False
+
         if has_confirmed_booking and wants_cancel_after_confirmation(message_text):
             conversation["last_customer_message"] = message_text
             cancelled, reply, cancel_label = try_cancel_confirmed_appointment(conn, conversation, message_text)

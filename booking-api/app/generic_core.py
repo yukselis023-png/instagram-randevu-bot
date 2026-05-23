@@ -1126,6 +1126,26 @@ def handle_confirmed_generic_reschedule(
     if not is_confirmed_generic_appointment(conversation, conn):
         return None
 
+    requested_date_for_new, requested_time_for_new = detect_reschedule_candidate(message_text, extracted)
+    has_full_new_booking_payload = bool(
+        extract_name(message_text, conversation.get("state") or "new")
+        and extract_phone(message_text)
+        and (extracted.get("service") or conversation.get("service") or known_requested_service(conversation, memory))
+        and requested_date_for_new
+        and requested_time_for_new
+        and not is_explicit_reschedule_request(message_text)
+        and not is_explicit_cancel_request(message_text)
+    )
+    if has_full_new_booking_payload:
+        memory["open_loop"] = None
+        memory["reschedule_requested_date"] = None
+        memory["reschedule_requested_time"] = None
+        memory["pending_reschedule_request"] = None
+        conversation["appointment_status"] = "collecting"
+        conversation["state"] = "collect_datetime"
+        conversation["memory_state"] = memory
+        return None
+
     if not existing_id:
         memory["open_loop"] = None
         memory["reschedule_requested_date"] = None
@@ -1182,26 +1202,8 @@ def handle_confirmed_generic_reschedule(
             "decision_label": "appointment_reschedule_handoff",
         }
 
-    requested_date, requested_time = detect_reschedule_candidate(message_text, extracted)
+    requested_date, requested_time = requested_date_for_new, requested_time_for_new
     if not requested_date and not requested_time:
-        return None
-
-    has_full_new_booking_payload = bool(
-        extract_name(message_text, conversation.get("state") or "new")
-        and extract_phone(message_text)
-        and (extracted.get("service") or conversation.get("service") or known_requested_service(conversation, memory))
-        and requested_date
-        and requested_time
-        and not is_explicit_reschedule_request(message_text)
-    )
-    if has_full_new_booking_payload:
-        memory["open_loop"] = None
-        memory["reschedule_requested_date"] = None
-        memory["reschedule_requested_time"] = None
-        memory["pending_reschedule_request"] = None
-        conversation["appointment_status"] = "collecting"
-        conversation["state"] = "collect_datetime"
-        conversation["memory_state"] = memory
         return None
 
     if is_explicit_reschedule_request(message_text):
