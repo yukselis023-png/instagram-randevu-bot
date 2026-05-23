@@ -6490,6 +6490,18 @@ def extract_name(text: str, state: str) -> str | None:
         'müşteri adı ',
         'musteri adi ',
     ]
+    third_party_patterns = [
+        r"(?:kardesim|kardeşim|arkadasim|arkadaşım|abim|ablam|esim|eşim|annem|babam|kuzenim)\s+([A-Za-zÇĞİÖŞÜçğıöşü]+(?:\s+[A-Za-zÇĞİÖŞÜçğıöşü]+){0,3})\s+(?:adina|adına)",
+        r"([A-Za-zÇĞİÖŞÜçğıöşü]+(?:\s+[A-Za-zÇĞİÖŞÜçğıöşü]+){1,3})\s+(?:adina|adına)",
+    ]
+    for pattern in third_party_patterns:
+        match = re.search(pattern, normalized, flags=re.IGNORECASE)
+        if match:
+            candidate = titlecase_name(sanitize_text(match.group(1)).strip(" :-"))
+            words = candidate.split() if candidate else []
+            if candidate and 1 <= len(words) <= 4 and not any(word.lower() in NON_NAME_WORDS for word in words):
+                return candidate
+
     for prefix in explicit_prefixes:
         idx = lowered.find(prefix)
         if idx != -1:
