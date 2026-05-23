@@ -5755,6 +5755,7 @@ def find_active_appointment_for_user(
             FROM appointments
             WHERE instagram_user_id = %s
               AND status IN ('confirmed', 'preconsultation')
+              AND (appointment_date > CURRENT_DATE OR (appointment_date = CURRENT_DATE AND appointment_time >= CURRENT_TIME))
             ORDER BY
               CASE
                 WHEN %s::date IS NOT NULL AND %s::time IS NOT NULL
