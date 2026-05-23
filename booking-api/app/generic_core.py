@@ -949,12 +949,14 @@ def extract_generic_datetime_time(message_text: str) -> str | None:
     return None
 
 
-def is_confirmed_generic_appointment(conversation: dict[str, Any]) -> bool:
-    return bool(
-        conversation.get("appointment_id")
-        or conversation.get("appointment_status") == "confirmed"
-        or conversation.get("state") == "completed"
-    )
+def is_confirmed_generic_appointment(conversation: dict[str, Any], conn: Any | None = None) -> bool:
+    if conversation.get("appointment_id"):
+        return True
+    if not (conversation.get("appointment_status") == "confirmed" or conversation.get("state") == "completed"):
+        return False
+    if conn is not None:
+        return existing_generic_appointment_id(conversation, conn) is not None
+    return True
 
 
 def existing_generic_appointment_id(conversation: dict[str, Any], conn: Any | None = None) -> int | None:
@@ -1113,10 +1115,20 @@ def handle_confirmed_generic_reschedule(
     extracted: dict[str, Any],
     username: str | None,
 ) -> dict[str, Any] | None:
-    if not is_confirmed_generic_appointment(conversation):
+    existing_id = existing_generic_appointment_id(conversation, conn)
+    if not is_confirmed_generic_appointment(conversation, conn):
         return None
 
-    existing_id = existing_generic_appointment_id(conversation, conn)
+    if not existing_id:
+        memory["open_loop"] = None
+        memory["reschedule_requested_date"] = None
+        memory["reschedule_requested_time"] = None
+        memory["pending_reschedule_request"] = None
+        conversation["appointment_status"] = "collecting"
+        if conversation.get("state") == "completed":
+            conversation["state"] = "collect_datetime"
+        conversation["memory_state"] = memory
+        return None
     pending_reschedule = bool(memory.get("reschedule_requested_date") or memory.get("reschedule_requested_time"))
     pending_confirm = memory.get("open_loop") == "generic_reschedule_confirmation_pending" or pending_reschedule
     if pending_confirm and is_reschedule_confirmation_acceptance(message_text):
