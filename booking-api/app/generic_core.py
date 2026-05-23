@@ -1164,6 +1164,24 @@ def handle_confirmed_generic_reschedule(
     if not requested_date and not requested_time:
         return None
 
+    has_full_new_booking_payload = bool(
+        extract_name(message_text, conversation.get("state") or "new")
+        and extract_phone(message_text)
+        and (extracted.get("service") or conversation.get("service") or known_requested_service(conversation, memory))
+        and requested_date
+        and requested_time
+        and not is_explicit_reschedule_request(message_text)
+    )
+    if has_full_new_booking_payload:
+        memory["open_loop"] = None
+        memory["reschedule_requested_date"] = None
+        memory["reschedule_requested_time"] = None
+        memory["pending_reschedule_request"] = None
+        conversation["appointment_status"] = "collecting"
+        conversation["state"] = "collect_datetime"
+        conversation["memory_state"] = memory
+        return None
+
     if is_explicit_reschedule_request(message_text):
         try:
             updated, reply, label = try_reschedule_confirmed_appointment(conn, conversation, message_text, username)
