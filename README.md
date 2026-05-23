@@ -68,7 +68,7 @@ cd C:\Users\oyunc\Desktop\instagram-randevu-bot
 
 ## Public webhook URL alma
 Şu an çalışan quick tunnel URL:
-- `https://belong-monetary-realtors-extras.trycloudflare.com`
+- `https://scores-unable-texts-fish.trycloudflare.com`
 
 Cloudflared quick tunnel URL'sini tekrar görmek için:
 
@@ -79,7 +79,7 @@ cd C:\Users\oyunc\Desktop\instagram-randevu-bot
 
 Webhook path:
 - Verify + events callback: `<TUNNEL_URL>/webhook/instagram/randevu`
-- Şu anki tam callback: `https://belong-monetary-realtors-extras.trycloudflare.com/webhook/instagram/randevu`
+- Şu anki tam callback: `https://scores-unable-texts-fish.trycloudflare.com/webhook/instagram/randevu`
 
 ## Aktif çalışan akış
 Sistem şu anda aktif olarak **Instagram private API poller + n8n AI router** ile çalışır:

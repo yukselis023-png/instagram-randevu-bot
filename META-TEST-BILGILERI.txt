@@ -1,0 +1,60 @@
+INSTAGRAM RANDEVU BOTU - TEST BILGILERI
+=====================================
+
+N8N
+---
+URL: http://localhost:5678
+Basic Auth Kullanici: doel
+Basic Auth Sifre: ubcbRHmhA47uCSJz9fkF-uEM
+n8n Owner E-posta: doel@local.test
+n8n Owner Sifre: ubcbRHmhA47uCSJz9fkF-uEM
+
+BOOKING API
+-----------
+Health: http://localhost:18000/health
+Appointments: http://localhost:18000/api/appointments
+Conversations: http://localhost:18000/api/conversations
+
+PUBLIC WEBHOOK
+--------------
+Tunnel URL: https://scores-unable-texts-fish.trycloudflare.com
+Callback URL: https://scores-unable-texts-fish.trycloudflare.com/webhook/instagram/randevu
+Verify Token: vNz-rfv6Jkl-ByISHwpd8KHrfr5orFug
+
+INSTAGRAM APP DURUMU
+-------------------
+Meta App Name: Doel Randevu Botu / Doel Randevu Botu-IG
+Meta App ID: 1606025937152065
+Instagram Business User ID: 17841479716248121
+Webhook Subscription: ON
+Tester Invite: ACCEPTED
+Token Type: LONG-LIVED (~60 days)
+
+AKTIF CALISAN TASIMA YOLU
+-------------------------
+Instagram DM alisverisi su an `instagram-poller` servisi ile private API uzerinden calisiyor.
+Meta webhook kurulumu klasorde tutuluyor ancak ana canli yol poller servisidir.
+
+META TARAFINDA GIRILECEKLER
+---------------------------
+Webhook Callback URL:
+https://scores-unable-texts-fish.trycloudflare.com/webhook/instagram/randevu
+
+Verify Token:
+vNz-rfv6Jkl-ByISHwpd8KHrfr5orFug
+
+.ENV ICIN SONRADAN GEREKECEKLER
+-------------------------------
+META_PAGE_ACCESS_TOKEN=
+META_PAGE_ID=
+
+DOSYALAR
+--------
+Proje klasoru:
+C:\Users\oyunc\Desktop\instagram-randevu-bot
+
+Env dosyasi:
+C:\Users\oyunc\Desktop\instagram-randevu-bot\.env
+
+README:
+C:\Users\oyunc\Desktop\instagram-randevu-bot\README.md
