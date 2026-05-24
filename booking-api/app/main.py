@@ -14516,20 +14516,25 @@ def api_delete_tenant(slug: str):
     """Delete tenant and related data."""
     try:
         with get_conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT id FROM tenants WHERE slug = %s", (slug,))
-                row = cur.fetchone()
-                if not row:
-                    return {"ok": False, "error": "not_found"}
-                tid = row["id"]
-                cur.execute("DELETE FROM conversations WHERE tenant_slug = %s", (slug,))
-                cur.execute("DELETE FROM webchat_sessions WHERE tenant_slug = %s", (slug,))
-                try:
-                    cur.execute("DELETE FROM customers WHERE tenant_slug = %s", (slug,))
-                except Exception:
-                    pass
-                cur.execute("DELETE FROM appointments WHERE tenant_slug = %s", (slug,))
-                cur.execute("DELETE FROM tenants WHERE id = %s", (tid,))
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT id FROM tenants WHERE slug = %s", (slug,))
+                    row = cur.fetchone()
+                    if not row:
+                        return {"ok": False, "error": "not_found"}
+                    tid = row["id"]
+                    cur.execute("DELETE FROM conversations WHERE tenant_slug = %s", (slug,))
+                    cur.execute("DELETE FROM webchat_sessions WHERE tenant_slug = %s", (slug,))
+                    try:
+                        cur.execute("DELETE FROM customers WHERE tenant_slug = %s", (slug,))
+                    except Exception:
+                        pass
+                    cur.execute("DELETE FROM appointments WHERE tenant_slug = %s", (slug,))
+                    cur.execute("DELETE FROM tenants WHERE id = %s", (tid,))
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
         return {"ok": True, "deleted": slug}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
@@ -14641,18 +14646,27 @@ def api_patch_tenant_whatsapp(slug: str, body: dict[str, Any]):
         return {"ok": False, "error": "token and phone_id required"}
     try:
         with get_conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT id, channels FROM tenants WHERE slug = %s", (slug,))
-                row = cur.fetchone()
-                if not row:
-                    return {"ok": False, "error": "not_found"}
-                channels = row.get("channels") or {}
-                if isinstance(channels, str):
-                    channels = json.loads(channels)
-                channels["whatsapp"] = {"token": token, "phone_id": phone_id}
-                cur.execute("UPDATE tenants SET channels = %s, updated_at = NOW() WHERE id = %s",
-                            (json.dumps(channels), row["id"]))
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT id, channels FROM tenants WHERE slug = %s", (slug,))
+                    row = cur.fetchone()
+                    if not row:
+                        return {"ok": False, "error": "not_found"}
+                    raw = row.get("channels") or {}
+                    # Handle both list and dict formats
+                    if isinstance(raw, list):
+                        channels = {ch: True for ch in raw}
+                    elif isinstance(raw, str):
+                        channels = json.loads(raw)
+                    else:
+                        channels = dict(raw)  # psycopg dict_row returns a dict-like
+                    channels["whatsapp"] = {"token": token, "phone_id": phone_id}
+                    cur.execute("UPDATE tenants SET channels = %s, updated_at = NOW() WHERE id = %s",
+                                (json.dumps(channels), row["id"]))
                 conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
         return {"ok": True, "slug": slug, "channel": "whatsapp", "configured": True}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}

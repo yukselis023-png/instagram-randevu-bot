@@ -56,6 +56,7 @@ def get_or_create_session(conn: Any, session_id: str | None, tenant_slug: str) -
                 f"INSERT INTO {TABLE} (session_id, tenant_slug) VALUES (%s, %s)",
                 (session_id, tenant_slug),
             )
+        conn.commit()
     return session_id, s
 
 
@@ -67,6 +68,7 @@ def _persist(conn: Any, s: dict) -> None:
             (json.dumps(s.get("messages", [])), s.get("full_name"), s.get("phone"),
              json.dumps(s["conversation"]) if s.get("conversation") else None, s["session_id"]),
         )
+    conn.commit()
 
 
 def handle_webchat_message(
