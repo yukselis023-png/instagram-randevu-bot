@@ -1748,6 +1748,17 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
                 save_message_log(conn, payload.sender_id, "out", reply, build_outbound_raw_event(decision_path + ["calendar:direct_slot_conflict"], trace_id, inbound_dedupe_key, inbound_platform, inbound_message_id))
                 metrics["total_ms"] = elapsed_ms(request_started_at)
                 return ProcessResult(sender_id=payload.sender_id, should_reply=True, reply_text=reply, outbound_text=reply, llm_raw_reply_text=llm_raw_reply_text, final_reply_source="calendar_authority", handoff=False, conversation_state=conversation.get("state", "new"), appointment_created=False, appointment_id=None, normalized=build_normalized(conversation), metrics=metrics, decision_path=decision_path + ["calendar:direct_slot_conflict"])
+            conversation["state"] = "completed"
+            conversation["appointment_status"] = "confirmed"
+            created = create_appointment(conn, conversation, payload.instagram_username)
+            appointment_id = int(created[0] if isinstance(created, tuple) else created)
+            conversation["appointment_id"] = appointment_id
+            reply = build_confirmation_message(conversation)
+            upsert_conversation(conn, conversation)
+            save_message_log(conn, payload.sender_id, "out", reply, build_outbound_raw_event(decision_path + ["calendar:direct_appointment_created"], trace_id, inbound_dedupe_key, inbound_platform, inbound_message_id))
+            metrics["total_ms"] = elapsed_ms(request_started_at)
+            queue_crm_sync(background_tasks, conversation, appointment_id, metrics)
+            return ProcessResult(sender_id=payload.sender_id, should_reply=True, reply_text=reply, outbound_text=reply, llm_raw_reply_text=llm_raw_reply_text, final_reply_source="calendar_authority", handoff=False, conversation_state=conversation.get("state", "new"), appointment_created=True, appointment_id=appointment_id, normalized=build_normalized(conversation), metrics=metrics, decision_path=decision_path + ["calendar:direct_appointment_created"])
 
         msg_provided_name = bool(extract_name(message_text, conversation.get("state", "new")))
         msg_provided_phone = bool(extract_phone(message_text))
