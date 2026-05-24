@@ -1608,6 +1608,10 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
             booking_opt_in = False
             intent = "direct_answer"
         active_state_is_relevant, active_state_label = active_state_relevance(message_text, state_before_entities, cfg)
+        if booking_opt_in and not str(state_before_entities or "").startswith("collect_"):
+            active_state_is_relevant = True
+            active_state_label = "booking_request"
+            decision_path.append("fsm:new_booking_request_relevant")
         if (
             state_before_entities == "collect_name"
             and (conversation.get("full_name") or conversation.get("lead_name"))
@@ -1846,7 +1850,8 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
             else:
                 appointment_created = False
                 appointment_id = None
-                conversation["state"] = previous_state
+                if not (booking_opt_in and should_create_appointment and has_service and has_name and has_contact and has_date and has_time):
+                    conversation["state"] = previous_state
             state_changed_by_fsm = conversation.get("state") != previous_state
 
         service_for_booking = known_requested_service(conversation, memory)
