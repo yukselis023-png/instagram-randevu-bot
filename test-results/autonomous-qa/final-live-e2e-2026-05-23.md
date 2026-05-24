@@ -208,3 +208,39 @@ Result: `182 passed, 28 skipped, 2 warnings`.
   - Second identical request: `duplicate=true`, `should_reply=false`, decision path `duplicate_ignored`
 
 Status: PASS.
+
+---
+
+## 2026-05-24 Full regression continuation
+
+### New fix
+- `32b2e40` — Create appointments in direct booking validation path.
+- Reason: the early deterministic direct-booking path handled invalid/past date and occupied slot, but if the slot was valid/free it could fall through to LLM fallback instead of creating the appointment when LLM/network was unavailable.
+
+### DB-backed container regression
+Executed inside `ig-randevu-api` container after copying tests and installing pytest:
+- `python -m pytest tests/test_live_cancel_regression.py -q`
+- Result: `1 passed, 2 warnings`
+
+### Full local non-DB regression
+Command:
+- `PYTHONPATH=. python -m pytest tests -q --ignore=tests/test_live_cancel_regression.py`
+
+Result:
+- `465 passed, 35 skipped, 2 warnings`
+
+Note: full local suite without DB env still fails only on DB-backed live cancel test with `No database URL configured`; same test passes inside Docker container with configured DB.
+
+### TestSprite generated suite
+Re-run against local Docker API:
+- `10 passed, 0 failed`
+
+### Prod deploy/probe
+- Prod `/version`: `32b2e4024914d46ff586fb48f8527622f1bf34b9`
+- Direct no-conflict booking smoke:
+  - `appointment_created=true`
+  - `appointment_id=27`
+  - `final_reply_source=calendar_authority`
+  - decision path includes `calendar:direct_appointment_created`
+
+Status: PASS.
