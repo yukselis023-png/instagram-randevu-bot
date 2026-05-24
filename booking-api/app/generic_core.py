@@ -1833,7 +1833,7 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
         question_intents = {"service_question", "price_question", "direct_answer", "fallback"}
         is_question_intent = intent in question_intents and not suggested_slot_selected
         has_question_mark = "?" in message_text
-        has_date_or_time_selection = bool(conversation.get("requested_date") and conversation.get("requested_time") and (msg_provided_date or suggested_slot_selected))
+        has_date_or_time_selection = bool(conversation.get("requested_date") and conversation.get("requested_time") and (msg_provided_date or suggested_slot_selected or (str(conversation.get("state") or "") in {"collect_datetime", "collect_date", "collect_time", "collect_period"} and time_candidate)))
         should_create_appointment = bool(
             user_provided_booking_info
             and not is_question_intent
@@ -1847,6 +1847,12 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
         state_changed_by_fsm = False
         invalid_phone_prompt = False
         
+        if curr_state in {"collect_datetime", "collect_date", "collect_time", "collect_period"} and time_candidate and conversation.get("requested_date") and conversation.get("requested_time"):
+            active_state_is_relevant = True
+            active_state_label = "datetime"
+            suppress_active_field_updates = False
+            decision_path.append("fsm:datetime_relevant_by_time")
+            should_create_appointment = True
         active_fsm_applies = curr_state.startswith("collect_") and active_state_is_relevant and active_state_label != "llm_flow"
         if suppress_active_field_updates and not active_direct_clarification:
             # VIBE CODING: FSM has no mouth. Preserve LLM reply; only state/DB may change.
