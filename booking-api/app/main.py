@@ -21,6 +21,19 @@ from pydantic import BaseModel, Field
 import psycopg
 from psycopg.rows import dict_row
 
+# ── Platform modules ────────────────────────────────────────────────
+from app.tenant import (
+    create_tenant, resolve_tenant, get_tenant_from_header,
+    get_tenant_from_host, DEFAULT_TENANT_SLUG,
+)
+from app.scraper import scrape_url_to_config
+from app.whatsapp import verify_webhook, handle_whatsapp_inbound
+from app.webchat_handler import handle_webchat_message, get_session_history
+from app.scoring import score_conversation, format_score_for_crm
+from app.actions import detect_action_intent, route_to_action, is_action_enabled
+from app.handoff import is_handoff_request, send_telegram_handoff, build_handoff_reply
+from app.followup import run_followup_cycle
+
 TIMEZONE = os.getenv("TIMEZONE", "Europe/Istanbul")
 TZ = ZoneInfo(TIMEZONE)
 APP_BUILD_VERSION = os.getenv("APP_BUILD_VERSION") or os.getenv("RENDER_GIT_COMMIT") or "local"
@@ -418,6 +431,41 @@ CREATE INDEX IF NOT EXISTS idx_automation_events_status_scheduled_at ON automati
 CREATE INDEX IF NOT EXISTS idx_appointments_date_time_status ON appointments(appointment_date, appointment_time, status);
 CREATE INDEX IF NOT EXISTS idx_customer_work_items_status_due ON customer_work_items(status, due_at);
 CREATE INDEX IF NOT EXISTS idx_customer_work_items_customer_id ON customer_work_items(customer_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS tenants (
+    id BIGSERIAL PRIMARY KEY,
+    slug TEXT NOT NULL UNIQUE,
+    brand_name TEXT NOT NULL,
+    logo_url TEXT NOT NULL DEFAULT '',
+    colors JSONB NOT NULL DEFAULT '{}'::jsonb,
+    config JSONB NOT NULL DEFAULT '{}'::jsonb,
+    channels JSONB NOT NULL DEFAULT '[]'::jsonb,
+    actions JSONB NOT NULL DEFAULT '[]'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'conversations' AND column_name = 'tenant_slug'
+    ) THEN
+        ALTER TABLE conversations ADD COLUMN tenant_slug TEXT NOT NULL DEFAULT 'doel';
+        CREATE INDEX IF NOT EXISTS idx_conversations_tenant_slug ON conversations(tenant_slug);
+    END IF;
+END $$;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'appointments' AND column_name = 'tenant_slug'
+    ) THEN
+        ALTER TABLE appointments ADD COLUMN tenant_slug TEXT NOT NULL DEFAULT 'doel';
+        CREATE INDEX IF NOT EXISTS idx_appointments_tenant_slug ON appointments(tenant_slug);
+    END IF;
+END $$;
 """
 
 NAME_PATTERNS = [
@@ -1001,6 +1049,25 @@ def on_startup() -> None:
         except Exception:  # noqa: BLE001
             logger.exception("live_crm_auth_warm_failed")
 
+    # Background follow-up scheduler
+    try:
+        import threading as _t
+        import time as _m
+        def _floop():
+            while True:
+                try:
+                    with get_conn() as _c:
+                        from app.followup import run_followup_cycle
+                        _r = run_followup_cycle(_c, lambda _s,_x: None)
+                        if _r.get("sent"):
+                            logger.info("followup_cycle sent=%d checked=%d", _r.get("sent"), _r.get("checked"))
+                except Exception as _e:
+                    logger.debug("followup_cycle_err %s", _e)
+                _m.sleep(3600)
+        _t.Thread(target=_floop, daemon=True).start()
+        logger.info("followup_scheduler_active")
+    except Exception as _e:
+        logger.warning("followup_scheduler_fail %s", _e)
 
 @app.get("/health")
 def health() -> dict[str, Any]:
@@ -2505,7 +2572,34 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
     import os
     if os.getenv("CHATBOT_ENGINE", "generic") == "generic":
         from app.generic_core import process_instagram_message_generic
-        return process_instagram_message_generic(payload, background_tasks)
+        result = process_instagram_message_generic(payload, background_tasks)
+        # ── Post-processing: scoring + handoff ──
+        try:
+            if result and result.should_reply and result.reply_text:
+                sender = payload.sender_id
+                if sender and not sender.startswith("test_") and not sender.startswith("final100"):
+                    from app.scoring import score_conversation_start
+                    from app.handoff import is_handoff_request, send_telegram_handoff, build_handoff_reply
+                    message_text = payload.message_text or ""
+                    if is_handoff_request(message_text):
+                        tenant = resolve_tenant(get_conn() if DATABASE_URL else None, get_tenant_from_header(dict(payload.raw_event or {})))
+                        handoff_reply = build_handoff_reply(tenant)
+                        result.reply_text = handoff_reply
+                        result.handoff = True
+                        # Fire Telegram notification async
+                        try:
+                            send_telegram_handoff(
+                                tenant_name=tenant.get("brand_name", ""),
+                                customer_name=sender,
+                                customer_phone=None,
+                                channel="instagram_dm",
+                                summary=message_text[:200],
+                            )
+                        except Exception:
+                            pass
+        except Exception as exc:
+            logger.debug("post_process_skip %s", exc)
+        return result
 
     request_started_at = time_module.perf_counter()
     metrics = {
@@ -14296,4 +14390,228 @@ outbound_channel: {channel}
         logger.warning(log_block)
     except Exception as e:
         print("Log error:", e)
+
+
+# ═══════════════════════════════════════════════════════════════════
+# PLATFORM API — White-label multi-tenant AI Agent
+# ═══════════════════════════════════════════════════════════════════
+
+_LLM_HEADERS: dict[str, str] | None = None
+
+def _get_llm_headers() -> dict[str, str]:
+    global _LLM_HEADERS
+    if _LLM_HEADERS is None:
+        _LLM_HEADERS = {
+            "Authorization": f"Bearer {LLM_API_KEY}",
+            "Content-Type": "application/json",
+        }
+    return _LLM_HEADERS
+
+def _llm_call_scraper(prompt: str) -> str:
+    """Simple LLM call for scraper extraction."""
+    try:
+        resp = requests.post(
+            f"{LLM_BASE_URL}/chat/completions",
+            headers=_get_llm_headers(),
+            json={
+                "model": LLM_MODEL,
+                "messages": [
+                    {"role": "system", "content": "You are a business analyzer. Return ONLY valid JSON."},
+                    {"role": "user", "content": prompt},
+                ],
+                "temperature": 0.1,
+                "max_tokens": 4096,
+            },
+            timeout=60,
+        )
+        data = resp.json()
+        return data["choices"][0]["message"]["content"]
+    except Exception as exc:
+        logger.error("scraper_llm_error %s", exc)
+        return '{"services": []}'
+
+
+@app.post("/api/tenant/{slug}/scrape")
+def tenant_scrape(slug: str, body: dict[str, Any]):
+    """Scrape website → auto-generate tenant config."""
+    url = body.get("url", "")
+    if not url:
+        return {"ok": False, "error": "url required"}
+    config = scrape_url_to_config(url, _llm_call_scraper)
+    return {"ok": True, "config": config, "slug": slug}
+
+
+@app.post("/api/tenants")
+def api_create_tenant(body: dict[str, Any]):
+    """Create new tenant (agency/client)."""
+    slug = body.get("slug", "")
+    brand = body.get("brand_name", slug)
+    config = body.get("config")
+    if not slug:
+        return {"ok": False, "error": "slug required"}
+    with get_conn() as conn:
+        tenant = create_tenant(conn, slug, brand, config)
+    return {"ok": True, "tenant": tenant}
+
+
+@app.get("/api/tenants")
+def api_list_tenants():
+    """List all tenants."""
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT id, slug, brand_name, logo_url, colors, channels, actions, created_at FROM tenants ORDER BY id")
+                rows = cur.fetchall()
+        return {"ok": True, "tenants": [{
+            "id": r["id"],
+            "slug": r["slug"],
+            "brand_name": r["brand_name"],
+            "logo_url": r.get("logo_url", ""),
+            "colors": r.get("colors", {}),
+            "channels": r.get("channels", []),
+            "actions": r.get("actions", []),
+        } for r in rows]}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+@app.get("/api/tenants/{slug}")
+def api_get_tenant(slug: str):
+    """Get tenant details."""
+    with get_conn() as conn:
+        tenant = resolve_tenant(conn, slug)
+    return {"ok": True, "tenant": tenant}
+
+
+@app.patch("/api/tenants/{slug}/config")
+def api_update_tenant_config(slug: str, body: dict[str, Any]):
+    """Update tenant config (services, pricing, branding)."""
+    config = body.get("config", {})
+    brand = body.get("brand_name", "")
+    colors = body.get("colors")
+    channels = body.get("channels")
+    actions = body.get("actions")
+    try:
+        with get_conn() as conn:
+            updates = []
+            params = []
+            if config:
+                updates.append("config = %s")
+                params.append(json.dumps(config))
+            if brand:
+                updates.append("brand_name = %s")
+                params.append(brand)
+            if colors:
+                updates.append("colors = %s")
+                params.append(json.dumps(colors))
+            if channels is not None:
+                updates.append("channels = %s")
+                params.append(json.dumps(channels))
+            if actions is not None:
+                updates.append("actions = %s")
+                params.append(json.dumps(actions))
+            if not updates:
+                return {"ok": False, "error": "no fields to update"}
+            params.append(slug)
+            with conn.cursor() as cur:
+                cur.execute(f"UPDATE tenants SET {', '.join(updates)}, updated_at = NOW() WHERE slug = %s", params)
+            conn.commit()
+        return {"ok": True, "slug": slug}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+@app.post("/api/channel/whatsapp")
+def api_whatsapp_webhook(body: dict[str, Any], background_tasks: BackgroundTasks):
+    """WhatsApp inbound webhook (Meta)."""
+    from app.generic_core import process_instagram_message_generic
+    results = handle_whatsapp_inbound(body, process_instagram_message_generic, background_tasks)
+    return {"ok": True, "results": results}
+
+
+@app.get("/api/channel/whatsapp")
+def api_whatsapp_verify(mode: str | None = None, token: str | None = None, challenge: str | None = None):
+    """WhatsApp webhook verification (Meta handshake)."""
+    status, body = verify_webhook(mode, token, challenge)
+    if status == 200 and body:
+        import starlette.responses
+        return starlette.responses.Response(content=body, media_type="text/plain")
+    return {"ok": False}
+
+
+@app.post("/api/channel/webchat")
+def api_webchat_message(body: dict[str, Any], background_tasks: BackgroundTasks):
+    """Web Chat message."""
+    from app.generic_core import process_instagram_message_generic
+    session_id = body.get("session_id")
+    tenant_slug = body.get("tenant", DEFAULT_TENANT_SLUG)
+    text = body.get("message", "")
+    name = body.get("full_name")
+    phone = body.get("phone")
+    if not text:
+        return {"ok": False, "error": "message required"}
+    result = handle_webchat_message(session_id, tenant_slug, text, process_instagram_message_generic, background_tasks, name, phone)
+    return {"ok": True, "result": result}
+
+
+@app.get("/api/channel/webchat/session/{session_id}")
+def api_webchat_session(session_id: str):
+    """Get Web Chat session history."""
+    session = get_session_history(session_id)
+    if not session:
+        return {"ok": False, "error": "session not found"}
+    return {"ok": True, "session": session}
+
+
+@app.post("/api/followup/run")
+def api_run_followup(body: dict[str, Any] = {}):
+    """Manual trigger follow-up cycle."""
+    tenant = body.get("tenant")
+    try:
+        with get_conn() as conn:
+            result = run_followup_cycle(conn, lambda sid, msg: None, tenant)
+        return {"ok": True, "result": result}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+@app.post("/api/handoff/notify")
+def api_handoff_notify(body: dict[str, Any]):
+    """Send handoff notification to Telegram."""
+    sent = send_telegram_handoff(
+        tenant_name=body.get("tenant", ""),
+        customer_name=body.get("customer", ""),
+        customer_phone=body.get("phone"),
+        channel=body.get("channel", "instagram_dm"),
+        summary=body.get("summary", ""),
+        conversation_url=body.get("url"),
+    )
+    return {"ok": sent, "notified": sent}
+
+
+@app.get("/api/platform/status")
+def api_platform_status():
+    """Platform overview: tenants, channels, health."""
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) as c FROM tenants")
+                tenant_count = cur.fetchone()["c"]
+                cur.execute("SELECT COUNT(*) as c FROM conversations WHERE tenant_slug != 'doel'")
+                external_convos = cur.fetchone()["c"]
+        llm_ok = probe_llm_model(LLM_MODEL, _get_llm_headers())
+        return {
+            "ok": True,
+            "tenants": tenant_count,
+            "external_conversations": external_convos,
+            "llm_healthy": bool(llm_ok and llm_ok.get("ok")),
+            "channels": {
+                "whatsapp": bool(os.getenv("WHATSAPP_TOKEN")),
+                "webchat": True,
+                "instagram": True,
+            },
+            "version": APP_BUILD_VERSION,
+        }
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
 
