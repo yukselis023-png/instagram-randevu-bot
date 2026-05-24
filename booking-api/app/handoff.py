@@ -17,11 +17,13 @@ logger = logging.getLogger("handoff")
 # ── Detection ───────────────────────────────────────────────────────
 
 HANDOFF_PATTERNS = [
-    r"\b(?:insanla|yetkili|müdür|midur|yönetici|yonetici|patron|sorumlu)\b.{0,50}\b(?:konuş|konus|bağla|bagla|görüş|gorus|ulaş|ulas|bağlan|baglan|devral|aktar)\b",
+    r"\b(?:insanla|yetkili|müdür|midur|yönetici|yonetici|patron|sorumlu)\b.{0,50}\b(?:konuş|konus|bağla|bagla|görüş|goruş|gorus|ulaş|ulas|bağlan|baglan|devral|aktar)\b",
     r"\b(?:beni (?:bir )?insana bağla|beni (?:bir )?yetkiliye bağla)\b",
-    r"\b(?:müdürle|midurle|yetkiliyle|yöneticiyle|yoneticiyle)\b.{0,30}\b(?:görüş|gorus|konuş|konus)\b",
+    r"\b(?:müdürle|midurle|yetkiliyle|yöneticiyle|yoneticiyle)\b.{0,30}\b(?:görüş|goruş|gorus|konuş|konus)\b",
     r"\b(?:robot değil|bot değil|yapay zeka değil|ai değil|otomatik değil)\b",
     r"\b(?:gerçek|gercek|reel|canlı)\b.{0,20}\b(?:insan|kişi|kisi|yetkili)\b",
+    r"\binsan(?:la)?\b.{0,30}(?:goruş|goruşmek|gorusmek|konuşmak|konusmak)\b",
+    r"\b(?:operator|operatör|musteri hizmet|müşteri hizmet|destek)\b.{0,30}(?:bağla|bagla|ulaş|ulas|ara)\b",
 ]
 
 HANDOFF_RE = re.compile("|".join(HANDOFF_PATTERNS), re.IGNORECASE)
