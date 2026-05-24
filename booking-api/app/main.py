@@ -2825,8 +2825,15 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
 
         if has_confirmed_booking and wants_cancel_after_confirmation(message_text):
             conversation["last_customer_message"] = message_text
-            cancelled, reply, cancel_label = try_cancel_confirmed_appointment(conn, conversation, message_text)
-            return finalize_result(reply, message_type="appointment", should_polish=False, decision_label=cancel_label or "appointment_cancelled")
+            cancelled, reply, cancel_label, cancelled_appointment_id = try_cancel_confirmed_appointment(conn, conversation, message_text)
+            return finalize_result(
+                reply,
+                message_type="appointment",
+                should_polish=False,
+                decision_label=cancel_label or "appointment_cancelled",
+                appointment_created_value=bool(cancelled),
+                appointment_id_value=cancelled_appointment_id if cancelled else None,
+            )
 
         if has_confirmed_booking and (any(k in lower_text for k in CANCEL_KEYWORDS) or wants_change_after_confirmation(message_text, conversation)):
             detected_date = extract_date(message_text)
@@ -5865,7 +5872,7 @@ def wants_cancel_after_confirmation(message_text: str) -> bool:
     return any(token in lowered for token in ["iptal", "vazgec", "vazgeç", "cancel", "canceled", "cancelled"])
 
 
-def try_cancel_confirmed_appointment(conn: psycopg.Connection, conversation: dict[str, Any], reason: str | None = None) -> tuple[bool, str, str | None]:
+def try_cancel_confirmed_appointment(conn: psycopg.Connection, conversation: dict[str, Any], reason: str | None = None) -> tuple[bool, str, str | None, int | None]:
     target = find_active_appointment_for_user(
         conn,
         conversation.get("instagram_user_id"),
@@ -5873,7 +5880,7 @@ def try_cancel_confirmed_appointment(conn: psycopg.Connection, conversation: dic
         preferred_time=conversation.get("requested_time"),
     )
     if not target:
-        return False, "Aktif bir ön görüşme kaydı bulamadım. İsterseniz yeni bir zaman planlayabiliriz.", "appointment_cancel_not_found"
+        return False, "Aktif bir ön görüşme kaydı bulamadım. İsterseniz yeni bir zaman planlayabiliriz.", "appointment_cancel_not_found", None
     with conn.cursor() as cur:
         cur.execute(
             """
@@ -5890,7 +5897,7 @@ def try_cancel_confirmed_appointment(conn: psycopg.Connection, conversation: dic
         updated = cur.fetchone()
     if not updated:
         conn.rollback()
-        return False, "Randevu iptalini kaydederken bir sorun oldu. Lütfen tekrar yazar mısınız?", "appointment_cancel_failed"
+        return False, "Randevu iptalini kaydederken bir sorun oldu. Lütfen tekrar yazar mısınız?", "appointment_cancel_failed", None
 
     appointment_id = updated["id"] if isinstance(updated, dict) else updated[0]
     appointment_date = updated["appointment_date"] if isinstance(updated, dict) else updated[1]
@@ -5905,7 +5912,7 @@ def try_cancel_confirmed_appointment(conn: psycopg.Connection, conversation: dic
     conn.commit()
     human_date = format_human_date(str(appointment_date))
     human_time = normalize_time_string(str(appointment_time)) or str(appointment_time)[:5]
-    return True, f"Tabii, {human_date} saat {human_time} için olan ön görüşme randevunuzu iptal ettim. Dilediğiniz zaman tekrar planlayabiliriz.", "appointment_cancelled"
+    return True, f"Tabii, {human_date} saat {human_time} için olan ön görüşme randevunuzu iptal ettim. Dilediğiniz zaman tekrar planlayabiliriz.", "appointment_cancelled", int(appointment_id)
 
 
 def wants_change_after_confirmation(message_text: str, conversation: dict[str, Any]) -> bool:
