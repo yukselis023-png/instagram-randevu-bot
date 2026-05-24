@@ -52,6 +52,7 @@ def parse_whatsapp_inbound(body: dict[str, Any]) -> list[dict[str, Any]]:
                         "type": msg.get("type", ""),
                         "timestamp": msg.get("timestamp", ""),
                         "source": "whatsapp_webhook",
+                        "platform": "whatsapp",
                     },
                     "wa_profile": value.get("contacts", [{}])[0].get("profile", {}),
                 }
@@ -117,6 +118,8 @@ def handle_whatsapp_inbound(
                 self.instagram_username = d["instagram_username"]
                 self.message_text = d["message_text"]
                 self.message_id = d["message_id"]
+                self.trace_id = d["message_id"]
+                self.recipient_id = None
                 self.raw_event = d["raw_event"]
         payload = FakePayload(msg)
         try:

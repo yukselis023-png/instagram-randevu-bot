@@ -58,7 +58,9 @@ def handle_webchat_message(
             self.instagram_username = f"webchat_{tenant_slug}"
             self.message_text = message_text
             self.message_id = message_id
-            self.raw_event = {"id": message_id, "source": "webchat", "tenant": tenant_slug}
+            self.trace_id = message_id
+            self.recipient_id = None
+            self.raw_event = {"id": message_id, "source": "webchat", "tenant": tenant_slug, "platform": "webchat"}
 
     payload = FakePayload()
     try:
