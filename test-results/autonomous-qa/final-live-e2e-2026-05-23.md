@@ -485,3 +485,36 @@ User rejected caveats as incomplete work. Follow-up fixes completed.
 
 ### Remaining status
 - No known blocker in tested A-Z flow.
+
+---
+
+## 2026-05-24 Final 100% pass after endpoint update
+
+### Requested LLM endpoint
+- New endpoint: `https://afford-fun-thorough-hints.trycloudflare.com/v1`
+- Production health: `ok=true`, `provider_reachable=true`, masked URL `https://affo...trycloudflare.com/v1`
+
+### Final deployed commits
+- `3faa996` Update LLM endpoint and sync DM cancellations to CRM
+- `278b6d5` Force stale LLM tunnel rewrite to current endpoint
+- `10208e4` Expose DM cancellation appointment ids in generic engine
+- `9f8ba74` Ensure LLM-driven DM cancellations sync to CRM
+- `6143278` Block LLM-only booking and cancellation claims
+- `d63659f` Prioritize deterministic DM cancellation over LLM replies
+- `dbcd6e2` Handle terse DM cancellation requests
+
+### Final production matrix — PASS
+- LLM health: PASS
+- Price + delivery question: PASS, deterministic rich answer, no appointment
+- Direct full booking: PASS, appointment `43` created
+- Duplicate inbound id: PASS, no duplicate appointment
+- Full slot conflict: PASS, no appointment, alternatives returned
+- Past date: PASS, rejected
+- DM terse cancel (`iptal etmek istiyorum`): PASS, appointment `43` cancelled, appointment id returned for CRM sync
+
+### Final local validation — PASS
+- Full local non-live pytest: `465 passed, 35 skipped, 2 warnings`
+- TestSprite generated suite: `10 passed, 0 failed`
+
+### Final status
+- Tested required A-Z system paths are passing in production.
