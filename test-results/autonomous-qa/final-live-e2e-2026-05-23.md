@@ -370,3 +370,35 @@ Current deployed production remains stable on `36c4a65`. Additional UX weak spot
 ### Current status
 - Production is now on guarded UX hardening merge (`0b95595`).
 - Stable smoke + cleanup confirmed.
+
+---
+
+## 2026-05-24 Continuation pass 5 — live IG + DOEL CRM verification
+
+### Instagram UI
+- Opened real Instagram thread: `https://www.instagram.com/direct/t/17843990679657209/`
+- Sent visible DM from logged-in account:
+  - `Canli test 3 web tasarim on gorusme istiyorum`
+- Message appeared in the Instagram UI as sent.
+- Local poller did not pick this specific self-sent UI message as inbound, consistent with poller behavior that skips own-account messages.
+
+### Production API / real thread identity probe
+- Ran production flow using real IG sender/thread metadata (`sender_id=67000808415`, `username=bwrkkay`, thread `17843990679657209`).
+- Appointment `32` was created and then cleanup-cancelled.
+- Caveat observed: existing conversation memory for this real sender reused stale `full_name=Conflict Test`, so this path is not suitable for clean CRM identity assertions without resetting that user state.
+
+### Clean production CRM sync probe
+- Created clean full direct booking with unique sender:
+  - sender: `crm-live-ui-full-20260524`
+  - customer: `Qa Live Crm`
+  - service: `Web Tasarim`
+  - date/time: `2026-05-27 17:00`
+- Production appointment `33` created successfully.
+- DOEL CRM UI verified sync:
+  - Home dashboard `Yaklaşan görüşmeler` shows `Qa Live Crm Web Tasarim 27 May 2026 • 17:00`
+  - `Aranacaklar` shows `Qa Live Crm Ön görüşme: 27 May 2026 • 17:00`
+  - CRM counts updated (`Ön görüşme 15`).
+
+### Status
+- Production backend, appointment creation, and DOEL CRM sync are verified end-to-end.
+- Appointment `33` was intentionally left active briefly for CRM visual verification; cleanup can be run after review if desired.
