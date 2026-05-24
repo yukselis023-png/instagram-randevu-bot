@@ -1306,13 +1306,17 @@ def is_appointment_confirmation_like_reply(reply: str) -> bool:
         r"\b(?:on gorusme|gorusme)\b.{0,80}\b(?:kaydiniz|kaydini|randevunuz|randevunuzu)\b.{0,80}\b(?:olusturdum|olusturuldu|tamamlandi|hazir|planlandi|onaylandi|ayarlandi|ayarlanmistir)\b",
         r"\b(?:on gorusmeniz|gorusmeniz)\b.{0,80}\b(?:olusturuldu|tamamlandi|hazir|planlandi|onaylandi|ayarlandi|ayarlanmistir|not aldim|not aldik)\b",
         r"\b(?:kaydiniz|kaydinizi|kayit)\b.{0,80}\b(?:olusturdum|olusturuldu|tamamlandi|hazir|onaylandi|not aldim|not aldik)\b",
-        r"\b(?:bugun|yarin|\d{1,2}[.:]\d{2}|saat\s*\d{1,2})\b.{0,80}\b(?:on gorusme|gorusme|randevu)\b.{0,80}\bnot aldim\b",
+        r"\b(?:bugun|yarin|\d{1,2}[.:]\d{2}|\d{1,2}\s+(?:ocak|subat|mart|nisan|mayis|haziran|temmuz|agustos|eylul|ekim|kasim|aralik)|saat\s*\d{1,2})\b.{0,100}\b(?:on gorusme|gorusme|randevu)\b.{0,100}\b(?:not aldim|not aldik)\b",
         r"\bsizi\s+arayac(?:agiz|aktir|ak)\b",
         r"\bislem\b.{0,40}\btamamlandi\b",
         r"\bsaat(?:iniz|inizi|i)?\b.{0,40}\b(?:guncelledim|guncellendi|degistirdim|degisti)\b",
         r"\b(?:confirmed|scheduled)\b",
     ]
-    if any(re.search(pattern, lowered) for pattern in explicit_patterns):
+    cancellation_claim_patterns = [
+        r"\b(?:randevu|on gorusme|gorusme)\b.{0,100}\b(?:iptal ettim|iptal edildi|iptal olusturuldu)\b",
+        r"\b(?:iptal ettim|iptal edildi)\b.{0,100}\b(?:randevu|on gorusme|gorusme)\b",
+    ]
+    if any(re.search(pattern, lowered) for pattern in explicit_patterns + cancellation_claim_patterns):
         return True
     has_definite_datetime = bool(re.search(r"\b(?:bugun|yarin|\d{1,2}[:.]\d{2}|saat\s*\d{1,2})\b", lowered))
     has_final_call_phrase = any(phrase in lowered for phrase in ["sizi arayacaktir", "sizi arayacak", "gorusmek uzere", "gorusuruz"])
