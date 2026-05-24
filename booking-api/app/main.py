@@ -14451,7 +14451,7 @@ def tenant_scrape(slug: str, body: dict[str, Any]):
                     row = cur.fetchone()
                     if row:
                         existing = row.get("config") or {}
-                        merged = {**existing, "service_catalog": config.get("services", []), "business_name": config.get("business_name", "")}
+                        merged = {**existing, "service_catalog": config.get("service_catalog", []), "business_name": config.get("business_name", "")}
                         cur.execute(
                             "UPDATE tenants SET config = %s, updated_at = NOW() WHERE id = %s",
                             (json.dumps(merged), row["id"]),
@@ -14459,7 +14459,7 @@ def tenant_scrape(slug: str, body: dict[str, Any]):
                     else:
                         # auto-create tenant if doesn't exist
                         from app.tenant import create_tenant
-                        create_tenant(conn, slug, config.get("business_name", slug), {"service_catalog": config.get("services", [])})
+                        create_tenant(conn, slug, config.get("business_name", slug), {"service_catalog": config.get("service_catalog", [])})
         except Exception as exc:
             logger.warning("scrape_persist_error %s", exc)
     return {"ok": True, "config": config, "slug": slug}
