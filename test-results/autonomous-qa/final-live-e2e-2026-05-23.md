@@ -402,3 +402,52 @@ Current deployed production remains stable on `36c4a65`. Additional UX weak spot
 ### Status
 - Production backend, appointment creation, and DOEL CRM sync are verified end-to-end.
 - Appointment `33` was intentionally left active briefly for CRM visual verification; cleanup can be run after review if desired.
+
+---
+
+## 2026-05-24 Continuation pass 6 — full-stop QA matrix
+
+### CRM cleanup/cancel check
+- Appointment `33` cancelled after CRM visual verification.
+- Backend cancellation succeeded.
+- CRM home still showed `Qa Live Crm` immediately after refresh, suggesting CRM sync is create/update visible but cancellation propagation to CRM dashboard is delayed or not implemented for cancelled backend appointments.
+
+### Production full matrix
+Executed production matrix with unique synthetic senders:
+- Direct full booking: PASS — appointment `34` created.
+- Duplicate inbound id/message id: PASS — no duplicate appointment.
+- Full-slot conflict: PASS — returned `Maalesef 10:00 dolu...` with alternatives.
+- Past date: PASS — returned past-date rejection.
+- Other service full booking: PASS — appointment `35` created.
+- Reschedule existing booking: PASS — appointment `34` moved to `28.05.2026 12:00`.
+- Cancel existing booking: PASS — appointment `34` cancelled.
+- Cleanup: appointments `34`, `35` cancelled.
+
+### Additional issue found and fixed
+Observed weak behavior:
+- Price/service question could fall into generic fallback CTA when LLM was degraded.
+- Nonsense text could also avoid hallucinated appointment creation but returned generic fallback.
+
+Patch:
+- Commit `1b4277a Prefer price answers over service CTA fallback`
+- Price-question deterministic handler now wins before service-interest CTA fallback.
+- Question-mark service-interest fallback tightened.
+
+### Validation before deploy
+- Full local non-DB pytest: `465 passed, 35 skipped, 2 warnings`
+- TestSprite generated suite: `10 passed, 0 failed`
+
+### Production deploy and post-deploy checks
+- Deployed `/version`: `1b4277aa6679...`
+- Post-deploy probes:
+  - Price question no longer creates appointment; returns safe fallback under current degraded LLM.
+  - Nonsense question no longer becomes service CTA; returns safe fallback.
+  - Direct full booking still creates appointment (`36`) and cleanup cancellation succeeded.
+- Final prod smoke:
+  - `live_smoke_dm_flow.py`: PASS
+  - appointment `37` created and cleanup-cancelled.
+
+### Remaining known caveats
+- LLM endpoint currently degraded/intermittent, so some informational questions fall back to safe generic text instead of rich pricing/overview copy.
+- CRM dashboard cancellation removal is not confirmed; create sync is confirmed visible, cancel sync appears delayed/missing.
+- Real IG UI self-sent messages are visible in Instagram but skipped by poller as own-account messages; true external inbound requires customer-side send.
