@@ -1026,7 +1026,8 @@ def is_explicit_cancel_request(message_text: str) -> bool:
     lowered = sanitize_text(message_text or "").lower()
     subject = any(token in lowered for token in ["randevu", "gorusme", "görüşme", "on gorusme", "ön görüşme", "kayit", "kayıt"])
     action = any(token in lowered for token in ["iptal", "vazgec", "vazgeç", "cancel", "canceled", "cancelled"])
-    return subject and action
+    terse_cancel = any(phrase in lowered for phrase in ["iptal etmek istiyorum", "iptal edelim", "iptal olsun", "iptal et", "vazgeçtim", "vazgectim"])
+    return action and (subject or terse_cancel)
 
 
 def is_explicit_reschedule_request(message_text: str) -> bool:
