@@ -290,3 +290,29 @@ Status: PASS.
 
 ### Final comprehensive status
 PASS. Generic booking flow now remains functional even when LLM/network is unavailable, while existing hallucination/compactness guards and full regression suites remain green.
+
+---
+
+## 2026-05-24 Continuation pass 2
+
+### Extra validation run
+- Live regression subset: `8 passed, 2 warnings`
+  - `test_live_bug_active_direct.py`
+  - `test_live_slot_acceptance_regression.py`
+  - `test_live_stale_collect_name_slot_bug.py`
+  - `test_poller_canonical_reply_text.py`
+- n8n workflow validation rerun: PASS
+  - Output: `OK: n8n workflow doğrulaması geçti`
+- Local stack health:
+  - `booking-api`: healthy
+  - `postgres`: healthy
+  - `n8n`: healthy / HTTP 200
+  - `instagram-poller`: running, inbox API 200, duplicate skip behavior observed
+- Prod comprehensive UX script rerun captured additional weak-copy cases while LLM endpoint was offline/intermittent.
+  - No prod code change shipped for these exploratory UX improvements because an attempted local hardening branch introduced regressions in false-confirmation/slot-creation tests.
+  - Reverted uncommitted experiment; stable branch restored.
+- Stable branch validation after revert:
+  - Full local non-DB pytest: `465 passed, 35 skipped, 2 warnings`
+
+### Status
+Current deployed production remains stable on `36c4a65`. Additional UX weak spots are documented for a separate guarded implementation pass; no risky regression-prone patch was deployed.
