@@ -14433,11 +14433,35 @@ def _llm_call_scraper(prompt: str) -> str:
 
 @app.post("/api/tenant/{slug}/scrape")
 def tenant_scrape(slug: str, body: dict[str, Any]):
-    """Scrape website → auto-generate tenant config."""
+    """Scrape website → auto-generate tenant config and persist."""
     url = body.get("url", "")
+    save = body.get("save", True)  # default: save to tenant
     if not url:
         return {"ok": False, "error": "url required"}
     config = scrape_url_to_config(url, _llm_call_scraper)
+    # Persist scraped config to tenant
+    if save:
+        try:
+            with get_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT id, config FROM tenants WHERE slug = %s",
+                        (slug,),
+                    )
+                    row = cur.fetchone()
+                    if row:
+                        existing = row.get("config") or {}
+                        merged = {**existing, "service_catalog": config.get("services", []), "business_name": config.get("business_name", "")}
+                        cur.execute(
+                            "UPDATE tenants SET config = %s, updated_at = NOW() WHERE id = %s",
+                            (json.dumps(merged), row["id"]),
+                        )
+                    else:
+                        # auto-create tenant if doesn't exist
+                        from app.tenant import create_tenant
+                        create_tenant(conn, slug, config.get("business_name", slug), {"service_catalog": config.get("services", [])})
+        except Exception as exc:
+            logger.warning("scrape_persist_error %s", exc)
     return {"ok": True, "config": config, "slug": slug}
 
 
@@ -14537,6 +14561,17 @@ def api_whatsapp_verify(mode: str | None = None, token: str | None = None, chall
         import starlette.responses
         return starlette.responses.Response(content=body, media_type="text/plain")
     return {"ok": False}
+
+
+@app.get("/webchat/widget.js")
+async def serve_webchat_widget():
+    """Embeddable Web Chat widget for any website."""
+    from fastapi.responses import Response
+    return Response(
+        content='/* DOEL AI Agent — Embeddable Web Chat Widget\n * Usage: <script src="https://api.doeldigital.com/webchat/widget.js?tenant=mybrand"></script>\n */\n(function() {\n    \'use strict\';\n\n    // ── Config ─────────────────────────────────────────────────────\n    var tenant = \'__TENANT__\';\n    var apiBase = \'__API_BASE__\' || \'https://instagram-randevu-bot.onrender.com\';\n    var brandColor = \'#1a1a2e\';\n    var logoUrl = \'\';\n\n    // Parse query params\n    var scripts = document.getElementsByTagName(\'script\');\n    for (var i = 0; i < scripts.length; i++) {\n        var src = scripts[i].src || \'\';\n        if (src.indexOf(\'widget.js\') > -1) {\n            var params = new URLSearchParams(src.split(\'?\')[1] || \'\');\n            if (params.get(\'tenant\')) tenant = params.get(\'tenant\');\n            if (params.get(\'color\')) brandColor = \'#\' + params.get(\'color\');\n            break;\n        }\n    }\n\n    // ── State ──────────────────────────────────────────────────────\n    var sessionId = localStorage.getItem(\'doel_chat_session_\' + tenant);\n    var isOpen = false;\n    var bubbleEl, panelEl, messagesEl, inputEl, sendEl;\n\n    // ── Inject styles ──────────────────────────────────────────────\n    var style = document.createElement(\'style\');\n    style.textContent = `\n        #doel-chat-bubble {\n            position: fixed; bottom: 20px; right: 20px; z-index: 999999;\n            width: 60px; height: 60px; border-radius: 50%;\n            background: ${brandColor}; color: #fff;\n            display: flex; align-items: center; justify-content: center;\n            cursor: pointer; box-shadow: 0 4px 16px rgba(0,0,0,0.2);\n            transition: transform 0.2s; font-size: 28px;\n        }\n        #doel-chat-bubble:hover { transform: scale(1.1); }\n        #doel-chat-panel {\n            position: fixed; bottom: 90px; right: 20px; z-index: 999999;\n            width: 360px; height: 520px; background: #fff;\n            border-radius: 16px; box-shadow: 0 8px 32px rgba(0,0,0,0.15);\n            display: none; flex-direction: column; overflow: hidden;\n            font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, sans-serif;\n        }\n        #doel-chat-panel.open { display: flex; }\n        #doel-chat-header {\n            background: ${brandColor}; color: #fff; padding: 14px 18px;\n            font-size: 15px; font-weight: 600; display: flex;\n            justify-content: space-between; align-items: center;\n        }\n        #doel-chat-close { cursor: pointer; opacity: 0.8; font-size: 18px; }\n        #doel-chat-messages {\n            flex: 1; overflow-y: auto; padding: 14px; \n            background: #f5f5f5; display: flex; flex-direction: column;\n            gap: 8px; font-size: 14px; line-height: 1.4;\n        }\n        .doel-msg { max-width: 80%; padding: 10px 14px; border-radius: 14px; }\n        .doel-msg.user { align-self: flex-end; background: ${brandColor}; color: #fff; border-bottom-right-radius: 4px; }\n        .doel-msg.bot { align-self: flex-start; background: #e8e8e8; color: #222; border-bottom-left-radius: 4px; }\n        .doel-msg.typing { align-self: flex-start; background: transparent; color: #888; font-style: italic; }\n        #doel-chat-input-area {\n            display: flex; padding: 10px; border-top: 1px solid #e0e0e0;\n            background: #fff;\n        }\n        #doel-chat-input {\n            flex: 1; border: 1px solid #ddd; border-radius: 20px;\n            padding: 10px 14px; font-size: 14px; outline: none;\n        }\n        #doel-chat-input:focus { border-color: ${brandColor}; }\n        #doel-chat-send {\n            background: ${brandColor}; color: #fff; border: none;\n            width: 40px; height: 40px; border-radius: 50%; margin-left: 8px;\n            cursor: pointer; font-size: 18px; display: flex;\n            align-items: center; justify-content: center;\n        }\n        @media (max-width: 480px) {\n            #doel-chat-panel { width: 100vw; height: 100vh; bottom: 0; right: 0; border-radius: 0; }\n            #doel-chat-bubble { bottom: 20px; right: 20px; }\n        }\n    `;\n    document.head.appendChild(style);\n\n    // ── Create elements ─────────────────────────────────────────────\n    bubbleEl = document.createElement(\'div\');\n    bubbleEl.id = \'doel-chat-bubble\';\n    bubbleEl.textContent = \'💬\';\n    document.body.appendChild(bubbleEl);\n\n    panelEl = document.createElement(\'div\');\n    panelEl.id = \'doel-chat-panel\';\n    panelEl.className = \'doel-chat-theme\';\n    panelEl.innerHTML = `\n        <div id="doel-chat-header">\n            <span>💬 Mesaj</span>\n            <span id="doel-chat-close">✕</span>\n        </div>\n        <div id="doel-chat-messages">\n            <div class="doel-msg bot">Merhaba! Size nasıl yardımcı olabilirim?</div>\n        </div>\n        <div id="doel-chat-input-area">\n            <input id="doel-chat-input" type="text" placeholder="Mesajınızı yazın..." />\n            <button id="doel-chat-send">➤</button>\n        </div>\n    `;\n    document.body.appendChild(panelEl);\n\n    // ── References ──────────────────────────────────────────────────\n    messagesEl = document.getElementById(\'doel-chat-messages\');\n    inputEl = document.getElementById(\'doel-chat-input\');\n    sendEl = document.getElementById(\'doel-chat-send\');\n    var closeEl = document.getElementById(\'doel-chat-close\');\n\n    // ── Functions ───────────────────────────────────────────────────\n    function addMessage(text, role) {\n        var div = document.createElement(\'div\');\n        div.className = \'doel-msg \' + role;\n        div.textContent = text;\n        messagesEl.appendChild(div);\n        messagesEl.scrollTop = messagesEl.scrollHeight;\n    }\n\n    function showTyping() {\n        var div = document.createElement(\'div\');\n        div.className = \'doel-msg typing\';\n        div.id = \'doel-typing\';\n        div.textContent = \'Yazıyor...\';\n        messagesEl.appendChild(div);\n        messagesEl.scrollTop = messagesEl.scrollHeight;\n    }\n\n    function hideTyping() {\n        var el = document.getElementById(\'doel-typing\');\n        if (el) el.remove();\n    }\n\n    function sendMessage(text) {\n        addMessage(text, \'user\');\n        showTyping();\n\n        fetch(apiBase + \'/api/channel/webchat\', {\n            method: \'POST\',\n            headers: { \'Content-Type\': \'application/json\' },\n            body: JSON.stringify({\n                session_id: sessionId,\n                tenant: tenant,\n                message: text,\n            })\n        })\n        .then(function(r) { return r.json(); })\n        .then(function(data) {\n            hideTyping();\n            if (data.ok && data.result && data.result.reply_text) {\n                addMessage(data.result.reply_text, \'bot\');\n                if (data.result.session_id) {\n                    sessionId = data.result.session_id;\n                    localStorage.setItem(\'doel_chat_session_\' + tenant, sessionId);\n                }\n            } else {\n                addMessage(\'Bir hata oluştu. Lütfen tekrar deneyin.\', \'bot\');\n            }\n        })\n        .catch(function(err) {\n            hideTyping();\n            addMessage(\'Bağlantı hatası. Lütfen daha sonra tekrar deneyin.\', \'bot\');\n            console.error(\'DOEL Chat error:\', err);\n        });\n    }\n\n    // ── Event listeners ─────────────────────────────────────────────\n    bubbleEl.addEventListener(\'click\', function() {\n        isOpen = !isOpen;\n        panelEl.className = isOpen ? \'open\' : \'\';\n        bubbleEl.textContent = isOpen ? \'✕\' : \'💬\';\n        if (isOpen) inputEl.focus();\n    });\n\n    closeEl.addEventListener(\'click\', function() {\n        isOpen = false;\n        panelEl.className = \'\';\n        bubbleEl.textContent = \'💬\';\n    });\n\n    sendEl.addEventListener(\'click\', function() {\n        var text = inputEl.value.trim();\n        if (!text) return;\n        inputEl.value = \'\';\n        sendMessage(text);\n    });\n\n    inputEl.addEventListener(\'keydown\', function(e) {\n        if (e.key === \'Enter\') {\n            sendEl.click();\n        }\n    });\n\n    console.log(\'DOEL AI Chat Widget loaded — tenant:\', tenant);\n})();\n',
+        media_type="application/javascript",
+        headers={'Access-Control-Allow-Origin': '*', 'Cache-Control': 'public, max-age=86400'},
+    )
 
 
 @app.post("/api/channel/webchat")
