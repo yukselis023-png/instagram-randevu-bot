@@ -3,6 +3,7 @@
 *.bak-*
 *.sqlite
 *.json
+!workflows/*.json
 *.png
 *.pyc
 __pycache__/

@@ -1,0 +1,70 @@
+{
+  "name": "AI Agent Handoff → Telegram",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ai-agent/handoff",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "webhook_handoff",
+      "name": "Handoff Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "handoff-ai-agent"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $json.body || $json;\nconst tenant = body.tenant || 'doel';\nconst customer = body.customer_name || 'Bilinmeyen';\nconst phone = body.customer_phone || '—';\nconst channel = body.channel || 'instagram_dm';\nconst summary = (body.summary || '').slice(0, 500);\nconst channelLabels = { instagram_dm: '📱 Instagram DM', whatsapp: '💬 WhatsApp', webchat: '🌐 Web Chat' };\nconst label = channelLabels[channel] || channel;\n\nconst message = `🚨 İNSAN DEVREYE GİRMELİ\n\nMüşteri: ${customer}\nTelefon: ${phone}\nKanal: ${label}\n\n${summary}\n\n👉 ${process.env.BOOKING_API_BASE_URL || 'https://instagram-randevu-bot.onrender.com'}/admin/handoff`;\n\nreturn [{ json: { chat_id: body.chat_id || process.env.TELEGRAM_HANDOFF_CHAT_ID, text: message } }];"
+      },
+      "id": "code_format",
+      "name": "Format Telegram Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.telegram.org/bot{{$env.TELEGRAM_BOT_TOKEN}}/sendMessage",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "chat_id", "value": "={{ $json.chat_id }}" },
+            { "name": "text", "value": "={{ $json.text }}" },
+            { "name": "parse_mode", "value": "HTML" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "telegram_send",
+      "name": "Send Telegram",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [750, 300],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { ok: true, sent: true } }];"
+      },
+      "id": "code_response",
+      "name": "Respond",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [980, 300]
+    }
+  ],
+  "connections": {
+    "Handoff Webhook": { "main": [[ { "node": "Format Telegram Message", "type": "main", "index": 0 } ]] },
+    "Format Telegram Message": { "main": [[ { "node": "Send Telegram", "type": "main", "index": 0 } ]] },
+    "Send Telegram": { "main": [[ { "node": "Respond", "type": "main", "index": 0 } ]] }
+  },
+  "settings": {
+    "saveExecutionProgress": true,
+    "timezone": "Europe/Istanbul"
+  },
+  "tags": ["ai-agent", "handoff"]
+}

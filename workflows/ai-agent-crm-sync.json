@@ -1,0 +1,91 @@
+{
+  "name": "AI Agent → CRM Sync",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [ { "field": "minutes", "minutesInterval": 15 } ]
+        }
+      },
+      "id": "cron_trigger",
+      "name": "Every 15 min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const BASE = process.env.BOOKING_API_BASE_URL || 'https://instagram-randevu-bot.onrender.com';\nreturn [{ json: { baseUrl: BASE } }];"
+      },
+      "id": "code_init",
+      "name": "Init",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.baseUrl }}/api/platform/status",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [ { "name": "content-type", "value": "application/json" } ] },
+        "options": {}
+      },
+      "id": "http_tenants",
+      "name": "Get Platform Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [650, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "const tenants = $json.tenants || [];\nconst out = [];\nfor (const t of tenants) {\n  out.push({ json: { slug: t.slug, brand: t.brand_name, ...t } });\n}\nif (out.length === 0) out.push({ json: { _empty: true } });\nreturn out;"
+      },
+      "id": "code_split",
+      "name": "Split Tenants",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [850, 200]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.CRM_BASE_URL || 'https://doel-crm.vercel.app' }}/api/ai-agent/sync",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [] },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ tenant: $json.slug }) }}",
+        "options": {}
+      },
+      "id": "http_crm_ping",
+      "name": "Ping CRM",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1050, 200],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nreturn [{ json: { synced: items.length, ok: true } }];"
+      },
+      "id": "code_done",
+      "name": "Done",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1250, 300]
+    }
+  ],
+  "connections": {
+    "Every 15 min": { "main": [[ { "node": "Init", "type": "main", "index": 0 } ]] },
+    "Init": { "main": [[ { "node": "Get Platform Status", "type": "main", "index": 0 } ]] },
+    "Get Platform Status": { "main": [[ { "node": "Split Tenants", "type": "main", "index": 0 } ]] },
+    "Split Tenants": { "main": [[ { "node": "Ping CRM", "type": "main", "index": 0 } ]] },
+    "Ping CRM": { "main": [[ { "node": "Done", "type": "main", "index": 0 } ]] }
+  },
+  "settings": {
+    "saveExecutionProgress": false,
+    "timezone": "Europe/Istanbul"
+  },
+  "tags": ["ai-agent", "crm"]
+}
