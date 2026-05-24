@@ -343,3 +343,30 @@ Current deployed production remains stable on `36c4a65`. Additional UX weak spot
 - `main` pushed at `09fccbc`.
 - Render `/version` still reports `36c4a65` after polling, so production auto-deploy has not picked up the new merge yet.
 - Current production remains stable at `36c4a65` until Render deploy is manually triggered or auto-deploy resumes.
+
+---
+
+## 2026-05-24 Continuation pass 4 — production deploy verified
+
+### Deploy
+- Manual Render deploy triggered from dashboard.
+- New deployed `/version`: `0b9559527297...`
+- Service: `https://instagram-randevu-bot.onrender.com`
+
+### Production smoke
+- `live_smoke_dm_flow.py` against production: PASS
+- Appointment `30` created, then cleanup-cancelled.
+- Endpoint checks all 200:
+  - `/health`
+  - `/version`
+  - `/api/customers`
+  - `/api/appointments`
+
+### Production edge probe
+- Scenario: user selects an unsuggested but available explicit time (`15:00 olur mu?`) after suggested slots are shown.
+- Result: PASS
+- Appointment `31` created at `2026-05-25 15:00`, then cleanup-cancelled.
+
+### Current status
+- Production is now on guarded UX hardening merge (`0b95595`).
+- Stable smoke + cleanup confirmed.
