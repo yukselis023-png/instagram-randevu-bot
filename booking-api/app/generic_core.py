@@ -1529,6 +1529,15 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
         decision_path = [f"generic_intent:{intent}"]
         booking_opt_in = is_booking_opt_in(message_text, intent)
         deterministic_reply = False
+        if is_explicit_cancel_request(message_text) and existing_generic_appointment_id(conversation, conn):
+            cancelled, reply, label, cancelled_appointment_id = try_cancel_confirmed_appointment(conn, conversation, message_text)
+            if cancelled:
+                update_conversation_memory_after_bot_reply(conversation, reply, "|".join(decision_path + [label or "appointment_cancelled"]))
+                upsert_conversation(conn, conversation)
+                save_message_log(conn, payload.sender_id, "out", reply, build_outbound_raw_event(decision_path + [label or "appointment_cancelled"], trace_id, inbound_dedupe_key, inbound_platform, inbound_message_id))
+                metrics["total_ms"] = elapsed_ms(request_started_at)
+                queue_crm_sync(background_tasks, conversation, int(cancelled_appointment_id), metrics)
+                return ProcessResult(sender_id=payload.sender_id, should_reply=True, reply_text=reply, outbound_text=reply, llm_raw_reply_text=llm_raw_reply_text, final_reply_source="fsm", handoff=False, conversation_state=conversation.get("state", "new"), appointment_created=True, appointment_id=int(cancelled_appointment_id), normalized=build_normalized(conversation), metrics=metrics, decision_path=decision_path + [label or "appointment_cancelled"])
         if is_company_capability_question(message_text):
             capability_reply = build_company_capability_reply(message_text)
             if capability_reply:
