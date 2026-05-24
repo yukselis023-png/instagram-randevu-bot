@@ -40,6 +40,11 @@ TZ = ZoneInfo(TIMEZONE)
 APP_BUILD_VERSION = os.getenv("APP_BUILD_VERSION") or os.getenv("RENDER_GIT_COMMIT") or "local"
 RAW_DATABASE_URL = os.getenv("DATABASE_URL")
 
+# ── Background scheduler state ──
+_followup_scheduler_state: dict[str, Any] = {
+    "status": "initializing", "last_run": None, "last_sent": 0, "last_checked": 0, "last_error": None
+}
+
 def _normalize_database_url(raw: str | None) -> str | None:
     if not raw:
         return None
@@ -1054,15 +1059,22 @@ def on_startup() -> None:
     try:
         import threading as _t
         import time as _m
+        global _followup_scheduler_state
+        _followup_scheduler_state["status"] = "running"
         def _floop():
+            global _followup_scheduler_state
             while True:
                 try:
                     with get_conn() as _c:
                         from app.followup import run_followup_cycle
                         _r = run_followup_cycle(_c, lambda _s,_x: None)
+                        _followup_scheduler_state["last_run"] = datetime.now(TZ).isoformat()
+                        _followup_scheduler_state["last_sent"] = _r.get("sent", 0)
+                        _followup_scheduler_state["last_checked"] = _r.get("checked", 0)
                         if _r.get("sent"):
                             logger.info("followup_cycle sent=%d checked=%d", _r.get("sent"), _r.get("checked"))
                 except Exception as _e:
+                    _followup_scheduler_state["last_error"] = str(_e)
                     logger.debug("followup_cycle_err %s", _e)
                 _m.sleep(3600)
         _t.Thread(target=_floop, daemon=True).start()
@@ -14490,6 +14502,32 @@ def tenant_scrape(slug: str, body: dict[str, Any]):
     return {"ok": True, "config": config, "slug": slug}
 
 
+@app.post("/api/tenants/{slug}/scrape")
+def tenant_scrape_alias(slug: str, body: dict[str, Any] = {}):
+    """Alias for /api/tenant/{slug}/scrape (plural path consistency)."""
+    return tenant_scrape(slug, body)
+
+
+@app.delete("/api/tenants/{slug}")
+def api_delete_tenant(slug: str):
+    """Delete tenant and related data."""
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT id FROM tenants WHERE slug = %s", (slug,))
+                row = cur.fetchone()
+                if not row:
+                    return {"ok": False, "error": "not_found"}
+                tid = row["id"]
+                cur.execute("DELETE FROM conversations WHERE tenant_slug = %s", (slug,))
+                cur.execute("DELETE FROM customers WHERE tenant_slug = %s", (slug,))
+                cur.execute("DELETE FROM appointments WHERE tenant_slug = %s", (slug,))
+                cur.execute("DELETE FROM tenants WHERE id = %s", (tid,))
+        return {"ok": True, "deleted": slug}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
 @app.post("/api/tenants")
 def api_create_tenant(body: dict[str, Any]):
     """Create new tenant (agency/client)."""
@@ -14651,6 +14689,15 @@ def api_run_followup(body: dict[str, Any] = {}):
         with get_conn() as conn:
             result = run_followup_cycle(conn, lambda sid, msg: None, tenant)
         return {"ok": True, "result": result}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+@app.get("/api/followup/status")
+def api_followup_status():
+    """Follow-up scheduler state."""
+    try:
+        return {"ok": True, "scheduler": _followup_scheduler_state}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
 
