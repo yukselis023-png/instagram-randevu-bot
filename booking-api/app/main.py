@@ -5579,8 +5579,11 @@ def extract_inbound_message_id(raw_event: dict[str, Any] | None) -> str | None:
     candidates = [
         raw_event.get("message_id"),
         raw_event.get("mid"),
+        raw_event.get("id"),
         ((raw_event.get("message") or {}).get("mid") if isinstance(raw_event.get("message"), dict) else None),
+        ((raw_event.get("message") or {}).get("id") if isinstance(raw_event.get("message"), dict) else None),
         (((raw_event.get("raw_event") or {}).get("message") or {}).get("mid") if isinstance(raw_event.get("raw_event"), dict) else None),
+        (((raw_event.get("raw_event") or {}).get("message") or {}).get("id") if isinstance(raw_event.get("raw_event"), dict) else None),
     ]
     for value in candidates:
         clean = sanitize_text(str(value or ""))
