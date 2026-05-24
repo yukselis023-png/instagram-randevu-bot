@@ -244,3 +244,49 @@ Re-run against local Docker API:
   - decision path includes `calendar:direct_appointment_created`
 
 Status: PASS.
+
+---
+
+## 2026-05-24 Comprehensive QA continuation
+
+### New hardening commit
+- `36c4a65` — Harden generic booking flow without LLM.
+
+### Issues found during comprehensive tests
+1. `live_smoke_dm_flow.py` expected old `ai_first_v5` engine only.
+   - Updated to accept `generic_core`.
+2. If LLM was unavailable, generic service interest messages such as `Web sitesi actirmak istiyom` could return fallback text.
+   - Added deterministic service-interest reply for fallback/error cases.
+3. Pending preconsultation offer acceptance (`Tamam`) did not always enter deterministic booking collection.
+   - Added pending-offer acceptance → `collect_name` prompt.
+4. After phone collection, slot suggestions were stored in memory but reply could ask generic date/time instead of listing slots.
+   - Added deterministic suggested-slot prompt with `DD.MM.YYYY HH:MM` options.
+5. Full booking payload was briefly intercepted by service-interest fallback.
+   - Guarded service-interest fallback so full booking payloads continue to appointment creation path.
+
+### Validation matrix
+- Syntax: `python -m py_compile app/generic_core.py app/main.py` PASS
+- Extended grouped pytest: `283 passed, 7 skipped, 2 warnings`
+- Full local non-DB pytest: `465 passed, 35 skipped, 2 warnings`
+- Regression guard tests for price/long reply: `2 passed`
+- Local Docker smoke DM flow:
+  - Service interest → preconsultation CTA
+  - `Tamam` → asks name
+  - Name → asks phone
+  - Phone → lists slot options
+  - Slot selection → creates appointment
+  - Cleanup cancel → appointment cancelled
+  - Result: PASS (`appointment_id=195` in local DB)
+- Container DB-backed cancel regression:
+  - `python -m pytest tests/test_live_cancel_regression.py -q`
+  - Result: `1 passed, 2 warnings`
+- TestSprite generated suite: `10 passed, 0 failed`
+- Prod deploy: `/version=36c4a6537732c8999ce073332509ed119b9ed9f7`
+- Prod smoke DM flow:
+  - Endpoint checks `/health`, `/version`, `/api/customers`, `/api/appointments`: PASS
+  - 5-step booking journey: PASS
+  - Appointment created: `id=28`
+  - Cleanup cancellation via API: PASS (`status=cancelled`)
+
+### Final comprehensive status
+PASS. Generic booking flow now remains functional even when LLM/network is unavailable, while existing hallucination/compactness guards and full regression suites remain green.
