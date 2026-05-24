@@ -6846,7 +6846,9 @@ def extract_date(text: str) -> str | None:
         try:
             parsed = date(year, month, day)
             if not year_raw and parsed < today:
-                parsed = date(today.year + 1, month, day)
+                next_year = date(today.year + 1, month, day)
+                if next_year <= today + timedelta(days=APPOINTMENT_LOOKAHEAD_DAYS):
+                    parsed = next_year
             return parsed.isoformat()
         except ValueError:
             pass
@@ -6873,7 +6875,9 @@ def extract_date(text: str) -> str | None:
         try:
             parsed = date(year, month, day)
             if not year_raw and parsed < today:
-                parsed = date(today.year + 1, month, day)
+                next_year = date(today.year + 1, month, day)
+                if next_year <= today + timedelta(days=APPOINTMENT_LOOKAHEAD_DAYS):
+                    parsed = next_year
             return parsed.isoformat()
         except ValueError:
             pass
