@@ -316,3 +316,30 @@ PASS. Generic booking flow now remains functional even when LLM/network is unava
 
 ### Status
 Current deployed production remains stable on `36c4a65`. Additional UX weak spots are documented for a separate guarded implementation pass; no risky regression-prone patch was deployed.
+
+---
+
+## 2026-05-24 Continuation pass 3 — guarded UX hardening
+
+### Change
+- Branch: `hardening-ux-offline`
+- Commit: `5a39a95 Allow explicit available time during generic booking`
+- Merged to `main`: `09fccbc Merge UX offline hardening`
+- Behavior: In `collect_datetime`, if user gives an explicit available time such as `15:00 olur mu?`, the generic FSM now treats the active datetime field as relevant and creates the appointment when date/time/service/name/contact are already complete.
+
+### Validation
+- Focused guard set: `4 passed`
+  - available unsuggested time creates appointment
+  - false confirmation guard variants remain blocked
+  - collect_datetime missing-time confirmation remains blocked
+  - invariant false-confirmation phrases remain blocked
+- Full local non-DB pytest: `465 passed, 35 skipped, 2 warnings`
+- TestSprite generated suite: `10 passed, 0 failed`
+- Local stack smoke DM flow: PASS
+  - appointment `199` created
+  - appointment `199` cleanup cancelled
+
+### Deployment
+- `main` pushed at `09fccbc`.
+- Render `/version` still reports `36c4a65` after polling, so production auto-deploy has not picked up the new merge yet.
+- Current production remains stable at `36c4a65` until Render deploy is manually triggered or auto-deploy resumes.
