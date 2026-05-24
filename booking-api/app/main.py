@@ -14515,26 +14515,27 @@ def tenant_scrape_alias(slug: str, body: dict[str, Any] = {}):
 def api_delete_tenant(slug: str):
     """Delete tenant and related data."""
     try:
-        with get_conn() as conn:
-            try:
-                with conn.cursor() as cur:
-                    cur.execute("SELECT id FROM tenants WHERE slug = %s", (slug,))
-                    row = cur.fetchone()
-                    if not row:
-                        return {"ok": False, "error": "not_found"}
-                    tid = row["id"]
-                    cur.execute("DELETE FROM conversations WHERE tenant_slug = %s", (slug,))
-                    cur.execute("DELETE FROM webchat_sessions WHERE tenant_slug = %s", (slug,))
-                    try:
-                        cur.execute("DELETE FROM customers WHERE tenant_slug = %s", (slug,))
-                    except Exception:
-                        pass
-                    cur.execute("DELETE FROM appointments WHERE tenant_slug = %s", (slug,))
-                    cur.execute("DELETE FROM tenants WHERE id = %s", (tid,))
-                conn.commit()
-            except Exception:
-                conn.rollback()
-                raise
+        conn = get_conn()
+        conn.autocommit = True
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT id FROM tenants WHERE slug = %s", (slug,))
+                row = cur.fetchone()
+                if not row:
+                    return {"ok": False, "error": "not_found"}
+                tid = row["id"]
+                cur.execute("DELETE FROM conversations WHERE tenant_slug = %s", (slug,))
+                cur.execute("DELETE FROM webchat_sessions WHERE tenant_slug = %s", (slug,))
+                try:
+                    cur.execute("DELETE FROM customers WHERE tenant_slug = %s", (slug,))
+                except Exception:
+                    pass
+                cur.execute("DELETE FROM appointments WHERE tenant_slug = %s", (slug,))
+                cur.execute("DELETE FROM tenants WHERE id = %s", (tid,))
+        except Exception:
+            raise
+        finally:
+            conn.close()
         return {"ok": True, "deleted": slug}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
