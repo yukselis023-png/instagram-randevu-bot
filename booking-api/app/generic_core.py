@@ -1525,10 +1525,20 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
             intent = "direct_answer"
             booking_opt_in = False
             deterministic_reply = True
+        elif is_price_question(message_text):
+            price_reply = build_service_price_reply(cfg, known_requested_service(conversation, memory) or detect_requested_service_from_text(message_text, cfg), memory)
+            if price_reply:
+                reply_text = price_reply
+                intent = "direct_answer"
+                booking_opt_in = False
+                decision_path.append("reply:service_price")
+                deterministic_reply = True
         elif (
             (detected_service_for_reply := detect_requested_service_from_text(message_text, cfg))
             and (intent == "fallback" or is_llm_error_reply(reply_text) or metrics.get("llm_error"))
             and not (extract_phone(message_text) and (extract_date(message_text) or extract_time(message_text) or extract_generic_datetime_time(message_text)))
+            and not is_price_question(message_text)
+            and not "?" in message_text
         ):
             reply_text = build_service_interest_reply(cfg, detected_service_for_reply)
             remember_requested_service(conversation, memory, detected_service_for_reply)
@@ -1560,14 +1570,6 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
             booking_opt_in = False
             decision_path.append("reply:preconsultation_explanation")
             deterministic_reply = True
-        elif is_price_question(message_text):
-            price_reply = build_service_price_reply(cfg, known_requested_service(conversation, memory), memory)
-            if price_reply:
-                reply_text = price_reply
-                intent = "direct_answer"
-                booking_opt_in = False
-                decision_path.append("reply:service_price")
-                deterministic_reply = True
         elif is_business_fit_question(message_text):
             reply_text = recommendation_engine(conversation, message_text, recent_history)
             decision_path.append("reply:business_fit")
