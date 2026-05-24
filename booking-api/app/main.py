@@ -1825,7 +1825,7 @@ def mark_appointment_attendance(appointment_id: int, payload: AttendanceUpdateRe
 
 
 @app.patch("/api/appointments/{appointment_id}")
-def update_appointment(appointment_id: str, payload: AppointmentUpdateRequest) -> dict[str, Any]:
+def update_appointment(appointment_id: str, payload: AppointmentUpdateRequest, background_tasks: BackgroundTasks) -> dict[str, Any]:
     try:
         appointment_id_int = int(appointment_id)
     except (TypeError, ValueError):
@@ -1876,6 +1876,20 @@ def update_appointment(appointment_id: str, payload: AppointmentUpdateRequest) -
     row_data = serialize_row(row)
     if payload.note or payload.notes:
         row_data["notes"] = sanitize_text(payload.note or payload.notes)
+    status_value = sanitize_text(row_data.get("status") or "").lower()
+    if status_value in {"cancelled", "canceled"}:
+        sync_conversation = {
+            "instagram_user_id": row_data.get("instagram_user_id"),
+            "instagram_username": row_data.get("instagram_username"),
+            "full_name": row_data.get("full_name"),
+            "phone": row_data.get("phone"),
+            "service": row_data.get("service"),
+            "requested_date": row_data.get("appointment_date"),
+            "requested_time": str(row_data.get("appointment_time") or "")[:5],
+            "appointment_status": "cancelled",
+            "state": "completed",
+        }
+        queue_crm_sync(background_tasks, sync_conversation, appointment_id_int, {"extract_ms": 0, "polish_ms": 0, "crm_ms": 0, "total_ms": 0})
     return {**row_data, "appointment": row_data}
 
 
@@ -13955,7 +13969,43 @@ def sync_conversation_to_crm(
         entity_id = preconsultation_record["id"]
         event_type = "pre_consultation_sync"
 
-        if conversation.get("appointment_status") == "confirmed" and conversation.get("requested_date") and conversation.get("requested_time"):
+        if conversation.get("appointment_status") in {"cancelled", "canceled"} and conversation.get("requested_date") and conversation.get("requested_time"):
+            requested_time = str(conversation.get("requested_time"))[:5]
+            appointment_key = f"booking-{appointment_id}" if appointment_id is not None else f"{conversation.get('instagram_user_id')}-{conversation.get('requested_date')}-{requested_time}"
+            appointment_index = next((index for index, item in enumerate(payload["appointments"]) if item.get("sourceAppointmentId") == appointment_key), -1)
+            if appointment_index < 0:
+                appointment_index = next(
+                    (
+                        index
+                        for index, item in enumerate(payload["appointments"])
+                        if str(item.get("instagramUserId") or "") == str(conversation.get("instagram_user_id") or "")
+                        and item.get("appointmentDate") == conversation.get("requested_date")
+                        and str(item.get("appointmentTime") or "")[:5] == requested_time
+                    ),
+                    -1,
+                )
+            if appointment_index >= 0:
+                existing_appointment = payload["appointments"][appointment_index]
+                appointment_record = {
+                    **existing_appointment,
+                    "status": "cancelled",
+                    "updatedAt": now_iso,
+                    "lastConversationAt": observed_at,
+                }
+                payload["appointments"][appointment_index] = appointment_record
+                entity_type = "appointment"
+                entity_id = appointment_record.get("id") or customer_id
+                event_type = "appointment_cancelled_sync"
+                appointment_source_id = appointment_record.get("sourceAppointmentId") or appointment_key
+                task_key = f"task-{appointment_source_id}"
+                task_index = next((index for index, item in enumerate(payload["tasks"]) if item.get("sourceAppointmentId") == appointment_source_id or item.get("id") == task_key), -1)
+                if task_index >= 0:
+                    payload["tasks"][task_index] = {**payload["tasks"][task_index], "status": "cancelled"}
+                if preconsultation_record:
+                    preconsultation_record = {**preconsultation_record, "status": "cancelled", "updatedAt": now_iso, "lastConversationAt": observed_at}
+                    if preconsultation_index >= 0:
+                        payload["preConsultations"][preconsultation_index] = preconsultation_record
+        elif conversation.get("appointment_status") == "confirmed" and conversation.get("requested_date") and conversation.get("requested_time"):
             requested_time = str(conversation.get("requested_time"))[:5]
             appointment_key = f"booking-{appointment_id}" if appointment_id is not None else f"{conversation.get('instagram_user_id')}-{conversation.get('requested_date')}-{requested_time}"
             appointment_index = next((index for index, item in enumerate(payload["appointments"]) if item.get("sourceAppointmentId") == appointment_key), -1)
@@ -14103,7 +14153,9 @@ def sync_conversation_to_crm(
         else:
             bindings.insert(0, binding_record)
 
-        if event_type == "appointment_followup_sync":
+        if event_type == "appointment_cancelled_sync":
+            sync_summary = f"{source_account} hesabındaki {display_name} randevusu iptal edildi ve CRM'e işlendi."
+        elif event_type == "appointment_followup_sync":
             sync_summary = f"{source_account} hesabındaki {display_name} randevusu follow-up sonrası tekrar doğrulandı."
         elif event_type == "appointment_confirmed_sync":
             sync_summary = f"{source_account} hesabından {display_name} ön görüşmesi randevuya dönüştürülüp CRM'e işlendi."

@@ -592,7 +592,30 @@ def build_service_interest_reply(cfg: dict[str, Any], service_label: str | None)
     return f"{label} konusunda yardımcı olabiliriz. {summary}{delivery_text} İsterseniz 10 dakikalık bir ön görüşme için uygun saatleri paylaşabilirim."
 
 def build_service_price_reply(cfg: dict[str, Any], service_label: str | None, memory: dict[str, Any]) -> str | None:
-    return None
+    service = find_service_config(cfg, service_label) if service_label else None
+    if service:
+        label = sanitize_text(service.get("display") or service_label or "bu hizmet")
+        price = sanitize_text(service.get("price") or service.get("pricing") or service.get("starting_price") or "")
+        delivery = sanitize_text(service.get("delivery_time") or "")
+        summary = sanitize_text(service.get("summary") or service.get("fit_description") or "")
+        parts = [f"{label} için fiyatlandırma"]
+        if price:
+            parts.append(f"genellikle {price} aralığından başlar")
+        else:
+            parts.append("ihtiyaç kapsamına göre netleşir")
+        if delivery:
+            parts.append(f"ortalama teslim süresi {delivery}")
+        if summary:
+            parts.append(summary)
+        return ". ".join(parts).strip() + ". İsterseniz 10 dakikalık ön görüşmede kapsamı netleştirelim."
+
+    remembered = sanitize_text(memory.get("requested_service") or memory.get("selected_service") or memory.get("service_interest") or "")
+    if remembered:
+        service = find_service_config(cfg, remembered)
+        if service:
+            return build_service_price_reply(cfg, sanitize_text(service.get("display") or remembered), {})
+
+    return "Fiyat kapsam, entegrasyon ve teslim süresine göre değişir. İhtiyacınızı 10 dakikalık ön görüşmede netleştirip size uygun aralığı paylaşabiliriz."
 
 
 def build_preconsultation_explanation_reply(service_label: str | None) -> str:
