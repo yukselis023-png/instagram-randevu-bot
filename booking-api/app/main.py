@@ -2567,6 +2567,49 @@ def preview_campaign_audience(
     return {"template_slug": template_slug, "count": len(rows), "customers": rows}
 
 
+# ── Channel post-processing helper (must be defined before route that uses it) ──────
+def _channel_post_process(
+    message_text: str,
+    sender: str | None,
+    result: Any,
+    tenant_slug: str | None = None,
+    channel: str = "instagram_dm",
+    customer_phone: str | None = None,
+):
+    """Apply scoring + handoff post-processing.
+    Shared across Instagram DM, WhatsApp, and WebChat.
+    Returns modified result if handoff triggered.
+    """
+    if not sender or sender.startswith("test_") or sender.startswith("final100"):
+        return result
+    try:
+        from app.handoff import is_handoff_request, send_telegram_handoff, build_handoff_reply
+        if is_handoff_request(message_text):
+            with get_conn() as conn:
+                tenant = resolve_tenant(conn, tenant_slug)
+            handoff_reply = build_handoff_reply(tenant)
+            # Apply to both object (ProcessResult) and dict results
+            if hasattr(result, "reply_text"):
+                result.reply_text = handoff_reply
+                result.handoff = True
+            elif isinstance(result, dict):
+                result["reply_text"] = handoff_reply
+                result["handoff"] = True
+            try:
+                send_telegram_handoff(
+                    tenant_name=tenant.get("brand_name", ""),
+                    customer_name=sender,
+                    customer_phone=customer_phone,
+                    channel=channel,
+                    summary=message_text[:200],
+                )
+            except Exception:
+                pass
+    except Exception as exc:
+        logger.debug("channel_post_process_skip %s", exc)
+    return result
+
+
 @app.post("/api/process-instagram-message", response_model=ProcessResult)
 def process_instagram_message(payload: IncomingMessage, background_tasks: BackgroundTasks) -> ProcessResult:
     import os
@@ -2574,31 +2617,12 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
         from app.generic_core import process_instagram_message_generic
         result = process_instagram_message_generic(payload, background_tasks)
         # ── Post-processing: scoring + handoff ──
-        try:
-            if result and result.should_reply and result.reply_text:
-                sender = payload.sender_id
-                if sender and not sender.startswith("test_") and not sender.startswith("final100"):
-                    from app.scoring import score_conversation_start
-                    from app.handoff import is_handoff_request, send_telegram_handoff, build_handoff_reply
-                    message_text = payload.message_text or ""
-                    if is_handoff_request(message_text):
-                        tenant = resolve_tenant(get_conn() if DATABASE_URL else None, get_tenant_from_header(dict(payload.raw_event or {})))
-                        handoff_reply = build_handoff_reply(tenant)
-                        result.reply_text = handoff_reply
-                        result.handoff = True
-                        # Fire Telegram notification async
-                        try:
-                            send_telegram_handoff(
-                                tenant_name=tenant.get("brand_name", ""),
-                                customer_name=sender,
-                                customer_phone=None,
-                                channel="instagram_dm",
-                                summary=message_text[:200],
-                            )
-                        except Exception:
-                            pass
-        except Exception as exc:
-            logger.debug("post_process_skip %s", exc)
+        _channel_post_process(
+            message_text=payload.message_text or "",
+            sender=payload.sender_id,
+            result=result,
+            channel="instagram_dm",
+        )
         return result
 
     request_started_at = time_module.perf_counter()
@@ -14550,6 +14574,15 @@ def api_whatsapp_webhook(body: dict[str, Any], background_tasks: BackgroundTasks
     """WhatsApp inbound webhook (Meta)."""
     from app.generic_core import process_instagram_message_generic
     results = handle_whatsapp_inbound(body, process_instagram_message_generic, background_tasks)
+    # Post-process: handoff detection (reply already sent inside handle_whatsapp_inbound)
+    for r in results:
+        if r.get("processed"):
+            try:
+                msg_body = body.get("entry", [{}])[0].get("changes", [{}])[0].get("value", {}).get("messages", [{}])[0].get("text", {}).get("body", "")
+                if msg_body and r.get("sender"):
+                    _channel_post_process(msg_body, r["sender"], {}, channel="whatsapp")
+            except Exception:
+                pass
     return {"ok": True, "results": results}
 
 
@@ -14586,6 +14619,17 @@ def api_webchat_message(body: dict[str, Any], background_tasks: BackgroundTasks)
     if not text:
         return {"ok": False, "error": "message required"}
     result = handle_webchat_message(session_id, tenant_slug, text, process_instagram_message_generic, background_tasks, name, phone)
+    # Post-process: scoring + handoff
+    if isinstance(result, dict):
+        sender = result.get("session_id", "")
+        _channel_post_process(
+            message_text=text,
+            sender=sender,
+            result=result,
+            tenant_slug=tenant_slug,
+            channel="webchat",
+            customer_phone=phone,
+        )
     return {"ok": True, "result": result}
 
 
