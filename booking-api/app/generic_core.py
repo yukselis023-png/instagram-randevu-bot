@@ -25,7 +25,7 @@ from app.main import (
     detect_customer_subsector, customer_sector_for_subsector, normalize_date_string, normalize_time_string,
     validate_slot, find_existing_appointment, suggest_alternatives, format_human_date, get_booking_label, TZ,
     collect_next_booking_slot_options, format_booking_slot_option, remember_booking_slot_options,
-    normalize_booking_slot_option
+    normalize_booking_slot_option, display_service_name
 )
 
 logger = logging.getLogger(__name__)
@@ -583,6 +583,14 @@ def find_service_config(cfg: dict[str, Any], service_label: str | None, memory: 
     return None
 
 
+def build_service_interest_reply(cfg: dict[str, Any], service_label: str | None) -> str:
+    service = find_service_config(cfg, service_label)
+    label = sanitize_text((service or {}).get("display") or service_label or "bu hizmet")
+    summary = sanitize_text((service or {}).get("summary") or (service or {}).get("fit_description") or "İhtiyacınıza göre kısa bir ön görüşmede en uygun yapıyı netleştirebiliriz.")
+    delivery = sanitize_text((service or {}).get("delivery_time") or "")
+    delivery_text = f" Ortalama teslim süresi {delivery}." if delivery else ""
+    return f"{label} konusunda yardımcı olabiliriz. {summary}{delivery_text} İsterseniz 10 dakikalık bir ön görüşme için uygun saatleri paylaşabilirim."
+
 def build_service_price_reply(cfg: dict[str, Any], service_label: str | None, memory: dict[str, Any]) -> str | None:
     return None
 
@@ -919,6 +927,13 @@ def strip_leading_greeting_for_non_greeting(message_text: str, reply_text: str |
 
 
 def build_service_carryover_booking_reply(service_label: str | None, state: str | None) -> str | None:
+    label = display_service_name(service_label) if service_label else "bu hizmet"
+    if state == "collect_name":
+        return f"Tabii, {label} için 10 dakikalık ön görüşme ayarlayabiliriz. Ad soyadınızı paylaşır mısınız?"
+    if state == "collect_phone":
+        return "Teşekkürler. Ön görüşme için telefon numaranızı paylaşır mısınız?"
+    if state in {"collect_datetime", "collect_date", "collect_time", "collect_period"}:
+        return "Uygun seçenekleri kontrol edebilmem için tercih ettiğiniz gün ve saati yazar mısınız?"
     return None
 
 
@@ -1241,7 +1256,22 @@ def handle_confirmed_generic_reschedule(
 
 
 def build_active_booking_prompt_reply(conversation: dict[str, Any], memory: dict[str, Any]) -> str | None:
-    return None
+    service = known_requested_service(conversation, memory)
+    state = conversation.get("state")
+    if state in {"collect_datetime", "collect_date", "collect_time", "collect_period"}:
+        slots = memory.get("suggested_booking_slots") or []
+        if isinstance(slots, list) and slots:
+            parts = []
+            for slot in slots[:3]:
+                if isinstance(slot, dict) and slot.get("date") and slot.get("time"):
+                    try:
+                        dt = datetime.datetime.strptime(str(slot["date"]), "%Y-%m-%d")
+                        parts.append(f"{dt.strftime('%d.%m.%Y')} {slot['time']}")
+                    except Exception:
+                        parts.append(f"{slot.get('date')} {slot.get('time')}")
+            if parts:
+                return f"Uygun seçenekler: {', '.join(parts)}. Hangisi uygun olur?"
+    return build_service_carryover_booking_reply(service, state)
 
 
 def is_appointment_confirmation_like_reply(reply: str) -> bool:
@@ -1495,6 +1525,18 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
             intent = "direct_answer"
             booking_opt_in = False
             deterministic_reply = True
+        elif (
+            (detected_service_for_reply := detect_requested_service_from_text(message_text, cfg))
+            and (intent == "fallback" or is_llm_error_reply(reply_text) or metrics.get("llm_error"))
+            and not (extract_phone(message_text) and (extract_date(message_text) or extract_time(message_text) or extract_generic_datetime_time(message_text)))
+        ):
+            reply_text = build_service_interest_reply(cfg, detected_service_for_reply)
+            remember_requested_service(conversation, memory, detected_service_for_reply)
+            intent = "direct_answer"
+            booking_opt_in = False
+            final_reply_source = "config_formatter"
+            decision_path.append("reply:service_interest_config")
+            deterministic_reply = True
         elif is_service_overview_question(message_text, intent):
             service_overview_rejection = generic_llm_reply_rejection_reason(reply_text)
             if intent == "fallback":
@@ -1644,6 +1686,20 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
             decision_path.append("fsm:active_direct_clarification")
         elif suppress_active_field_updates:
             decision_path.append("fsm:state_irrelevant_skipped")
+        if (
+            is_collect_name_continue_signal(message_text)
+            and memory.get("pending_offer") == "preconsultation_offer"
+            and memory.get("offer_status") in {"offered", "none", None}
+            and not conversation.get("full_name")
+        ):
+            memory["offer_status"] = "accepted"
+            memory["open_loop"] = "collect_name"
+            conversation["state"] = "collect_name"
+            conversation["appointment_status"] = "collecting"
+            reply_text = build_service_carryover_booking_reply(known_requested_service(conversation, memory), "collect_name") or reply_text
+            final_reply_source = "fsm"
+            decision_path.append("fsm:pending_offer_accepted_collect_name")
+            deterministic_reply = True
         username_save_requested = is_username_save_request(message_text)
         username_label = instagram_username_name_label(payload.instagram_username)
         if username_save_requested:
@@ -1903,9 +1959,21 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
             and service_for_booking
             and conversation.get("state") in {"collect_name", "collect_phone"}
         ):
-            decision_path.append("fsm:service_carryover_deferred_to_llm")
+            prompt = build_service_carryover_booking_reply(service_for_booking, conversation.get("state"))
+            if prompt and is_llm_error_reply(reply_text):
+                reply_text = prompt
+                final_reply_source = "fsm"
+                decision_path.append("fsm:service_carryover_prompt")
+            else:
+                decision_path.append("fsm:service_carryover_deferred_to_llm")
         elif (curr_state.startswith("collect_") and active_state_is_relevant and not active_direct_clarification and (is_llm_error_reply(reply_text) or state_changed_by_fsm or invalid_phone_prompt or active_state_label in {"name_ack", "username_save"})):
-            decision_path.append("fsm:active_booking_prompt_deferred_to_llm")
+            prompt = build_active_booking_prompt_reply(conversation, memory)
+            if prompt:
+                reply_text = prompt
+                final_reply_source = "fsm"
+                decision_path.append("fsm:active_booking_prompt")
+            else:
+                decision_path.append("fsm:active_booking_prompt_deferred_to_llm")
 
         if active_direct_clarification and (is_llm_error_reply(reply_text) or is_booking_field_collection_reply(reply_text)):
             intent = "direct_answer"

@@ -84,7 +84,7 @@ def run_smoke(base_url: str, *, prefix: str, timeout: int, pause: float) -> dict
         result = post_message(base_url, sender, username, message, index, timeout)
         reply = result.get("reply_text") or ""
         metrics = result.get("metrics") or {}
-        if metrics.get("reply_engine") != "ai_first_v5":
+        if metrics.get("reply_engine") not in {"ai_first_v5", "generic_core"}:
             raise AssertionError(f"unexpected reply_engine at step {index}: {metrics.get('reply_engine')!r}")
         compact = {
             "message": message,
@@ -119,7 +119,7 @@ def run_smoke(base_url: str, *, prefix: str, timeout: int, pause: float) -> dict
     selected_slot = f"{slot_match.group(1)} {slot_match.group(2)}"
     result = post_message(base_url, sender, username, selected_slot, len(messages) + 1, timeout)
     metrics = result.get("metrics") or {}
-    if metrics.get("reply_engine") != "ai_first_v5":
+    if metrics.get("reply_engine") not in {"ai_first_v5", "generic_core"}:
         raise AssertionError(f"unexpected reply_engine at slot selection: {metrics.get('reply_engine')!r}")
     compact = {
         "message": selected_slot,
