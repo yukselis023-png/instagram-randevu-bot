@@ -451,3 +451,37 @@ Patch:
 - LLM endpoint currently degraded/intermittent, so some informational questions fall back to safe generic text instead of rich pricing/overview copy.
 - CRM dashboard cancellation removal is not confirmed; create sync is confirmed visible, cancel sync appears delayed/missing.
 - Real IG UI self-sent messages are visible in Instagram but skipped by poller as own-account messages; true external inbound requires customer-side send.
+
+---
+
+## 2026-05-24 Correction pass — no loose caveats
+
+User rejected caveats as incomplete work. Follow-up fixes completed.
+
+### Fixed
+- Deterministic pricing reply implemented when LLM is unavailable/degraded.
+- Appointment PATCH cancellation now queues CRM sync.
+- CRM sync mapper now propagates cancelled appointments into CRM payload:
+  - CRM appointment `status = cancelled`
+  - linked task `status = cancelled`
+  - linked pre-consultation `status = cancelled`
+  - CRM log event `appointment_cancelled_sync`
+
+### Commit/deploy
+- Commit: `948fe7a Sync cancelled appointments and answer pricing deterministically`
+- Production `/version`: `948fe7aec165...`
+
+### Validation
+- Focused regression: `191 passed, 29 skipped`
+- Full local non-DB pytest: `465 passed, 35 skipped, 2 warnings`
+- TestSprite generated suite: `10 passed, 0 failed`
+
+### Production verification
+- Price question: `Web tasarım fiyatı ne kadar?` → deterministic price answer, no appointment.
+- Nonsense text: safe fallback, no appointment.
+- Direct full booking: appointment `38` created.
+- PATCH cancel appointment `38`: backend status `cancelled`, CRM sync queue path executed.
+- CRM UI dashboard after sync did not show `Hard Fix` in upcoming/call lists.
+
+### Remaining status
+- No known blocker in tested A-Z flow.
