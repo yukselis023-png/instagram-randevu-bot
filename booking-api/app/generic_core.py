@@ -1199,11 +1199,11 @@ def handle_confirmed_generic_reschedule(
         return None
     if is_explicit_cancel_request(message_text):
         try:
-            cancelled, reply, label = try_cancel_confirmed_appointment(conn, conversation, message_text)
+            cancelled, reply, label, cancelled_appointment_id = try_cancel_confirmed_appointment(conn, conversation, message_text)
         except Exception:
-            cancelled, reply, label = False, "", None
+            cancelled, reply, label, cancelled_appointment_id = False, "", None, None
         if cancelled:
-            return {"handled": True, "reply_text": reply, "handoff": False, "appointment_id": existing_id, "decision_label": label or "appointment_cancelled"}
+            return {"handled": True, "reply_text": reply, "handoff": False, "appointment_id": cancelled_appointment_id or existing_id, "appointment_changed": True, "decision_label": label or "appointment_cancelled"}
         return {
             "handled": True,
             "reply_text": reply or "Randevu iptal talebinizi aldım; kaydı iptal ederken sorun yaşadım, ekibe iletiyorum.",
@@ -1651,7 +1651,7 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
                 final_reply_source=final_reply_source,
                 handoff=handoff,
                 conversation_state=conversation.get("state", "new"),
-                appointment_created=False,
+                appointment_created=bool(post_confirmation.get("appointment_changed")),
                 appointment_id=post_confirmation.get("appointment_id"),
                 normalized=build_normalized(conversation),
                 metrics=metrics,
