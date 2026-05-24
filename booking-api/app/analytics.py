@@ -22,61 +22,74 @@ def aggregate_tenant_stats(conn: Any) -> dict[str, Any]:
     try:
         with conn.cursor() as cur:
             # ── Per-tenant conversation stats ──
-            cur.execute("""
-                SELECT
-                    tenant_slug,
-                    COUNT(*) AS total_convos,
-                    COUNT(*) FILTER (WHERE state NOT IN ('new', 'ignored', 'completed')) AS active,
-                    COUNT(*) FILTER (WHERE state = 'completed') AS completed,
-                    COUNT(*) FILTER (WHERE assigned_human = TRUE) AS handoffs
-                FROM conversations
-                GROUP BY tenant_slug
-                ORDER BY tenant_slug
-            """)
-            conv_rows = cur.fetchall()
+            try:
+                cur.execute("""
+                    SELECT
+                        COALESCE(tenant_slug, 'default') AS tenant_slug,
+                        COUNT(*) AS total_convos,
+                        COUNT(*) FILTER (WHERE state NOT IN ('new', 'ignored', 'completed')) AS active,
+                        COUNT(*) FILTER (WHERE state = 'completed') AS completed,
+                        COUNT(*) FILTER (WHERE assigned_human = TRUE) AS handoffs
+                    FROM conversations
+                    GROUP BY tenant_slug
+                    ORDER BY tenant_slug
+                """)
+                conv_rows = cur.fetchall()
+            except Exception:
+                conv_rows = []
 
             # ── Appointment stats ──
-            cur.execute("""
-                SELECT
-                    tenant_slug,
-                    COUNT(*) AS total_appts,
-                    COUNT(*) FILTER (WHERE status IN ('scheduled', 'confirmed')) AS upcoming,
-                    COUNT(*) FILTER (WHERE status = 'completed') AS completed,
-                    COUNT(*) FILTER (WHERE status = 'cancelled') AS cancelled,
-                    COUNT(*) FILTER (WHERE status = 'no_show') AS no_show
-                FROM appointments
-                GROUP BY tenant_slug
-                ORDER BY tenant_slug
-            """)
-            apt_rows = cur.fetchall()
-            apt_map = {r["tenant_slug"]: r for r in apt_rows}
+            try:
+                cur.execute("""
+                    SELECT
+                        COALESCE(tenant_slug, 'doel') AS tenant_slug,
+                        COUNT(*) AS total_appts,
+                        COUNT(*) FILTER (WHERE status IN ('scheduled', 'confirmed')) AS upcoming,
+                        COUNT(*) FILTER (WHERE status = 'completed') AS completed,
+                        COUNT(*) FILTER (WHERE status = 'cancelled') AS cancelled,
+                        COUNT(*) FILTER (WHERE status = 'no_show') AS no_show
+                    FROM appointments
+                    GROUP BY tenant_slug
+                    ORDER BY tenant_slug
+                """)
+                apt_rows = cur.fetchall()
+                apt_map = {r["tenant_slug"]: r for r in apt_rows}
+            except Exception:
+                apt_rows = []; apt_map = {}
 
             # ── Lead score stats (from customers) ──
-            cur.execute("""
-                SELECT
-                    tenant_slug,
-                    COUNT(*) AS total,
-                    AVG(lead_score)::numeric(5,1) AS avg_score,
-                    COUNT(*) FILTER (WHERE lead_score >= 70) AS hot,
-                    COUNT(*) FILTER (WHERE lead_score >= 40 AND lead_score < 70) AS warm,
-                    COUNT(*) FILTER (WHERE lead_score < 40) AS cold
-                FROM customers
-                WHERE lead_score IS NOT NULL
-                GROUP BY tenant_slug
-                ORDER BY tenant_slug
-            """)
-            score_rows = cur.fetchall()
-            score_map = {r["tenant_slug"]: r for r in score_rows}
+            # Use COALESCE for backward compat with customers lacking tenant_slug
+            try:
+                cur.execute("""
+                    SELECT
+                        COALESCE(tenant_slug, 'default') AS tenant_slug,
+                        COUNT(*) AS total,
+                        AVG(lead_score)::numeric(5,1) AS avg_score,
+                        COUNT(*) FILTER (WHERE lead_score >= 70) AS hot,
+                        COUNT(*) FILTER (WHERE lead_score >= 40 AND lead_score < 70) AS warm,
+                        COUNT(*) FILTER (WHERE lead_score < 40) AS cold
+                    FROM customers
+                    WHERE lead_score IS NOT NULL
+                    GROUP BY tenant_slug
+                    ORDER BY tenant_slug
+                """)
+                score_rows = cur.fetchall()
+                score_map = {r["tenant_slug"]: r for r in score_rows}
+            except Exception:
+                score_map = {}
 
             # ── Channel breakdown ──
-            cur.execute("""
-                SELECT tenant_slug, platform, COUNT(*) AS msg_count
-                FROM message_logs
-                WHERE created_at > NOW() - INTERVAL '30 days'
-                GROUP BY tenant_slug, platform
-                ORDER BY tenant_slug, platform
-            """)
-            channel_rows = cur.fetchall()
+            try:
+                cur.execute("""
+                    SELECT COALESCE(tenant_slug, 'default') AS tenant_slug, platform, COUNT(*) AS msg_count
+                    FROM message_logs
+                    WHERE created_at > NOW() - INTERVAL '30 days'
+                    GROUP BY tenant_slug, platform
+                    ORDER BY tenant_slug, platform
+                """)
+                channel_rows = cur.fetchall()
+            except Exception:
+                channel_rows = []
 
             # ── Build per-tenant stats ──
             tenants: dict[str, dict] = {}
@@ -148,28 +161,34 @@ def aggregate_time_series(conn: Any, days: int = 30) -> dict[str, Any]:
         return {"ok": False, "error": "no_db"}
     try:
         with conn.cursor() as cur:
-            cur.execute("""
-                SELECT
-                    DATE(created_at) as dt,
-                    COUNT(*) AS total,
-                    COUNT(*) FILTER (WHERE status IN ('scheduled', 'confirmed')) AS booked
-                FROM appointments
-                WHERE created_at > NOW() - INTERVAL '%s days'
-                GROUP BY dt
-                ORDER BY dt
-            """, (days,))
-            appointments = [{"date": str(r["dt"]), "total": r["total"], "booked": r["booked"]} for r in cur.fetchall()]
+            try:
+                cur.execute("""
+                    SELECT
+                        DATE(created_at) as dt,
+                        COUNT(*) AS total,
+                        COUNT(*) FILTER (WHERE status IN ('scheduled', 'confirmed')) AS booked
+                    FROM appointments
+                    WHERE created_at > NOW() - INTERVAL '%s days'
+                    GROUP BY dt
+                    ORDER BY dt
+                """, (days,))
+                appointments = [{"date": str(r["dt"]), "total": r["total"], "booked": r["booked"]} for r in cur.fetchall()]
+            except Exception:
+                appointments = []
 
-            cur.execute("""
-                SELECT
-                    DATE(created_at) as dt,
-                    COUNT(*) AS total
-                FROM message_logs
-                WHERE created_at > NOW() - INTERVAL '%s days'
-                GROUP BY dt
-                ORDER BY dt
-            """, (days,))
-            messages = [{"date": str(r["dt"]), "total": r["total"]} for r in cur.fetchall()]
+            try:
+                cur.execute("""
+                    SELECT
+                        DATE(created_at) as dt,
+                        COUNT(*) AS total
+                    FROM message_logs
+                    WHERE created_at > NOW() - INTERVAL '%s days'
+                    GROUP BY dt
+                    ORDER BY dt
+                """, (days,))
+                messages = [{"date": str(r["dt"]), "total": r["total"]} for r in cur.fetchall()]
+            except Exception:
+                messages = []
 
             return {
                 "ok": True,
