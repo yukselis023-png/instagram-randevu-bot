@@ -40,17 +40,25 @@ Deploy sonrası tüm platform endpoint'leri hazır:
 | `GET /api/tenants` | Tenant listesi |
 | `GET /api/tenants/{slug}` | Tenant detay (config dahil) |
 | `POST /api/tenants` | Yeni tenant oluştur |
+| `DELETE /api/tenants/{slug}` | Tenant sil (konuşma/randevu/müşteri verisiyle) |
 | `PATCH /api/tenants/{slug}/config` | Tenant güncelle (kanal/aksiyon/config) |
+| `PATCH /api/tenants/{slug}/channel/whatsapp` | Per-tenant WhatsApp token/phone_id ata |
 | `POST /api/tenant/{slug}/scrape` | URL → AI ile otomatik config çıkar |
-| `POST /api/channel/webchat` | Web Chat mesaj gönder/al |
+| `POST /api/tenants/{slug}/scrape` | Scrape alias (plural path) |
+| `POST /api/channel/webchat` | Web Chat mesaj gönder/al (PG persisted) |
 | `GET /api/channel/webchat/session/{id}` | Web Chat geçmişi |
 | `GET /api/channel/whatsapp` | WhatsApp webhook verify |
 | `POST /api/channel/whatsapp` | WhatsApp inbound mesaj |
 | `POST /api/followup/run` | Otomatik follow-up tetikle |
+| `GET /api/followup/status` | Follow-up scheduler durumu |
 | `POST /api/handoff/notify` | İnsan devralma bildirimi |
+| `GET /api/analytics` | Per-tenant analytics + time series |
 | `GET /webchat/widget.js` | Embed widget JS |
 | `GET /health` | Servis sağlık |
 | `GET /version` | Commit hash + deploy zamanı |
+| `GET /api/llm-health` | LLM sağlık/bilgi |
+
+**WebChat Sessions artık PostgreSQL'de** (in-memory değil — restart dayanıklı).
 
 ## 5. Web Chat Widget
 Siteye ekle:
