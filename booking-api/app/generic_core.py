@@ -2286,8 +2286,14 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
             return duplicate_process_result(payload, conversation, metrics, "duplicate_outbound_trace_ignored", request_started_at)
         save_message_log(conn, payload.sender_id, "out", reply_text, build_outbound_raw_event(decision_path, trace_id, inbound_dedupe_key, inbound_platform, inbound_message_id))
 
+        final_appointment_id = appointment_id
+        final_appointment_changed = appointment_created
+        if conversation.get("appointment_status") in {"cancelled", "canceled"}:
+            memory = ensure_conversation_memory(conversation)
+            final_appointment_id = final_appointment_id or memory.get("cancelled_appointment_id") or conversation.get("appointment_id")
+            final_appointment_changed = bool(final_appointment_id)
         metrics["total_ms"] = elapsed_ms(request_started_at)
-        queue_crm_sync(background_tasks, conversation, None, metrics)
+        queue_crm_sync(background_tasks, conversation, int(final_appointment_id) if final_appointment_id else None, metrics)
 
         return ProcessResult(
             sender_id=payload.sender_id,
@@ -2298,8 +2304,8 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
             final_reply_source=final_reply_source,
             handoff=handoff,
             conversation_state=conversation.get("state", "new"),
-            appointment_created=appointment_created,
-            appointment_id=appointment_id,
+            appointment_created=final_appointment_changed,
+            appointment_id=int(final_appointment_id) if final_appointment_id else None,
             normalized=build_normalized(conversation),
             metrics=metrics,
             decision_path=decision_path,
