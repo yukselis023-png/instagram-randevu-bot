@@ -170,3 +170,41 @@ Full path status: Instagram DM → Poller → Prod API → Appointment → Custo
 
 ### Final status
 PASS. Instagram DM → prod API → appointment state mutations → CRM-facing sync path validated. Remaining items are cosmetic only; no known DB integrity blocker.
+
+---
+
+## 2026-05-24 Extended TestSprite/local regression
+
+### New fix
+- `6210337` — Accept raw event `id` as inbound message id for dedupe.
+- Reason: TestSprite/local synthetic payloads used `raw_event.id` instead of `message_id`/`mid`; duplicate detection did not classify the second identical payload as duplicate.
+
+### Local Docker TestSprite generated suite
+Command: run `testsprite_tests/TC*.py` against `http://localhost:18000`.
+
+Result:
+- `TC001` health: PASS
+- `TC002` valid + duplicate message: PASS
+- `TC003` customer detail/404: PASS
+- `TC004` appointment patch: PASS
+- `TC005` appointment attendance: PASS
+- `TC006` automation claim: PASS
+- `TC007` automation mark: PASS
+- `TC008` campaigns list: PASS
+- `TC009` campaign create: PASS
+- `TC010` LLM health: PASS
+
+Summary: `10 passed, 0 failed`.
+
+### Focused pytest regression
+Command: `PYTHONPATH=. python -m pytest tests/test_generic_core_engine.py tests/test_conversation_regressions.py -q`
+
+Result: `182 passed, 28 skipped, 2 warnings`.
+
+### Prod deploy/probe
+- Prod `/version`: `62103379e805d0ba50c99ef30fc4acaa9c951f26`
+- Fresh `raw_event.id` duplicate probe:
+  - First request: `duplicate=false`, `should_reply=true`
+  - Second identical request: `duplicate=true`, `should_reply=false`, decision path `duplicate_ignored`
+
+Status: PASS.
