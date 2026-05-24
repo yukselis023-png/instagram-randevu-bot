@@ -33,6 +33,7 @@ from app.scoring import score_conversation, format_score_for_crm
 from app.actions import detect_action_intent, route_to_action, is_action_enabled
 from app.handoff import is_handoff_request, send_telegram_handoff, build_handoff_reply
 from app.followup import run_followup_cycle
+from app.analytics import aggregate_tenant_stats, aggregate_time_series
 
 TIMEZONE = os.getenv("TIMEZONE", "Europe/Istanbul")
 TZ = ZoneInfo(TIMEZONE)
@@ -14666,6 +14667,18 @@ def api_handoff_notify(body: dict[str, Any]):
         conversation_url=body.get("url"),
     )
     return {"ok": sent, "notified": sent}
+
+
+@app.get("/api/analytics")
+def api_analytics(days: int = 30):
+    """AI Agent analytics: stats per tenant + time series."""
+    try:
+        with get_conn() as conn:
+            stats = aggregate_tenant_stats(conn)
+            ts = aggregate_time_series(conn, days)
+        return {"ok": True, "stats": stats.get("platform", {}), "per_tenant": stats.get("per_tenant", {}), "time_series": ts}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
 
 
 @app.get("/api/platform/status")
