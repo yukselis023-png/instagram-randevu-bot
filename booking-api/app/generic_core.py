@@ -173,7 +173,10 @@ def is_booking_opt_in(message_text: str, intent: str | None) -> bool:
     if is_preconsultation_explanation_question(message_text):
         return False
     lowered = sanitize_text(message_text or "").lower()
-    return intent == "booking_request" or any(phrase in lowered for phrase in BOOKING_OPT_IN_PHRASES)
+    booking_terms = ("randevu", "ön görüşme", "on gorusme", "görüşme", "gorusme")
+    booking_actions = ("istiyorum", "almak", "alabilir", "ayarla", "planla", "uygun mu", "müsait mi", "musait mi")
+    direct_booking = any(term in lowered for term in booking_terms) and any(action in lowered for action in booking_actions)
+    return intent == "booking_request" or direct_booking or any(phrase in lowered for phrase in BOOKING_OPT_IN_PHRASES)
 
 
 def clear_stale_active_booking_state(conversation: dict[str, Any], memory: dict[str, Any], conn: Any | None = None) -> None:
