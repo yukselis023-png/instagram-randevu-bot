@@ -73,14 +73,17 @@ def _extract_text(msg: dict[str, Any]) -> str:
 
 # ── Send WhatsApp message ──────────────────────────────────────────
 
-def send_whatsapp_message(to: str, text: str) -> bool:
-    """Send text message via WhatsApp Cloud API."""
-    if not WHATSAPP_TOKEN or not WHATSAPP_PHONE_ID:
+def send_whatsapp_message(to: str, text: str, token: str | None = None, phone_id: str | None = None) -> bool:
+    """Send text message via WhatsApp Cloud API.
+    Supports per-tenant credentials; falls back to env vars."""
+    _token = token or WHATSAPP_TOKEN
+    _phone_id = phone_id or WHATSAPP_PHONE_ID
+    if not _token or not _phone_id:
         logger.warning("whatsapp_not_configured")
         return False
-    url = f"{WHATSAPP_BASE}/{WHATSAPP_API_VERSION}/{WHATSAPP_PHONE_ID}/messages"
+    url = f"{WHATSAPP_BASE}/{WHATSAPP_API_VERSION}/{_phone_id}/messages"
     headers = {
-        "Authorization": f"Bearer {WHATSAPP_TOKEN}",
+        "Authorization": f"Bearer {_token}",
         "Content-Type": "application/json",
     }
     payload = {

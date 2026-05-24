@@ -1045,6 +1045,9 @@ def on_startup() -> None:
     try:
         wait_for_database()
         run_migrations()
+        from app.webchat_handler import ensure_table
+        with get_conn() as _ec:
+            ensure_table(_ec)
     except Exception:  # noqa: BLE001
         logger.exception("startup_database_unavailable_continue")
     if is_live_crm_configured():
@@ -14520,7 +14523,11 @@ def api_delete_tenant(slug: str):
                     return {"ok": False, "error": "not_found"}
                 tid = row["id"]
                 cur.execute("DELETE FROM conversations WHERE tenant_slug = %s", (slug,))
-                cur.execute("DELETE FROM customers WHERE tenant_slug = %s", (slug,))
+                cur.execute("DELETE FROM webchat_sessions WHERE tenant_slug = %s", (slug,))
+                try:
+                    cur.execute("DELETE FROM customers WHERE tenant_slug = %s", (slug,))
+                except Exception:
+                    pass
                 cur.execute("DELETE FROM appointments WHERE tenant_slug = %s", (slug,))
                 cur.execute("DELETE FROM tenants WHERE id = %s", (tid,))
         return {"ok": True, "deleted": slug}
@@ -14623,6 +14630,32 @@ def api_whatsapp_webhook(body: dict[str, Any], background_tasks: BackgroundTasks
             except Exception:
                 pass
     return {"ok": True, "results": results}
+
+
+@app.patch("/api/tenants/{slug}/channel/whatsapp")
+def api_patch_tenant_whatsapp(slug: str, body: dict[str, Any]):
+    """Set per-tenant WhatsApp credentials."""
+    token = body.get("token", "")
+    phone_id = body.get("phone_id", "")
+    if not token or not phone_id:
+        return {"ok": False, "error": "token and phone_id required"}
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT id, channels FROM tenants WHERE slug = %s", (slug,))
+                row = cur.fetchone()
+                if not row:
+                    return {"ok": False, "error": "not_found"}
+                channels = row.get("channels") or {}
+                if isinstance(channels, str):
+                    channels = json.loads(channels)
+                channels["whatsapp"] = {"token": token, "phone_id": phone_id}
+                cur.execute("UPDATE tenants SET channels = %s, updated_at = NOW() WHERE id = %s",
+                            (json.dumps(channels), row["id"]))
+                conn.commit()
+        return {"ok": True, "slug": slug, "channel": "whatsapp", "configured": True}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
 
 
 @app.get("/api/channel/whatsapp")
