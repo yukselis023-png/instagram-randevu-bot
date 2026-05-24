@@ -1719,6 +1719,36 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
 
         conversation["memory_state"] = memory
 
+        direct_full_booking = bool(
+            booking_opt_in
+            and conversation.get("service")
+            and (conversation.get("full_name") or conversation.get("lead_name"))
+            and has_booking_contact_for_fsm(conversation)
+            and conversation.get("requested_date")
+            and conversation.get("requested_time")
+        )
+        if direct_full_booking:
+            slot_error = validate_slot(conversation.get("requested_date"), conversation.get("requested_time"))
+            if slot_error:
+                conversation["state"] = "collect_datetime"
+                conversation["appointment_status"] = "collecting"
+                upsert_conversation(conn, conversation)
+                save_message_log(conn, payload.sender_id, "out", slot_error, build_outbound_raw_event(decision_path + ["calendar:direct_slot_validation_failed"], trace_id, inbound_dedupe_key, inbound_platform, inbound_message_id))
+                metrics["total_ms"] = elapsed_ms(request_started_at)
+                return ProcessResult(sender_id=payload.sender_id, should_reply=True, reply_text=slot_error, outbound_text=slot_error, llm_raw_reply_text=llm_raw_reply_text, final_reply_source="calendar_authority", handoff=False, conversation_state=conversation.get("state", "new"), appointment_created=False, appointment_id=None, normalized=build_normalized(conversation), metrics=metrics, decision_path=decision_path + ["calendar:direct_slot_validation_failed"])
+            requested_date_norm = normalize_date_string(conversation.get("requested_date"))
+            requested_time_norm = normalize_time_string(conversation.get("requested_time"))
+            conflict = find_existing_appointment(conn, requested_date_norm, requested_time_norm, conversation.get("service"))
+            if conflict:
+                alternatives = suggest_alternatives(conn, requested_date_norm, requested_time_norm, conversation.get("service"))
+                reply = build_slot_conflict_reply(conversation, requested_time_norm or "bu saat", alternatives)
+                conversation["state"] = "collect_datetime"
+                conversation["appointment_status"] = "collecting"
+                upsert_conversation(conn, conversation)
+                save_message_log(conn, payload.sender_id, "out", reply, build_outbound_raw_event(decision_path + ["calendar:direct_slot_conflict"], trace_id, inbound_dedupe_key, inbound_platform, inbound_message_id))
+                metrics["total_ms"] = elapsed_ms(request_started_at)
+                return ProcessResult(sender_id=payload.sender_id, should_reply=True, reply_text=reply, outbound_text=reply, llm_raw_reply_text=llm_raw_reply_text, final_reply_source="calendar_authority", handoff=False, conversation_state=conversation.get("state", "new"), appointment_created=False, appointment_id=None, normalized=build_normalized(conversation), metrics=metrics, decision_path=decision_path + ["calendar:direct_slot_conflict"])
+
         msg_provided_name = bool(extract_name(message_text, conversation.get("state", "new")))
         msg_provided_phone = bool(extract_phone(message_text))
         msg_provided_date = bool(
