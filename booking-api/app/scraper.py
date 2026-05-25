@@ -135,6 +135,46 @@ def _normalize_to_config(llm_data: dict[str, Any]) -> dict[str, Any]:
     }
     return config
 
+
+def _fallback_services_from_text(site_text: str) -> list[dict[str, Any]]:
+    """Heuristic fallback: extract likely service/product names from headings/short lines."""
+    seen: set[str] = set()
+    services: list[dict[str, Any]] = []
+    stop = {
+        "anasayfa", "hakkımızda", "hakkimizda", "iletişim", "iletisim", "blog", "referanslar",
+        "gizlilik", "kvkk", "çerez", "cerez", "menu", "menü", "devamını oku", "detaylı bilgi",
+        "doel digital", "doel", "login", "giriş", "kayit", "kayıt"
+    }
+    lines = [re.sub(r"\s+", " ", line).strip(" -•|\t") for line in site_text.splitlines()]
+    service_words = re.compile(r"(hizmet|paket|danışman|danisman|tasarım|tasarim|web|seo|reklam|sosyal medya|otomasyon|crm|yazılım|yazilim|randevu|e-ticaret|eticaret|bakım|bakim|terapi|klinik|kuaför|güzellik|estetik|course|service|marketing|software)", re.I)
+    for line in lines:
+        if not (4 <= len(line) <= 90):
+            continue
+        low = line.lower()
+        if low in stop or low.startswith("--- page:"):
+            continue
+        if not service_words.search(line):
+            continue
+        # skip sentence-like paragraphs
+        if len(line.split()) > 9:
+            continue
+        key = low
+        if key in seen:
+            continue
+        seen.add(key)
+        slug = re.sub(r"[^a-z0-9]+", "-", low.encode("ascii", "ignore").decode() or low)[:60].strip("-") or f"service-{len(services)+1}"
+        services.append({
+            "slug": slug,
+            "display": line,
+            "keywords": [w for w in re.split(r"\W+", low) if len(w) > 2][:6],
+            "price": "Özel teklif",
+            "price_note": "",
+            "summary": f"{line} hakkında bilgi ve teklif için müşteriye yardımcı ol.",
+        })
+        if len(services) >= 8:
+            break
+    return services
+
 # ── Main entry ──────────────────────────────────────────────────────
 
 def scrape_url_to_config(url: str, llm_call: callable) -> dict[str, Any]:
@@ -146,5 +186,7 @@ def scrape_url_to_config(url: str, llm_call: callable) -> dict[str, Any]:
     if not site_text or len(site_text.strip()) < 50:
         return {"business_name": "İşletme (içerik taranamadı)", "service_catalog": []}
     config = extract_business_config(site_text, llm_call)
+    if not config.get("service_catalog"):
+        config["service_catalog"] = _fallback_services_from_text(site_text)
     config["_scraped_from"] = url
     return config
