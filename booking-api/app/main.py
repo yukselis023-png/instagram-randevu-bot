@@ -14641,10 +14641,12 @@ def api_whatsapp_webhook(body: dict[str, Any], background_tasks: BackgroundTasks
 @app.patch("/api/tenants/{slug}/channel/whatsapp")
 def api_patch_tenant_whatsapp(slug: str, body: dict[str, Any]):
     """Set per-tenant WhatsApp credentials."""
-    token = body.get("token", "")
-    phone_id = body.get("phone_id", "")
+    token = str(body.get("token", "")).strip()
+    phone_id = str(body.get("phone_id", "")).strip()
+    business_account_id = str(body.get("business_account_id", "")).strip()
     if not token or not phone_id:
-        return {"ok": False, "error": "token and phone_id required"}
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="token and phone_id required")
     try:
         with get_conn() as conn:
             try:
@@ -14661,7 +14663,7 @@ def api_patch_tenant_whatsapp(slug: str, body: dict[str, Any]):
                         channels = json.loads(raw)
                     else:
                         channels = dict(raw)  # psycopg dict_row returns a dict-like
-                    channels["whatsapp"] = {"token": token, "phone_id": phone_id}
+                    channels["whatsapp"] = {"token": token, "phone_id": phone_id, "business_account_id": business_account_id}
                     cur.execute("UPDATE tenants SET channels = %s, updated_at = NOW() WHERE id = %s",
                                 (json.dumps(channels), row["id"]))
                 conn.commit()
