@@ -14638,6 +14638,95 @@ def api_whatsapp_webhook(body: dict[str, Any], background_tasks: BackgroundTasks
     return {"ok": True, "results": results}
 
 
+
+
+# ── Meta OAuth / Embedded Signup ─────────────────────────────────────────────
+def _meta_env():
+    import os
+    return {
+        "app_id": os.getenv("META_APP_ID") or os.getenv("FACEBOOK_APP_ID") or "",
+        "app_secret": os.getenv("META_APP_SECRET") or os.getenv("FACEBOOK_APP_SECRET") or "",
+        "redirect_uri": os.getenv("META_REDIRECT_URI") or "",
+    }
+
+@app.get("/api/oauth/meta/start")
+def api_meta_oauth_start(slug: str, channel: str = "instagram"):
+    """Start customer-friendly Meta OAuth flow."""
+    from fastapi import HTTPException
+    from urllib.parse import urlencode
+    cfg = _meta_env()
+    if not cfg["app_id"] or not cfg["redirect_uri"]:
+        raise HTTPException(status_code=503, detail="Meta OAuth is not configured")
+    channel = channel if channel in ("instagram", "whatsapp") else "instagram"
+    scopes = ["pages_show_list", "pages_read_engagement"]
+    if channel == "instagram":
+        scopes += ["instagram_basic", "instagram_manage_messages", "pages_messaging"]
+    else:
+        scopes += ["whatsapp_business_management", "whatsapp_business_messaging", "business_management"]
+    state = f"{slug}:{channel}"
+    qs = urlencode({
+        "client_id": cfg["app_id"],
+        "redirect_uri": cfg["redirect_uri"],
+        "state": state,
+        "scope": ",".join(scopes),
+        "response_type": "code",
+    })
+    return {"ok": True, "url": f"https://www.facebook.com/v20.0/dialog/oauth?{qs}"}
+
+@app.get("/api/oauth/meta/callback")
+def api_meta_oauth_callback(code: str | None = None, state: str | None = None, error: str | None = None):
+    """Meta OAuth callback: exchange code, discover assets, save tenant channel."""
+    from fastapi import HTTPException
+    from fastapi.responses import HTMLResponse
+    import requests
+    cfg = _meta_env()
+    if error:
+        return HTMLResponse(f"<h2>Bağlantı iptal edildi</h2><p>{error}</p>", status_code=400)
+    if not code or not state or ":" not in state:
+        raise HTTPException(status_code=400, detail="missing code/state")
+    slug, channel = state.split(":", 1)
+    if not cfg["app_id"] or not cfg["app_secret"] or not cfg["redirect_uri"]:
+        raise HTTPException(status_code=503, detail="Meta OAuth is not configured")
+    token_res = requests.get("https://graph.facebook.com/v20.0/oauth/access_token", params={
+        "client_id": cfg["app_id"],
+        "client_secret": cfg["app_secret"],
+        "redirect_uri": cfg["redirect_uri"],
+        "code": code,
+    }, timeout=20)
+    token_res.raise_for_status()
+    access_token = token_res.json().get("access_token")
+    if not access_token:
+        raise HTTPException(status_code=400, detail="access_token missing")
+    pages = requests.get("https://graph.facebook.com/v20.0/me/accounts", params={"access_token": access_token}, timeout=20).json().get("data", [])
+    page = pages[0] if pages else {}
+    page_id = str(page.get("id") or "")
+    page_token = page.get("access_token") or access_token
+    ig_id = ""
+    if page_id:
+        try:
+            ig = requests.get(f"https://graph.facebook.com/v20.0/{page_id}", params={"fields": "instagram_business_account", "access_token": page_token}, timeout=20).json()
+            ig_id = str((ig.get("instagram_business_account") or {}).get("id") or "")
+        except Exception:
+            ig_id = ""
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT id, channels FROM tenants WHERE slug = %s", (slug,))
+                row = cur.fetchone()
+                if not row:
+                    return HTMLResponse("<h2>Tenant bulunamadı</h2>", status_code=404)
+                raw = row.get("channels") or {}
+                channels = json.loads(raw) if isinstance(raw, str) else (dict(raw) if not isinstance(raw, list) else {x: True for x in raw})
+                if channel == "instagram":
+                    channels["instagram"] = {"token": page_token, "page_id": page_id, "instagram_business_id": ig_id, "oauth": True}
+                else:
+                    channels["whatsapp"] = {"token": access_token, "oauth": True}
+                cur.execute("UPDATE tenants SET channels = %s, updated_at = NOW() WHERE id = %s", (json.dumps(channels), row["id"]))
+            conn.commit()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    return HTMLResponse("<h2>Bağlantı tamamlandı</h2><p>Bu pencereyi kapatıp CRM'e dönebilirsiniz.</p><script>setTimeout(()=>window.close(),1500)</script>")
+
 @app.patch("/api/tenants/{slug}/channel/whatsapp")
 def api_patch_tenant_whatsapp(slug: str, body: dict[str, Any]):
     """Set per-tenant WhatsApp credentials."""
