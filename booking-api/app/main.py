@@ -14675,6 +14675,42 @@ def api_patch_tenant_whatsapp(slug: str, body: dict[str, Any]):
         return {"ok": False, "error": str(exc)}
 
 
+
+
+@app.patch("/api/tenants/{slug}/channel/instagram")
+def api_patch_tenant_instagram(slug: str, body: dict[str, Any]):
+    """Set per-tenant Instagram credentials."""
+    token = str(body.get("token", "")).strip()
+    page_id = str(body.get("page_id", "")).strip()
+    instagram_business_id = str(body.get("instagram_business_id", "")).strip()
+    if not token or not page_id:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="token and page_id required")
+    try:
+        with get_conn() as conn:
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT id, channels FROM tenants WHERE slug = %s", (slug,))
+                    row = cur.fetchone()
+                    if not row:
+                        return {"ok": False, "error": "not_found"}
+                    raw = row.get("channels") or {}
+                    if isinstance(raw, list):
+                        channels = {ch: True for ch in raw}
+                    elif isinstance(raw, str):
+                        channels = json.loads(raw)
+                    else:
+                        channels = dict(raw)
+                    channels["instagram"] = {"token": token, "page_id": page_id, "instagram_business_id": instagram_business_id}
+                    cur.execute("UPDATE tenants SET channels = %s, updated_at = NOW() WHERE id = %s", (json.dumps(channels), row["id"]))
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+        return {"ok": True, "slug": slug, "channel": "instagram", "configured": True}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
 @app.get("/api/channel/whatsapp")
 def api_whatsapp_verify(mode: str | None = None, token: str | None = None, challenge: str | None = None):
     """WhatsApp webhook verification (Meta handshake)."""
