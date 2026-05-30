@@ -90,24 +90,30 @@ SLOT_BUFFER_MINUTES = int(os.getenv("SLOT_BUFFER_MINUTES", "10"))
 APPOINTMENT_LOOKAHEAD_DAYS = int(os.getenv("APPOINTMENT_LOOKAHEAD_DAYS", "30"))
 AI_FIRST_BOOKING_SLOT_LIMIT = int(os.getenv("AI_FIRST_BOOKING_SLOT_LIMIT", "4"))
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "").strip().rstrip("/")
-if (
-    "intent-association-radar-route.trycloudflare.com" in LLM_BASE_URL
-    or "scores-unable-texts-fish.trycloudflare.com" in LLM_BASE_URL
-):
-    LLM_BASE_URL = "https://afford-fun-thorough-hints.trycloudflare.com/v1"
+_DEAD_TUNNELS = [
+    "intent-association-radar-route.trycloudflare.com",
+    "scores-unable-texts-fish.trycloudflare.com",
+    "afford-fun-thorough-hints.trycloudflare.com",
+]
+if any(dead in LLM_BASE_URL for dead in _DEAD_TUNNELS):
+    LLM_BASE_URL = ""
+if not LLM_BASE_URL:
+    LLM_BASE_URL = "https://lists-seal-colour-resumes.trycloudflare.com/v1"
 if LLM_BASE_URL and not LLM_BASE_URL.endswith("/v1"):
     LLM_BASE_URL = f"{LLM_BASE_URL}/v1"
 LLM_API_KEY = os.getenv("LLM_API_KEY", "").strip()
-LLM_MODEL = os.getenv("LLM_MODEL", "llama-3.3-70b-versatile")
-LLM_FALLBACK_MODEL = os.getenv("LLM_FALLBACK_MODEL", "llama-3.1-8b-instant")
+if not LLM_API_KEY:
+    LLM_API_KEY = "sk-93ac4612b7b5427d9de03ec1b96e8f26"
+LLM_MODEL = os.getenv("LLM_MODEL", "gemini-3-flash")
+LLM_FALLBACK_MODEL = os.getenv("LLM_FALLBACK_MODEL", "gemini-3-flash")
 LLM_EXTRACT_TIMEOUT_SECONDS = float(os.getenv("LLM_EXTRACT_TIMEOUT_SECONDS", "6"))
 LLM_REPLY_POLISH_TIMEOUT_SECONDS = float(os.getenv("LLM_REPLY_POLISH_TIMEOUT_SECONDS", "8"))
-LLM_REPLY_MICRO_MODEL = os.getenv("LLM_REPLY_MICRO_MODEL", "llama-3.1-8b-instant").strip() or LLM_MODEL
-LLM_REPLY_ADVISORY_MODEL = os.getenv("LLM_REPLY_ADVISORY_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct").strip() or LLM_MODEL
+LLM_REPLY_MICRO_MODEL = os.getenv("LLM_REPLY_MICRO_MODEL", "gemini-3-flash").strip() or LLM_MODEL
+LLM_REPLY_ADVISORY_MODEL = os.getenv("LLM_REPLY_ADVISORY_MODEL", "gemini-3-flash").strip() or LLM_MODEL
 LLM_REPLY_QUALITY_MODEL = (
     os.getenv("LLM_REPLY_QUALITY_MODEL")
     or os.getenv("LLM_QUALITY_MODEL")
-    or "llama-3.3-70b-versatile"
+    or "gemini-3-flash"
 ).strip()
 LLM_REPLY_MICRO_TIMEOUT_SECONDS = float(os.getenv("LLM_REPLY_MICRO_TIMEOUT_SECONDS", "6.5"))
 LLM_REPLY_ADVISORY_TIMEOUT_SECONDS = float(os.getenv("LLM_REPLY_ADVISORY_TIMEOUT_SECONDS", str(LLM_REPLY_POLISH_TIMEOUT_SECONDS)))
