@@ -1042,14 +1042,17 @@ class CampaignCreateRequest(BaseModel):
 
 @app.on_event("startup")
 def on_startup() -> None:
-    try:
-        wait_for_database()
-        run_migrations()
-        from app.webchat_handler import ensure_table
-        with get_conn() as _ec:
-            ensure_table(_ec)
-    except Exception:  # noqa: BLE001
-        logger.exception("startup_database_unavailable_continue")
+    if os.getenv("SKIP_STARTUP_DB", "false").lower() in {"1", "true", "yes", "on"}:
+        logger.warning("startup_database_skipped_by_env")
+    else:
+        try:
+            wait_for_database()
+            run_migrations()
+            from app.webchat_handler import ensure_table
+            with get_conn() as _ec:
+                ensure_table(_ec)
+        except Exception:  # noqa: BLE001
+            logger.exception("startup_database_unavailable_continue")
     if is_live_crm_configured():
         try:
             headers, user_id = live_crm_auth_session()
@@ -3657,7 +3660,7 @@ def get_conn() -> psycopg.Connection:
         sslmode = parse_qs(parsed.query).get("sslmode", [None])[0]
         if not sslmode:
             sslmode = "disable" if (parsed.hostname or "") in {"postgres", "localhost", "127.0.0.1"} else "require"
-        return psycopg.connect(clean_url, row_factory=dict_row, sslmode=sslmode)
+        return psycopg.connect(clean_url, row_factory=dict_row, sslmode=sslmode, connect_timeout=int(os.getenv("DB_CONNECT_TIMEOUT", "5")))
     except Exception as exc:  # noqa: BLE001
         logger.warning("database_connect_failed host=%s error=%s", DATABASE_URL.split("@")[-1].split("/")[0], exc)
         raise
@@ -6223,7 +6226,7 @@ def parse_reschedule_followup_request(text: str, base_date_value: Any, base_time
             base_dt = None
         if base_dt is not None:
             if re.search(r"evvelsi\s+gün\w*|evvelsi\s+gun\w*|evelsi\s+gün\w*|evelsi\s+gun\w*", lowered):
-                explicit_date = (base_dt + timedelta(days=1)).isoformat()
+                explicit_date = (base_dt + timedelta(days=2)).isoformat()
             elif re.search(r"öbür\s+gün\w*|obur\s+gun\w*", lowered):
                 explicit_date = (base_dt + timedelta(days=2)).isoformat()
             elif re.search(r"ertesi\s+gün\w*|ertesi\s+gun\w*|sonraki\s+gün\w*|sonraki\s+gun\w*|bir\s+sonraki\s+gün\w*|bir\s+sonraki\s+gun\w*|yarın\w*|yarin\w*", lowered):
@@ -6270,7 +6273,7 @@ def try_reschedule_confirmed_appointment(conn: psycopg.Connection, conversation:
             base_dt = None
         if base_dt is not None:
             if re.search(r"evvelsi\s+gün\w*|evvelsi\s+gun\w*|evelsi\s+gün\w*|evelsi\s+gun\w*", lowered_message):
-                detected_date = (base_dt + timedelta(days=1)).isoformat()
+                detected_date = (base_dt + timedelta(days=2)).isoformat()
             elif re.search(r"öbür\s+gün\w*|obur\s+gun\w*", lowered_message):
                 detected_date = (base_dt + timedelta(days=2)).isoformat()
             elif re.search(r"ertesi\s+gün\w*|ertesi\s+gun\w*|sonraki\s+gün\w*|sonraki\s+gun\w*|bir\s+sonraki\s+gün\w*|bir\s+sonraki\s+gun\w*|yarın\w*|yarin\w*", lowered_message):
@@ -6285,7 +6288,7 @@ def try_reschedule_confirmed_appointment(conn: psycopg.Connection, conversation:
                 base_dt = None
             if base_dt is not None:
                 if re.search(r"evvelsi|evelsi", lowered_message):
-                    detected_date = (base_dt + timedelta(days=1)).isoformat()
+                    detected_date = (base_dt + timedelta(days=2)).isoformat()
                 elif re.search(r"öbür|obur", lowered_message):
                     detected_date = (base_dt + timedelta(days=2)).isoformat()
                 elif re.search(r"ertesi|sonraki|yarın|yarin", lowered_message):
@@ -10810,13 +10813,35 @@ def parse_json_like(content: str) -> dict[str, Any]:
     except json.JSONDecodeError:
         pass
     start = content.find("{")
-    end = content.rfind("}")
-    if start == -1 or end == -1 or end <= start:
+    if start == -1:
         return {}
-    try:
-        return json.loads(content[start : end + 1])
-    except json.JSONDecodeError:
-        return {}
+    depth = 0
+    in_string = False
+    escape = False
+    for idx in range(start, len(content)):
+        ch = content[idx]
+        if escape:
+            escape = False
+            continue
+        if ch == "\\" and in_string:
+            escape = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                try:
+                    parsed = json.loads(content[start : idx + 1])
+                    return parsed if isinstance(parsed, dict) else {}
+                except json.JSONDecodeError:
+                    return {}
+    return {}
 
 
 AI_FIRST_DECISION_KEYS = {
@@ -10900,6 +10925,7 @@ def build_ai_first_prompt_payload(
         "extractor_hint": llm_data or {},
         "message": message_text,
         "available_slots": conversation.get("available_slots") or [],
+        "asked_date_hint": conversation.get("asked_date_hint"),
     }
 
 
@@ -11951,7 +11977,7 @@ def build_ai_first_decision(
                 "Use only the provided service catalog for prices, delivery times, and services. If unsure, say that the team should confirm instead of inventing. "
                 "If booking_intent is true, include one clear next missing field in the reply, not several at once. Keep replies short: usually 1-3 concise sentences. Do not include markdown. "
                 "When suggesting or asking for appointment date/time, offer specific options within working hours 10:00-19:00. Instead of vague phrases like 'öğleden sonra', give 2-3 concrete choices like '12:00, 14:00 veya 16:00'. "
-                "RANDEVU SLOTLARI KURALLARI: If payload.available_slots is provided, only offer slots from that list. Never invent availability and never use vague phrases like 'yarın öğlen' or 'öğleden sonra'. Ask naturally in Turkish, e.g. 'Ahmet Bey için en yakın uygun seçenekler 18 Mayıs 12:00, 18 Mayıs 14:00 veya 19 Mayıs 11:00 görünüyor; hangisi sizin için uygun olur?' Never open-ended 'hangi gün müsaitsiniz'. If user gives a relative date/time like 'yarın öğlen' or 'cumartesi 15:00', accept it when extractable; do not stubbornly ask for exact format. If date/time already exists and user corrects name/phone, apologize/correct and do not ask date/time again."
+                "RANDEVU SLOTLARI KURALLARI: If payload.available_slots is provided, only offer slots from that list. Never invent availability and never use vague phrases like 'yarın öğlen' or 'öğleden sonra'. Ask naturally in Turkish, e.g. 'Ahmet Bey için en yakın uygun seçenekler 18 Mayıs 12:00, 18 Mayıs 14:00 veya 19 Mayıs 11:00 görünüyor; hangisi sizin için uygun olur?' Never open-ended 'hangi gün müsaitsiniz'. If asked_date_hint is present, that is the resolved date the user is asking about — use the matching available_slots for that date. Never override available_slots with your own date interpretation. If user gives a relative date/time like 'yarın öğlen' or 'cumartesi 15:00', accept it when extractable; do not stubbornly ask for exact format. If date/time already exists and user corrects name/phone, apologize/correct and do not ask date/time again."
             ),
         },
         {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
@@ -14726,6 +14752,51 @@ def api_meta_oauth_callback(code: str | None = None, state: str | None = None, e
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
     return HTMLResponse("<h2>Bağlantı tamamlandı</h2><p>Bu pencereyi kapatıp CRM'e dönebilirsiniz.</p><script>setTimeout(()=>window.close(),1500)</script>")
+
+
+@app.post("/api/tenants/{slug}/channel/instagram-private")
+def api_connect_instagram_private(slug: str, body: dict[str, Any]):
+    """Connect Instagram via private/poller login. No Meta app required."""
+    username = str(body.get("username", "")).strip()
+    password = str(body.get("password", "")).strip()
+    verification_code = str(body.get("verification_code", "")).strip()
+    if not username or not password:
+        raise HTTPException(status_code=400, detail="instagram username and password required")
+    safe_slug = re.sub(r"[^a-z0-9-]+", "-", slug.lower()).strip("-") or "doel"
+    try:
+        from instagrapi import Client
+        base_dir = Path(os.getenv("IG_PRIVATE_DATA_DIR", os.path.join(os.getcwd(), "private-ig-sessions")))
+        acct_dir = base_dir / safe_slug
+        acct_dir.mkdir(parents=True, exist_ok=True)
+        session_file = acct_dir / "session.json"
+        meta_file = acct_dir / "account.json"
+        cl = Client()
+        cl.delay_range = [2, 5]
+        proxy = str(body.get("proxy") or os.getenv("IG_PROXY", "")).strip()
+        if proxy:
+            cl.set_proxy(proxy)
+        if session_file.exists():
+            try:
+                cl.set_settings(json.loads(session_file.read_text(encoding="utf-8")))
+            except Exception:
+                pass
+        if verification_code:
+            cl.login(username, password, verification_code=verification_code)
+        else:
+            cl.login(username, password)
+        try:
+            cl.get_timeline_feed()
+        except Exception:
+            pass
+        session_file.write_text(json.dumps(cl.get_settings(), ensure_ascii=False, indent=2), encoding="utf-8")
+        meta_file.write_text(json.dumps({"slug": safe_slug, "username": username, "user_id": str(cl.user_id), "connected_at": datetime.now(TZ).isoformat(), "mode": "instagram_private"}, ensure_ascii=False, indent=2), encoding="utf-8")
+        return {"ok": True, "slug": safe_slug, "channel": "instagram_private", "configured": True, "username": username, "user_id": str(cl.user_id)}
+    except Exception as exc:
+        msg = str(exc)
+        lower = msg.lower()
+        if "challenge" in lower or "two-factor" in lower or "2fa" in lower or "verification" in lower:
+            return {"ok": False, "needs_verification": True, "error": "Instagram güvenlik doğrulaması/2FA istedi. Kodu girip tekrar deneyin."}
+        return {"ok": False, "error": "Instagram bağlantısı kurulamadı: " + msg[:300]}
 
 @app.patch("/api/tenants/{slug}/channel/whatsapp")
 def api_patch_tenant_whatsapp(slug: str, body: dict[str, Any]):

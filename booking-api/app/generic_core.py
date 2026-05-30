@@ -9,6 +9,7 @@ import time as time_module
 from typing import Any, Tuple, Optional
 
 from fastapi import BackgroundTasks
+from app.handoff import is_handoff_request
 from app.main import (
     ProcessResult, IncomingMessage, get_conn, get_or_create_conversation, 
     sanitize_conversation_state, ensure_conversation_memory, 
@@ -25,6 +26,7 @@ from app.main import (
     detect_customer_subsector, customer_sector_for_subsector, normalize_date_string, normalize_time_string,
     validate_slot, find_existing_appointment, suggest_alternatives, format_human_date, get_booking_label, TZ,
     collect_next_booking_slot_options, format_booking_slot_option, remember_booking_slot_options,
+    get_available_slots_for_date,
     normalize_booking_slot_option, display_service_name
 )
 
@@ -397,6 +399,20 @@ def infer_date_from_available_slot_time(conn: Any, conversation: dict[str, Any],
     normalized_time = normalize_time_string(time_value)
     if not normalized_time:
         return None
+    memory = ensure_conversation_memory(conversation)
+    last_date = normalize_date_string(memory.get("last_availability_date"))
+    if last_date:
+        service_name = conversation.get("service") or conversation.get("requested_service") or "Web Tasarim"
+        try:
+            day_slots = get_available_slots_for_date(conn, last_date, service_name)
+        except Exception:  # noqa: BLE001
+            day_slots = []
+        if normalized_time in [normalize_time_string(t) for t in day_slots]:
+            remember_booking_slot_options(conversation, [{"date": last_date, "time": normalized_time}])
+            return last_date
+        # Keep the user's follow-up anchored to the last date they asked about;
+        # calendar validation will reject the unavailable time and offer same-date alternatives.
+        return last_date
     try:
         slots = collect_next_booking_slot_options(conn, conversation, preferred_time=normalized_time, limit=6)
     except Exception:  # noqa: BLE001
@@ -1283,7 +1299,9 @@ def build_active_booking_prompt_reply(conversation: dict[str, Any], memory: dict
     service = known_requested_service(conversation, memory)
     state = conversation.get("state")
     if state in {"collect_datetime", "collect_date", "collect_time", "collect_period"}:
-        slots = memory.get("suggested_booking_slots") or []
+        last_date = normalize_date_string(memory.get("last_availability_date"))
+        last_times = memory.get("last_availability_slots") or []
+        slots = ([{"date": last_date, "time": t} for t in last_times[:4]] if last_date and last_times else None) or (memory.get("suggested_booking_slots") or [])
         if isinstance(slots, list) and slots:
             parts = []
             for slot in slots[:3]:
@@ -1462,30 +1480,66 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
         # LLM'e cevap öncesi sadece context hazırla; PY müşteri metnini yazmaz.
         pre_llm_state = str(conversation.get("state") or "")
         pre_llm_name = None
-        if pre_llm_state == "collect_name" and not is_username_save_request(message_text):
+        _pre_lowered = sanitize_text(message_text).lower()
+        _pre_time_acceptance = bool(re.search(r"\b\d{1,2}\s*([:.]\s*\d{2})?\s*(ayarla|ayarlayabilir|olur|uygun|kabul|tamam)", _pre_lowered))
+        if not conversation.get("full_name"):
+            _third_party_name = re.search(r"(?:adı|adi|ismi|ismi)\s+([A-ZÇĞİÖŞÜ][a-zçğıöşü]+(?:\s+[A-ZÇĞİÖŞÜ][a-zçğıöşü]+){0,2})", message_text)
+            if _third_party_name:
+                pre_llm_name = clean_name_text(_third_party_name.group(1)) or _third_party_name.group(1)
+                if is_valid_name_candidate(pre_llm_name, require_full_name=False):
+                    conversation["lead_name"] = pre_llm_name
+                    conversation["full_name"] = pre_llm_name
+                    memory["consultation_attendee_name"] = pre_llm_name
+                    memory["attendee_evidence"] = "explicit third-party name in user message"
+        if not pre_llm_name and pre_llm_state == "collect_name" and not _pre_time_acceptance and not is_username_save_request(message_text):
             pre_llm_name = extract_name(message_text, "collect_name")
             if pre_llm_name and is_valid_name_candidate(pre_llm_name, require_full_name=True):
                 pre_llm_name = clean_name_text(pre_llm_name) or pre_llm_name
                 conversation["lead_name"] = pre_llm_name
                 conversation["full_name"] = pre_llm_name
-        if (
-            pre_llm_state in {"collect_name", "collect_phone", "collect_datetime", "collect_date", "collect_time", "collect_period"}
-            and known_requested_service(conversation, memory)
-            and (conversation.get("full_name") or conversation.get("lead_name"))
-            and not normalize_date_string(conversation.get("requested_date"))
-            and not normalize_time_string(conversation.get("requested_time"))
-        ):
-            try:
-                slot_options = collect_next_booking_slot_options(conn, conversation, limit=3)
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("generic_pre_llm_slot_context_failed sender_id=%s error=%s", payload.sender_id, exc)
-                slot_options = []
-            if slot_options:
-                conversation["available_slots"] = [format_booking_slot_option(slot) for slot in slot_options[:3]]
-                remember_booking_slot_options(conversation, slot_options[:3])
+        # Slot context: always inject DB slots before LLM. If user asks a concrete
+        # date ("1 Haziran", "evelsi gün"), include that day's real availability.
+        try:
+            slot_options = collect_next_booking_slot_options(conn, conversation, limit=12)
+            lowered_msg = sanitize_text(message_text).lower()
+            base_dt = datetime.datetime.now(TZ).date()
+            asked_date = None
+            days_after_match = re.search(r"(\d{1,2})\s*gün\s*(sonra|sonrası|sonrasi)", lowered_msg)
+            if days_after_match:
+                asked_date = (base_dt + datetime.timedelta(days=int(days_after_match.group(1)))).isoformat()
+            elif re.search(r"evvelsi\s+gün\w*|evvelsi\s+gun\w*|evelsi\s+gün\w*|evelsi\s+gun\w*|öbür\s+gün\w*|obur\s+gun\w*", lowered_msg):
+                asked_date = (base_dt + datetime.timedelta(days=2)).isoformat()
+            elif re.search(r"ertesi\s+gün\w*|ertesi\s+gun\w*|sonraki\s+gün\w*|sonraki\s+gun\w*|yarın\w*|yarin\w*", lowered_msg):
+                asked_date = (base_dt + datetime.timedelta(days=1)).isoformat()
+            elif re.search(r"bugün\w*|bugun\w*", lowered_msg):
+                asked_date = base_dt.isoformat()
+            if not asked_date:
+                asked_date = normalize_date_string(extract_date(message_text))
+            if asked_date:
+                service_for_slots = conversation.get("service") or conversation.get("requested_service") or "Web Tasarim"
+                day_slots = get_available_slots_for_date(conn, asked_date, service_for_slots)
+                exact_options = [{"date": asked_date, "time": t} for t in day_slots[:12]]
+                if exact_options:
+                    slot_options = exact_options + [s for s in slot_options if s.get("date") != asked_date]
+                else:
+                    conversation["asked_date_available_slots"] = []
+                conversation["asked_date"] = asked_date
                 memory = ensure_conversation_memory(conversation)
-            else:
-                conversation.pop("available_slots", None)
+                memory["last_availability_date"] = asked_date
+                memory["last_availability_slots"] = day_slots[:12]
+                conversation["memory_state"] = memory
+                today_str = datetime.datetime.now(TZ).date().isoformat()
+                rel_label = "gelecek gün" if asked_date >= today_str else "önceki gün"
+                conversation["asked_date_hint"] = f"Kullanıcının sorduğu tarih {asked_date} ({rel_label}). Available_slots içindeki bu tarihe ait slotları kullan."
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("generic_pre_llm_slot_context_failed sender_id=%s error=%s", payload.sender_id, exc)
+            slot_options = []
+        if slot_options:
+            conversation["available_slots"] = [normalize_booking_slot_option(slot) or slot for slot in slot_options[:12]]
+            remember_booking_slot_options(conversation, slot_options[:12])
+            memory = ensure_conversation_memory(conversation)
+        elif not conversation.get("available_slots"):
+            conversation.pop("available_slots", None)
         sync_conversation_memory_summary(conversation)
 
         processing_lock_acquired = try_acquire_inbound_processing_lock(conn, inbound_platform, payload.sender_id, inbound_message_id)
@@ -1522,15 +1576,32 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
         llm_raw_reply_text = str(reply_text or "").strip()
         final_reply_source = "llm_raw"
         extracted = result_dict.get("extracted_entities", {})
+        lowered_message_for_guards = sanitize_text(message_text).lower()
+        is_time_acceptance_message_early = bool(re.search(r"\b\d{1,2}\s*([:.]\s*\d{2})?\s*(ayarla|ayarlayabilir|olur|uygun|kabul|tamam)", lowered_message_for_guards))
+        if is_time_acceptance_message_early and isinstance(extracted, dict):
+            extracted.pop("lead_name", None)
+            extracted.pop("full_name", None)
+            result_dict["extracted_entities"] = extracted
         metrics["llm_raw_json"] = {k: v for k, v in result_dict.items() if not str(k).startswith("_")}
         metrics["llm_model_used"] = result_dict.get("_llm_model_used")
         metrics["llm_error"] = result_dict.get("_llm_error")
         metrics["context_summary"] = result_dict.get("_context_summary") or {}
 
         decision_path = [f"generic_intent:{intent}"]
+        deterministic_intent_hint = result_dict.get("_deterministic_intent") if result_dict.get("_llm_error") else None
+        if deterministic_intent_hint:
+            intent = deterministic_intent_hint
+            decision_path.append(f"generic_intent_hint:{intent}")
         booking_opt_in = is_booking_opt_in(message_text, intent)
         deterministic_reply = False
-        if is_explicit_cancel_request(message_text) and existing_generic_appointment_id(conversation, conn):
+        if is_explicit_cancel_request(message_text):
+            existing_cancel_id = existing_generic_appointment_id(conversation, conn)
+            if not existing_cancel_id:
+                reply = "Aktif bir ön görüşme kaydı bulamadım. İsterseniz yeni bir görüşme planlayabiliriz."
+                upsert_conversation(conn, conversation)
+                save_message_log(conn, payload.sender_id, "out", reply, build_outbound_raw_event(decision_path + ["appointment_cancel_no_active"], trace_id, inbound_dedupe_key, inbound_platform, inbound_message_id))
+                metrics["total_ms"] = elapsed_ms(request_started_at)
+                return ProcessResult(sender_id=payload.sender_id, should_reply=True, reply_text=reply, outbound_text=reply, llm_raw_reply_text=llm_raw_reply_text, final_reply_source="fsm", handoff=False, conversation_state=conversation.get("state", "new"), appointment_created=False, appointment_id=None, normalized=build_normalized(conversation), metrics=metrics, decision_path=decision_path + ["appointment_cancel_no_active"])
             cancelled, reply, label, cancelled_appointment_id = try_cancel_confirmed_appointment(conn, conversation, message_text)
             if cancelled:
                 update_conversation_memory_after_bot_reply(conversation, reply, "|".join(decision_path + [label or "appointment_cancelled"]))
@@ -1573,6 +1644,7 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
         elif (
             (detected_service_for_reply := detect_requested_service_from_text(message_text, cfg))
             and (intent == "fallback" or is_llm_error_reply(reply_text) or metrics.get("llm_error"))
+            and not booking_opt_in
             and not (extract_phone(message_text) and (extract_date(message_text) or extract_time(message_text) or extract_generic_datetime_time(message_text)))
             and not is_price_question(message_text)
             and not "?" in message_text
@@ -1675,7 +1747,7 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
         # 2. STATE & CRM DETERMINISTIC LAYER
         handoff = False
         active_booking_state = str(conversation.get("state") or "").startswith("collect_")
-        if not deterministic_reply and not active_booking_state and intent == "human_handoff":
+        if not active_booking_state and (intent == "human_handoff" or is_handoff_request(message_text)):
             decision_path.append("action:handoff")
             conversation["state"] = "human_handoff"
             conversation["assigned_human"] = True
@@ -1693,6 +1765,12 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
             active_state_is_relevant = True
             active_state_label = "booking_request"
             decision_path.append("fsm:new_booking_request_relevant")
+        lowered_state_msg = sanitize_text(message_text).lower()
+        is_time_acceptance_message = bool(re.search(r"\b\d{1,2}\s*([:.]\s*\d{2})?\s*(ayarla|ayarlayabilir|olur|uygun|kabul|tamam)", lowered_state_msg))
+        if is_time_acceptance_message and (memory.get("last_availability_date") or memory.get("suggested_booking_slots")):
+            active_state_is_relevant = True
+            active_state_label = "datetime"
+            decision_path.append("fsm:time_acceptance_relevant")
         if (
             state_before_entities == "collect_name"
             and (conversation.get("full_name") or conversation.get("lead_name"))
@@ -1754,7 +1832,7 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
         deterministic_name = None if suppress_active_field_updates or username_save_requested else extract_name(message_text, state_before_entities)
         name_candidate = deterministic_name
         require_full_name = state_before_entities == "collect_name"
-        if is_booking_acknowledgement_message(message_text) or not is_valid_name_candidate(name_candidate, require_full_name=require_full_name):
+        if is_time_acceptance_message or is_booking_acknowledgement_message(message_text) or not is_valid_name_candidate(name_candidate, require_full_name=require_full_name):
             name_candidate = None
         if name_candidate:
             name_candidate = clean_name_text(name_candidate) or name_candidate
@@ -1788,6 +1866,30 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
             except Exception:
                 pass
         direct_time = None if suppress_active_field_updates else (extract_time_for_state(message_text, state_before_entities) or extract_time(message_text) or extract_generic_datetime_time(message_text))
+        lowered_for_time = sanitize_text(message_text).lower()
+        is_availability_question = bool(re.search(r"boş|bos|müsait|musait|uygun|var\s*m[ıi]|var\s*mi", lowered_for_time))
+        has_explicit_clock = bool(re.search(r"\b\d{1,2}\s*[:.]\s*\d{2}\b|\bsaat\s*\d{1,2}\b|\b\d{1,2}\s*(ayarla|olur|uygun|kabul)", lowered_for_time))
+        if is_availability_question and not has_explicit_clock:
+            direct_time = None
+        if not direct_time and is_time_acceptance_message:
+            _time_match = re.search(r"\b(\d{1,2})(?:\s*[:.]\s*(\d{2}))?\b", lowered_for_time)
+            if _time_match:
+                _hour = int(_time_match.group(1))
+                _minute = int(_time_match.group(2) or 0)
+                if 0 <= _hour <= 23 and 0 <= _minute <= 59:
+                    direct_time = f"{_hour:02d}:{_minute:02d}"
+                    if not conversation.get("requested_date"):
+                        _last_date = normalize_date_string(memory.get("last_availability_date"))
+                        if not _last_date:
+                            for _hist in reversed(recent_history or []):
+                                _txt = str(_hist.get("message_text") or _hist.get("text") or "")
+                                _hist_date = normalize_date_string(extract_date(_txt))
+                                if _hist_date:
+                                    _last_date = _hist_date
+                                    break
+                        if _last_date:
+                            conversation["requested_date"] = _last_date
+                            decision_path.append("inferred:date_from_recent_availability")
         time_candidate = direct_time
         if time_candidate:
             try:
@@ -2326,6 +2428,43 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
         )
 
 
+def extract_balanced_json_object(text: str) -> dict | None:
+    """Parse first balanced JSON object from noisy LLM output.
+    Handles cases like: { ... } { extra or trailing braces.
+    """
+    start = text.find('{')
+    if start < 0:
+        return None
+    depth = 0
+    in_string = False
+    escape = False
+    for idx in range(start, len(text)):
+        ch = text[idx]
+        if escape:
+            escape = False
+            continue
+        if ch == '\\' and in_string:
+            escape = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == '{':
+            depth += 1
+        elif ch == '}':
+            depth -= 1
+            if depth == 0:
+                candidate = text[start:idx + 1]
+                try:
+                    parsed = json.loads(candidate)
+                    return parsed if isinstance(parsed, dict) else None
+                except Exception:
+                    return None
+    return None
+
+
 def call_llm_json(system_prompt: str, user_text: str) -> dict:
     import requests, os, json, re, time
     from app.main import LLM_BASE_URL, LLM_API_KEY, LLM_MODEL
@@ -2362,11 +2501,10 @@ def call_llm_json(system_prompt: str, user_text: str) -> dict:
             resp.raise_for_status()
             content = resp.json()["choices"][0]["message"]["content"]
             last_content = content
-            match = re.search(r'\{.*\}', content, re.DOTALL)
+            match = extract_balanced_json_object(content)
             if match:
-                result = json.loads(match.group(0))
-                result["_llm_model_used"] = model
-                return result
+                match["_llm_model_used"] = model
+                return match
             clean_content = sanitize_text(content)
             if clean_content:
                 logger.warning("generic_core_llm_non_json_response using direct_answer fallback")
@@ -2404,6 +2542,31 @@ def summarize_generic_business_context(context_json: str) -> dict[str, Any]:
     }
 
 
+def build_deterministic_fallback_reply(message_text: str, conversation: dict, memory: dict, cfg: dict[str, Any]) -> str:
+    """Customer-safe fallback when LLM/provider fails; never expose generic error wording."""
+    text = sanitize_text(message_text or "")
+    lowered = text.lower()
+    service_label = detect_requested_service_from_text(text, cfg) or known_requested_service(conversation, memory)
+    if any(token in lowered for token in ("dolandir", "dolandır", "guven", "güven", "sahte", "kazik", "kazık")):
+        return "Endişenizi anlıyorum; süreci şeffaf ilerletiyoruz. İsterseniz önce kısa bir ön görüşmede kapsamı netleştirelim."
+    if is_price_question(text):
+        return build_service_price_reply(cfg, service_label, memory)
+    if service_label:
+        remember_requested_service(conversation, memory, service_label)
+        if is_booking_opt_in(text, None):
+            if not (conversation.get("full_name") or conversation.get("lead_name")):
+                return "Ön görüşme için adınızı ve soyadınızı alabilir miyim?"
+            if not has_booking_contact_for_fsm(conversation):
+                return "Ön görüşme için telefon numaranızı paylaşır mısınız?"
+            return "Uygun gün ve saati net yazarsanız ön görüşme kaydını oluşturalım."
+        return build_service_interest_reply(cfg, service_label)
+    if is_booking_opt_in(text, None):
+        return "Ön görüşmeyi planlayabiliriz. Hangi hizmet için görüşmek istersiniz?"
+    if is_simple_greeting(text):
+        return "Merhaba, nasıl yardımcı olabilirim?"
+    return "Mesajınızı aldım. Hangi hizmetle ilgili destek istediğinizi yazarsanız hemen yardımcı olayım."
+
+
 def invoke_generic_llm(message_text: str, conversation: dict, memory: dict, history: list[dict]) -> dict:
     cfg = get_config()
     business_context = build_generic_business_context(message_text, cfg)
@@ -2421,7 +2584,39 @@ def invoke_generic_llm(message_text: str, conversation: dict, memory: dict, hist
     if inferred_attendee_context:
         known_context.update(inferred_attendee_context)
     available_slots = conversation.get("available_slots") or []
-    slot_context = "\nMÜSAİT RANDEVU SLOTLARI (CRM'DE KESİN BOŞ):\n" + "\n".join(f"- {slot}" for slot in available_slots) if available_slots else "\nMÜSAİT RANDEVU SLOTLARI: Sistem şu an kesin boş slot listesi vermedi. Saat uydurma; net slot yoksa ekibin kontrol edeceğini söyle."
+    asked_date = conversation.get("asked_date")
+    asked_date_hint = conversation.get("asked_date_hint") or ""
+    def _slot_line(slot: Any) -> str:
+        if isinstance(slot, dict):
+            return f"{slot.get('date')} {slot.get('time')}"
+        return str(slot)
+    if available_slots:
+        if asked_date:
+            asked_slots = [s for s in available_slots if isinstance(s, dict) and str(s.get("date")) == str(asked_date)]
+            if asked_slots:
+                asked_times = ", ".join(str(s.get("time")) for s in asked_slots[:8])
+                slot_context = (
+                    "\nTAKVİM SORGUSU SONUCU (CRM'DEN KESİN VERİ):\n"
+                    f"- Kullanıcının sorduğu tarih: {asked_date}\n"
+                    "- Sonuç: MÜSAİT\n"
+                    f"- Bu tarihte boş saatler: {asked_times}\n"
+                    "- Cevapta bu saatlerden 2-3 tanesini öner. 'Boş yok', 'geçmişte kaldı', 'kontrol edeceğiz' deme.\n"
+                    "\nGENEL MÜSAİT SLOTLAR:\n"
+                    + "\n".join(f"- {_slot_line(slot)}" for slot in available_slots)
+                )
+            else:
+                slot_context = (
+                    "\nTAKVİM SORGUSU SONUCU (CRM'DEN KESİN VERİ):\n"
+                    f"- Kullanıcının sorduğu tarih: {asked_date}\n"
+                    "- Sonuç: O TARİHTE BOŞ SAAT YOK\n"
+                    "- Cevapta kısaca o gün dolu de ve aşağıdaki alternatiflerden 2-3 tanesini öner.\n"
+                    "\nALTERNATİF MÜSAİT SLOTLAR:\n"
+                    + "\n".join(f"- {_slot_line(slot)}" for slot in available_slots)
+                )
+        else:
+            slot_context = "\nMÜSAİT RANDEVU SLOTLARI (CRM'DE KESİN BOŞ):\n" + "\n".join(f"- {_slot_line(slot)}" for slot in available_slots)
+    else:
+        slot_context = "\nMÜSAİT RANDEVU SLOTLARI: Sistem şu an kesin boş slot listesi vermedi. Saat uydurma; net slot yoksa ekibin kontrol edeceğini söyle."
     # Exposing missing booking fields to explicitly direct the AI on what to ask if it proceeds to 'active_booking'
     missing = []
     if not known_requested_service(conversation, memory): missing.append("Hizmet Türü")
@@ -2527,10 +2722,24 @@ Müşterinin yeni mesajını incele. Oku ve aşağıdaki JSON formatına SIKI SI
         return result
     except Exception as e:
         logger.error(f"Generic engine LLM Error: {e}")
+        detected_service = detect_requested_service_from_text(message_text, cfg) or known_requested_service(conversation, memory)
+        deterministic_booking = is_booking_opt_in(message_text, None) or str(conversation.get("state") or "").startswith("collect_")
+        deterministic_price = is_price_question(message_text)
+        deterministic_handoff = is_handoff_request(message_text)
+        deterministic_intent = "human_handoff" if deterministic_handoff else ("price_question" if deterministic_price else ("active_booking" if deterministic_booking else ("service_question" if detected_service else "direct_answer")))
+        deterministic_entities = {
+            "lead_name": extract_name(message_text, conversation.get("state") or "new"),
+            "phone": extract_phone(message_text),
+            "requested_service": detected_service,
+            "requested_date": extract_date(message_text),
+            "requested_time": extract_time_for_state(message_text, conversation.get("state") or "new") or extract_time(message_text) or extract_generic_datetime_time(message_text),
+            "customer_goal": None,
+        }
         return {
             "intent": "fallback",
-            "reply_text": cfg.get("fallback_reply") or "Şu an yanıtı netleştiremedim; mesajınızı aldım, birazdan devam edelim.",
-            "extracted_entities": {},
+            "_deterministic_intent": deterministic_intent,
+            "reply_text": cfg.get("fallback_reply") or build_deterministic_fallback_reply(message_text, conversation, memory, cfg),
+            "extracted_entities": deterministic_entities,
             "requires_human": False,
             "_context_summary": context_summary,
             "_llm_error": str(e),

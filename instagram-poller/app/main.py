@@ -377,7 +377,7 @@ def fetch_threads(cl: Client) -> list[dict[str, Any]]:
     # Instagram Web/browser usage can mark a DM as read before this poller sees it;
     # unread-only polling then misses the user's text entirely. Recent polling keeps
     # active/read conversations visible while processed_message_ids prevents repeats.
-    recent_limit = max(20, min(IG_THREAD_FETCH_LIMIT, 40))
+    recent_limit = max(10, min(IG_THREAD_FETCH_LIMIT, 15))
     recent_threads = fetch_raw_threads(
         cl,
         "direct_v2/inbox/",
@@ -395,7 +395,7 @@ def fetch_threads(cl: Client) -> list[dict[str, Any]]:
     threads.sort(key=lambda thread: max(thread_latest_item_ts(thread), as_int(thread.get("last_activity_at"))), reverse=True)
 
     refreshed_threads: list[dict[str, Any]] = []
-    refresh_limit = min(len(threads), 15)
+    refresh_limit = min(len(threads), 2)
     for index, thread in enumerate(threads):
         should_force_refresh = index < refresh_limit
         refreshed_threads.append(refresh_thread_if_stale(cl, thread, force=should_force_refresh))
