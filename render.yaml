@@ -60,8 +60,6 @@ services:
         value: llama-3.1-8b-instant
       - key: ANSWER_FIRST_PIPELINE
         value: "on"
-      - key: LLM_BASE_URL
-        value: "https://afford-fun-thorough-hints.trycloudflare.com/v1"
       - key: CRM_SYNC_ENABLED
         value: "true"
       - key: LIVE_CRM_ENABLED
