@@ -10890,19 +10890,78 @@ def select_ai_first_models(message_text: str, conversation: dict[str, Any]) -> l
     return result or list_llm_models()
 
 
+LIVE_CRM_SERVICES_AI_CACHE: list[dict[str, Any]] = []
+LIVE_CRM_SERVICES_AI_CACHE_TS: float = 0
+LIVE_CRM_SERVICES_AI_TTL = int(os.getenv("LIVE_CRM_SERVICES_AI_TTL", "300"))
+
+
+def fetch_live_crm_services_for_ai() -> list[dict[str, Any]]:
+    global LIVE_CRM_SERVICES_AI_CACHE, LIVE_CRM_SERVICES_AI_CACHE_TS
+    now = time_module.time()
+    if LIVE_CRM_SERVICES_AI_CACHE and (now - LIVE_CRM_SERVICES_AI_CACHE_TS) < LIVE_CRM_SERVICES_AI_TTL:
+        return LIVE_CRM_SERVICES_AI_CACHE
+    if not is_live_crm_configured():
+        return []
+    try:
+        headers, _ = live_crm_auth_session()
+        if not headers:
+            return []
+        response = live_crm_request(
+            "GET",
+            "services",
+            headers,
+            params={
+                "select": "id,name,category,price,duration,created_at",
+                "limit": "500",
+                "order": "created_at.desc",
+            },
+        )
+        rows = response.json() or []
+        result = []
+        for row in rows:
+            name = sanitize_text(row.get("name") or "")
+            if not name:
+                continue
+            price_val = row.get("price")
+            result.append({
+                "display": name,
+                "price": str(int(price_val)) if price_val else "",
+                "price_note": "CRM'den çekildi",
+                "delivery_time": str(row.get("duration") or "60"),
+                "summary": f"{name} hizmeti hakkında bilgi ver ve randevu/teklif için yönlendir.",
+                "keywords": name.lower().split(),
+                "source": "crm_live",
+            })
+        LIVE_CRM_SERVICES_AI_CACHE = result
+        LIVE_CRM_SERVICES_AI_CACHE_TS = now
+        return result
+    except Exception:
+        return LIVE_CRM_SERVICES_AI_CACHE
+
+
 def build_ai_first_service_context() -> list[dict[str, Any]]:
     services: list[dict[str, Any]] = []
+    seen_names: set[str] = set()
+    live_services = fetch_live_crm_services_for_ai()
+    for service in live_services:
+        name_key = (service.get("display") or "").lower().strip()
+        if name_key and name_key not in seen_names:
+            services.append(service)
+            seen_names.add(name_key)
     for service in DOEL_SERVICE_CATALOG:
-        services.append(
-            {
-                "display": display_service_name(str(service.get("display") or "")),
-                "price": str(service.get("price") or ""),
-                "price_note": str(service.get("price_note") or ""),
-                "delivery_time": str(service.get("delivery_time") or ""),
-                "summary": str(service.get("summary") or ""),
-                "keywords": service.get("keywords") or [],
-            }
-        )
+        name_key = (service.get("display") or "").lower().strip()
+        if name_key and name_key not in seen_names:
+            services.append(
+                {
+                    "display": display_service_name(str(service.get("display") or "")),
+                    "price": str(service.get("price") or ""),
+                    "price_note": str(service.get("price_note") or ""),
+                    "delivery_time": str(service.get("delivery_time") or ""),
+                    "summary": str(service.get("summary") or ""),
+                    "keywords": service.get("keywords") or [],
+                }
+            )
+            seen_names.add(name_key)
     return services
 
 
