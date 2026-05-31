@@ -13640,11 +13640,20 @@ def live_crm_ensure_task_for_conversation(conversation: dict[str, Any]) -> None:
                 "select": "id,title,due_date,completed",
                 "user_id": f"eq.{user_id}",
                 "title": f"eq.{task_title}",
-                "due_date": f"eq.{requested_date}",
+                "completed": "eq.false",
                 "limit": "1",
             },
         ).json() or []
         if existing_tasks:
+            existing_id = existing_tasks[0].get("id")
+            existing_date = existing_tasks[0].get("due_date", "")
+            if existing_date != requested_date:
+                live_crm_request(
+                    "PATCH",
+                    f"tasks?id=eq.{existing_id}",
+                    headers,
+                    json_body={"due_date": requested_date},
+                )
             return
         live_crm_request(
             "POST",
