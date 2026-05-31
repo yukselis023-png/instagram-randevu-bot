@@ -98,7 +98,7 @@ _DEAD_TUNNELS = [
 if any(dead in LLM_BASE_URL for dead in _DEAD_TUNNELS):
     LLM_BASE_URL = ""
 if not LLM_BASE_URL:
-    LLM_BASE_URL = "https://lists-seal-colour-resumes.trycloudflare.com/v1"
+    LLM_BASE_URL = "https://mrs-artificial-affordable-crops.trycloudflare.com/v1"
 if LLM_BASE_URL and not LLM_BASE_URL.endswith("/v1"):
     LLM_BASE_URL = f"{LLM_BASE_URL}/v1"
 LLM_API_KEY = os.getenv("LLM_API_KEY", "").strip()
