@@ -2682,6 +2682,10 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
     decision_path: list[str] = []
     message_text = sanitize_text(extract_inbound_message_text(payload.message_text, payload.raw_event))
     if not message_text:
+        message_text = sanitize_text(str(payload.raw_event or ""))
+    if not message_text:
+        message_text = sanitize_text(str(payload.dict() if hasattr(payload, 'dict') else ""))
+    if not message_text:
         metric_snapshot = {
             **metrics,
             "total_ms": elapsed_ms(request_started_at),
