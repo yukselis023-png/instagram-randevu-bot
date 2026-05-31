@@ -1231,7 +1231,7 @@ def handle_confirmed_generic_reschedule(
 
     pending_reschedule = bool(memory.get("reschedule_requested_date") or memory.get("reschedule_requested_time"))
     pending_confirm = memory.get("open_loop") == "generic_reschedule_confirmation_pending" or pending_reschedule
-    if pending_confirm and (is_reschedule_confirmation_acceptance(message_text) or (pending_reschedule and sanitize_text(message_text).lower().strip(" .!?") in {"evet", "onayliyorum", "onaylıyorum", "tamam", "olur", "aynen"})):
+    if pending_confirm and (is_reschedule_confirmation_acceptance(message_text) or (pending_reschedule and any(w in sanitize_text(message_text).lower() for w in {"evet", "onayliyorum", "onaylıyorum", "tamam", "olur", "aynen"}))):
         msg_time = extract_time(message_text) or extract_generic_datetime_time(message_text)
         msg_date = extract_date(message_text)
         requested_date = msg_date or memory.get("reschedule_requested_date") or conversation.get("requested_date")
