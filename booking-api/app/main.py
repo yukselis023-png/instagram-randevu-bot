@@ -2680,7 +2680,7 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
     trace_id = sanitize_text(payload.trace_id or ((payload.raw_event or {}).get("trace_id") if isinstance(payload.raw_event, dict) else "") or ((payload.raw_event or {}).get("message_id") if isinstance(payload.raw_event, dict) else "") or payload.sender_id)
     used_llm_extractor = False
     decision_path: list[str] = []
-    message_text = sanitize_text(payload.message_text or "")
+    message_text = sanitize_text(extract_inbound_message_text(payload.message_text, payload.raw_event))
     if not message_text:
         metric_snapshot = {
             **metrics,
@@ -5761,6 +5761,27 @@ def extract_inbound_message_id(raw_event: dict[str, Any] | None) -> str | None:
         if clean:
             return clean
     return None
+
+
+def extract_inbound_message_text(payload_message_text: str | None, raw_event: dict[str, Any] | None) -> str:
+    """Extract message text from payload, with fallback to raw_event."""
+    text = payload_message_text or ""
+    if text.strip():
+        return text
+    if not isinstance(raw_event, dict):
+        return ""
+    candidates = [
+        raw_event.get("message_text"),
+        raw_event.get("text"),
+        raw_event.get("message", {}).get("text") if isinstance(raw_event.get("message"), dict) else None,
+        raw_event.get("body"),
+        raw_event.get("content"),
+        raw_event.get("entry", [{}])[0].get("messaging", [{}])[0].get("message", {}).get("text") if isinstance(raw_event.get("entry"), list) else None,
+    ]
+    for value in candidates:
+        if value and str(value).strip():
+            return str(value)
+    return ""
 
 
 def normalize_inbound_platform(value: str | None) -> str:
