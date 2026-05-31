@@ -2083,16 +2083,54 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
                         conversation["state"] = "completed"
                         conversation["appointment_status"] = "confirmed"
                         try:
-                            created = create_appointment(conn, conversation, payload.instagram_username)
-                            appointment_id = int(created[0] if isinstance(created, tuple) else created)
-                            appointment_created = True
-                            conversation["appointment_id"] = appointment_id
-                            handoff = False
-                            reply_text = build_confirmation_message(conversation)
-                            final_reply_source = "calendar_authority"
-                            decision_path.append("fsm:silent_appointment_created")
+                            _existing = find_active_appointment_for_user(conn, conversation.get("instagram_user_id"))
+                            if _existing:
+                                _eid = _existing["id"]
+                                _d = normalize_date_string(conversation.get("requested_date"))
+                                _t = normalize_time_string(conversation.get("requested_time"))
+                                with conn.cursor() as cur:
+                                    cur.execute(
+                                        """
+                                        UPDATE appointments
+                                        SET appointment_date = %s::date,
+                                            appointment_time = %s::time,
+                                            instagram_username = COALESCE(%s, instagram_username),
+                                            full_name = COALESCE(%s, full_name),
+                                            phone = COALESCE(%s, phone),
+                                            service = COALESCE(%s, service),
+                                            updated_at = NOW()
+                                        WHERE id = %s
+                                        RETURNING id
+                                        """,
+                                        (_d, _t, payload.instagram_username,
+                                         conversation.get("full_name"),
+                                         conversation.get("phone"),
+                                         conversation.get("service"),
+                                         _eid),
+                                    )
+                                    _upd = cur.fetchone()
+                                if _upd:
+                                    conn.commit()
+                                    appointment_id = int(_eid)
+                                    appointment_created = True
+                                    conversation["appointment_id"] = appointment_id
+                                    handoff = False
+                                    reply_text = build_confirmation_message(conversation)
+                                    final_reply_source = "calendar_authority"
+                                    decision_path.append("fsm:silent_appointment_updated")
+                                else:
+                                    raise Exception("UPDATE returned no rows")
+                            else:
+                                created = create_appointment(conn, conversation, payload.instagram_username)
+                                appointment_id = int(created[0] if isinstance(created, tuple) else created)
+                                appointment_created = True
+                                conversation["appointment_id"] = appointment_id
+                                handoff = False
+                                reply_text = build_confirmation_message(conversation)
+                                final_reply_source = "calendar_authority"
+                                decision_path.append("fsm:silent_appointment_created")
                         except Exception as exc:  # noqa: BLE001
-                            logger.error("Silent appointment creation failed: %s", exc)
+                            logger.error("FSM appointment create/update failed: %s", exc)
                             conversation["state"] = "human_handoff"
                             conversation["appointment_status"] = "handoff"
                             conversation["assigned_human"] = True
