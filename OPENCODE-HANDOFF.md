@@ -1,5 +1,5 @@
 # OpenCode Handoff — Doel IG CRM System
-> Session: 260531-ready-swamp | Tarih: 2026-05-31 21:30 +03
+> Session: 260531-ready-swamp | Tarih: 2026-05-31 22:05 +03
 
 ## Hedef
 Instagram DM üzerinden randevu toplayan, LLM destekli bot + CRM dashboard sistemi.
