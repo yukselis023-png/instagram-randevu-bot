@@ -70,7 +70,7 @@ services:
       - key: LIVE_CRM_SUPABASE_ANON_KEY
         value: "sb_publishable_DhA_HhaX9lX8HOzTiep9gQ__sthJ0fx"
       - key: LIVE_CRM_SUPABASE_SERVICE_ROLE_KEY
-        value: "Sb_secret_S74WtQFHyGaY3t5eYWEk6A_3kXEiS0V"
+        value: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJuamtpbHlpcW5xaXlxaHdxZGx5Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NDM3Mjg0OCwiZXhwIjoyMDg5OTQ4ODQ4fQ.BjMvd4oxNLnAjXeskZkXcxwxj96c8k-unwCXVWLuVHA"
       - key: LIVE_CRM_EMAIL
         value: "infodoeldigital+crm@gmail.com"
       - key: LIVE_CRM_PASSWORD
