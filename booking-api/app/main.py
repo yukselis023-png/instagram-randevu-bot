@@ -12467,6 +12467,14 @@ def get_slot_service_usage(conn: psycopg.Connection, date_value: str, time_value
 
 
 def is_slot_capacity_available(conn: psycopg.Connection, date_value: str, time_value: str, service_name: str | None) -> bool:
+    # Check LIVE_CRM first if enabled
+    if LIVE_CRM_ENABLED:
+        try:
+            taken = live_crm_list_taken_slots(date_value)
+            if str(time_value)[:5] in taken:
+                return False
+        except Exception:
+            pass
     capacity = get_service_capacity(conn, service_name)
     current_count = get_slot_service_usage(conn, date_value, time_value, service_name)
     return is_slot_capacity_available_from_counts(current_count, capacity)
