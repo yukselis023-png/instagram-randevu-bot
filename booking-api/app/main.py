@@ -13358,7 +13358,7 @@ def live_crm_list_taken_slots(date_value: str, headers: dict[str, str] | None = 
         return set()
 
     if not force_refresh:
-        cached = get_live_crm_cached_slots(user_id, date_value)
+        cached = get_live_crm_cached_slots("global", date_value)
         if cached is not None:
             return cached
 
@@ -13368,7 +13368,6 @@ def live_crm_list_taken_slots(date_value: str, headers: dict[str, str] | None = 
         headers,
         params={
             "select": "id,time,status",
-            "user_id": f"eq.{user_id}",
             "date": f"eq.{date_value}",
             "limit": "500",
         },
@@ -13378,7 +13377,7 @@ def live_crm_list_taken_slots(date_value: str, headers: dict[str, str] | None = 
         for item in (response.json() or [])
         if item.get("time") and str(item.get("status") or "") in {"scheduled", LIVE_CRM_PRECONSULTATION_STATUS}
     }
-    set_live_crm_cached_slots(user_id, date_value, slots)
+    set_live_crm_cached_slots("global", date_value, slots)
     return slots
 
 
