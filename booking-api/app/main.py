@@ -7016,7 +7016,11 @@ def extract_date(text: str) -> str | None:
         year_raw = month_named.group(3)
         year = int(year_raw) if year_raw else today.year
         if year_raw and len(year_raw) == 2:
-            year += 200
+            year += 2000
+            if year < today.year:
+                year = today.year
+        if year < today.year or year > 2100:
+            year = today.year
         try:
             parsed = date(year, month, day)
             if not year_raw and parsed < today:
@@ -7046,6 +7050,8 @@ def extract_date(text: str) -> str | None:
         year = int(year_raw) if year_raw else today.year
         if year_raw and len(year_raw) == 2:
             year += 2000
+        if year < today.year or year > 2100:
+            year = today.year
         try:
             parsed = date(year, month, day)
             if not year_raw and parsed < today:
