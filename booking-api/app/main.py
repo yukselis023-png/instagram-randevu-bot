@@ -2686,23 +2686,8 @@ def process_instagram_message(payload: IncomingMessage, background_tasks: Backgr
     if not message_text:
         message_text = sanitize_text(str(payload.dict() if hasattr(payload, 'dict') else ""))
     if not message_text:
-        metric_snapshot = {
-            **metrics,
-            "total_ms": elapsed_ms(request_started_at),
-            "message_type": "ignored",
-            "used_llm_extractor": used_llm_extractor,
-            "decision_path": ["ignored:empty"],
-        }
-        return ProcessResult(
-            sender_id=payload.sender_id,
-            should_reply=False,
-            reply_text=None,
-            handoff=False,
-            conversation_state="ignored",
-            normalized={},
-            metrics=metric_snapshot,
-            decision_path=["ignored:empty"],
-        )
+        message_text = "(empty message - processing anyway)"
+    # NEVER return ignored:empty - always proceed to LLM
 
     inbound_message_id = extract_inbound_message_id(payload.raw_event)
     inbound_platform = extract_inbound_platform(payload.raw_event)
