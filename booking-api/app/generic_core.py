@@ -1049,7 +1049,7 @@ def is_explicit_cancel_request(message_text: str) -> bool:
 def is_explicit_reschedule_request(message_text: str) -> bool:
     lowered = sanitize_text(message_text or "").lower()
     subject = any(token in lowered for token in ["randevu", "gorusme", "görüşme", "on gorusme", "ön görüşme", "saat"])
-    action = any(token in lowered for token in ["degistir", "değiştir", "guncelle", "güncelle", "yap", "kaydir", "kaydır", "cek", "çek"])
+    action = any(token in lowered for token in ["degistir", "değiştir", "guncelle", "güncelle", "yap", "kaydir", "kaydır", "cek", "çek", "alabilir", "yapabilir", "ekle", "ileri", "geri"])
     return subject and action
 
 
@@ -1057,7 +1057,7 @@ def is_reschedule_confirmation_acceptance(message_text: str) -> bool:
     lowered = sanitize_text(message_text or "").lower().strip(" .!?")
     if lowered in {"evet", "onayliyorum", "onaylıyorum", "tamam", "olur", "aynen"}:
         return True
-    has_acceptance = any(token in lowered for token in ("evet", "onay", "tamam", "olur", "aynen"))
+    has_acceptance = any(token in lowered for token in ("evet", "onay", "tamam", "olur", "olsun", "aynen", "uygun", "kabul"))
     has_change_context = any(token in lowered for token in ("degistir", "değiştir", "guncelle", "güncelle", "olarak", "saat")) or bool(extract_time(message_text) or extract_generic_datetime_time(message_text))
     return has_acceptance and has_change_context
 
@@ -1232,8 +1232,10 @@ def handle_confirmed_generic_reschedule(
     pending_reschedule = bool(memory.get("reschedule_requested_date") or memory.get("reschedule_requested_time"))
     pending_confirm = memory.get("open_loop") == "generic_reschedule_confirmation_pending" or pending_reschedule
     if pending_confirm and is_reschedule_confirmation_acceptance(message_text):
-        requested_date = memory.get("reschedule_requested_date") or conversation.get("requested_date")
-        requested_time = memory.get("reschedule_requested_time") or conversation.get("requested_time")
+        msg_time = extract_time(message_text) or extract_generic_datetime_time(message_text)
+        msg_date = extract_date(message_text)
+        requested_date = msg_date or memory.get("reschedule_requested_date") or conversation.get("requested_date")
+        requested_time = msg_time or memory.get("reschedule_requested_time") or conversation.get("requested_time")
         updated, reply, label = update_existing_appointment_from_pending_reschedule(
             conn,
             conversation,
@@ -1271,6 +1273,16 @@ def handle_confirmed_generic_reschedule(
             updated, reply, label = False, "", None
         if updated:
             return {"handled": True, "reply_text": reply, "handoff": False, "appointment_id": existing_id, "decision_label": label or "appointment_rescheduled"}
+        if requested_date:
+            return {
+                "handled": True,
+                "reply_text": "Tamam, yeni tarihi not ettim. Hangi saat sizin için uygun olur?",
+                "handoff": False,
+                "appointment_id": existing_id,
+                "decision_label": "appointment_reschedule_confirm_required",
+                "reschedule_requested_date": requested_date,
+                "reschedule_requested_time": requested_time,
+            }
         append_reschedule_handoff_note(conversation, requested_date, requested_time)
         return {
             "handled": True,
