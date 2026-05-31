@@ -142,6 +142,7 @@ MAX_VOICE_NOTE_URL_LENGTH = int(os.getenv("MAX_VOICE_NOTE_URL_LENGTH", "1200000"
 LIVE_CRM_ENABLED = os.getenv("LIVE_CRM_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
 LIVE_CRM_SUPABASE_URL = os.getenv("LIVE_CRM_SUPABASE_URL", "https://rnjkilyiqnqiyqhwqdly.supabase.co").rstrip("/")
 LIVE_CRM_SUPABASE_ANON_KEY = os.getenv("LIVE_CRM_SUPABASE_ANON_KEY", "sb_publishable_DhA_HhaX9lX8HOzTiep9gQ__sthJ0fx")
+LIVE_CRM_SUPABASE_SERVICE_ROLE_KEY = os.getenv("LIVE_CRM_SUPABASE_SERVICE_ROLE_KEY", "")
 LIVE_CRM_EMAIL = os.getenv("LIVE_CRM_EMAIL", "infodoeldigital+crm@gmail.com").strip()
 LIVE_CRM_PASSWORD = os.getenv("LIVE_CRM_PASSWORD", "DoelCRM!2026")
 LIVE_CRM_PRECONSULTATION_STATUS = os.getenv("LIVE_CRM_PRECONSULTATION_STATUS", "preconsultation").strip() or "preconsultation"
@@ -13097,6 +13098,17 @@ def build_live_crm_headers(access_token: str) -> dict[str, str]:
     }
 
 
+def build_live_crm_service_role_headers() -> dict[str, str] | None:
+    if not LIVE_CRM_SUPABASE_SERVICE_ROLE_KEY:
+        return None
+    return {
+        "apikey": LIVE_CRM_SUPABASE_SERVICE_ROLE_KEY,
+        "Authorization": f"Bearer {LIVE_CRM_SUPABASE_SERVICE_ROLE_KEY}",
+        "Content-Type": "application/json",
+        "Prefer": "return=representation",
+    }
+
+
 def live_crm_auth_session(force_refresh: bool = False) -> tuple[dict[str, str], str] | tuple[None, None]:
     if not is_live_crm_configured():
         return None, None
@@ -13356,6 +13368,11 @@ def live_crm_list_taken_slots(date_value: str, headers: dict[str, str] | None = 
         headers, user_id = live_crm_auth_session(force_refresh)
     if not headers or not user_id:
         return set()
+
+    # Use service_role key for global slot queries (bypasses Supabase RLS)
+    sr_headers = build_live_crm_service_role_headers()
+    if sr_headers:
+        headers = sr_headers
 
     if not force_refresh:
         cached = get_live_crm_cached_slots("global", date_value)

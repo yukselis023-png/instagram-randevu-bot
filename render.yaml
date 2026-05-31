@@ -69,6 +69,8 @@ services:
         value: "https://rnjkilyiqnqiyqhwqdly.supabase.co"
       - key: LIVE_CRM_SUPABASE_ANON_KEY
         value: "sb_publishable_DhA_HhaX9lX8HOzTiep9gQ__sthJ0fx"
+      - key: LIVE_CRM_SUPABASE_SERVICE_ROLE_KEY
+        value: "Sb_secret_S74WtQFHyGaY3t5eYWEk6A_3kXEiS0V"
       - key: LIVE_CRM_EMAIL
         value: "infodoeldigital+crm@gmail.com"
       - key: LIVE_CRM_PASSWORD
