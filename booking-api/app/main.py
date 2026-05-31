@@ -5752,20 +5752,29 @@ def extract_inbound_message_id(raw_event: dict[str, Any] | None) -> str | None:
     return None
 
 
-def extract_inbound_message_text(payload_message_text: str | None, raw_event: dict[str, Any] | None) -> str:
+def extract_inbound_message_text(payload_message_text: str | None, raw_event: Any = None) -> str:
     """Extract message text from payload, with fallback to raw_event."""
     text = payload_message_text or ""
     if text.strip():
         return text
-    if not isinstance(raw_event, dict):
+    # Parse raw_event if string (JSON)
+    parsed_raw: dict[str, Any] | None = None
+    if isinstance(raw_event, str):
+        try:
+            parsed_raw = json.loads(raw_event)
+        except Exception:
+            parsed_raw = None
+    elif isinstance(raw_event, dict):
+        parsed_raw = raw_event
+    if not isinstance(parsed_raw, dict):
         return ""
     candidates = [
-        raw_event.get("message_text"),
-        raw_event.get("text"),
-        raw_event.get("message", {}).get("text") if isinstance(raw_event.get("message"), dict) else None,
-        raw_event.get("body"),
-        raw_event.get("content"),
-        raw_event.get("entry", [{}])[0].get("messaging", [{}])[0].get("message", {}).get("text") if isinstance(raw_event.get("entry"), list) else None,
+        parsed_raw.get("message_text"),
+        parsed_raw.get("text"),
+        parsed_raw.get("message", {}).get("text") if isinstance(parsed_raw.get("message"), dict) else None,
+        parsed_raw.get("body"),
+        parsed_raw.get("content"),
+        parsed_raw.get("entry", [{}])[0].get("messaging", [{}])[0].get("message", {}).get("text") if isinstance(parsed_raw.get("entry"), list) else None,
     ]
     for value in candidates:
         if value and str(value).strip():
