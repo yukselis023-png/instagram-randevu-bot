@@ -194,3 +194,68 @@ docker exec ig-randevu-api curl http://localhost:8000/health
 - Base URL: `http://127.0.0.1:8045/v1`
 - API Key: `sk-93ac4612b7b5427d9de03ec1b96e8f26`
 - Model: `gemini-3-flash`
+
+## Son Git Durumu (Güncel)
+```
+3d858b0 fix(generic_core): FSM slot confirmation updates existing appointment  ← HEAD
+569c528 fix: change to substring matching in reschedule confirmation
+e64bea0 fix(crm): allow simple affirmations in pending reschedule flow
+a3dd1c4 fix(generic_core): skip Phase 4B enforcement during slot collection
+27266f1 fix(crm): Phase 4B filter no longer overrides FSM reschedule responses
+a197188 fix(crm): reschedule flow for preconsultation appointments
+53678aa fix(crm): prevent duplicate tasks in live_crm_ensure_task_for_conversation
+85b2dc5 chore: use gemini-3-flash model consistently
+```
+
+## Deploy Durumu (Render)
+- En son deploy: `3d858b0` — manuel tetikleme (19:19)
+- Deploy ID: `dep-d8e5vkmk1jcs739l6h9g`
+- Live: 19:21:17 ("Your service is live")
+- URL: https://instagram-randevu-bot.onrender.com
+
+## Çalışma Modeli (Dynamic Agent Pipeline)
+```
+Build → Review → Fix(max 5 iter) → Merge → E2E
+
+PARALEL:
+- M0 LLM Erişimi: bağımsız
+- M1 Booking API Core: M0'a bağımlı
+- M2 Poller + M3 AI Katalog: M1'den sonra paralel
+- M4 CRM Frontend: M1+M3'e bağımlı
+- M5 Smoke Test: hepsinin üstünde
+
+AJAN KURALLARI:
+- Her modül = 1 agent() kendi worktree'sinde
+- Sadece modül + ilgili arayüz dosyaları okunur
+- budget.remaining() < 50.000 → yeni ajan spawn etme
+- Test geçmeyen modül Review'a gönderilmez
+```
+
+## Agent Pipeline (Dynamic Workflow)
+**Spawn Edilen Ajanlar (2026-05-31 21:35):**
+- `260531-steady-horizon` — CORE SYSTEMS (health + API endpoints + LLM tunnel)
+- `260531-zesty-mist` — BOOKING FLOW (create + reschedule + duplicate check)
+- `260531-prime-flower` — CRM SYNC (Supabase data + task dedup)
+- `260531-deep-salmon` — E2E FULL (happy path + pricing + handoff + cancellation)
+
+Her ajan kendi worktree'sinde test script'i yazıp çalıştıracak. Sonuçlar data/ klasörüne yazılacak.
+
+## Fix Özeti (Bu Oturum)
+| # | Commit | Fix | Etki |
+|---|--------|-----|------|
+| 1 | `53678aa` | Task dedup: title+completed=false eşleşmesi | Artık reschedule'da çift task oluşmaz |
+| 2 | `a197188` | Reschedule tespiti: alabilir/yapabilir/olsun/uygun/kabul | Türkçe kalıplar yakalanır |
+| 3 | `27266f1` | Phase 4B override guard: FSM yanıtları korunur | LLM safe fallback ile FSM ezilmez |
+| 4 | `a3dd1c4` | Phase 4B collect_datetime guard | Slot seçimi akışında override önlenir |
+| 5 | `3d858b0` | FSM slot onayı: mevcut randevuyu günceller | create_appointment yerine UPDATE |
+
+## Test Matrisi (Son)
+| Test | Sonuç |
+|------|-------|
+| Booking (Happy Path) | ✅ Appt #57 oluştu |
+| Reschedule ("randevumu...alabilirmiyim") | ✅ Tespit + slot önerisi + onay akışı |
+| FSM slot update (mevcut randevuyu güncelle) | ✅ 3d858b0 ile deploy edildi |
+| Task dedup (CRM'de çift task yok) | ✅ 44 unique task, hepsi single |
+| CRM sync (15 appt, 19 cust, 10 svc) | ✅ Gerçek veri senkronize |
+| LLM tunnel (gemini-3-flash proxy) | ✅ 200 OK, final_reply_source=llm_raw |
+| API endpoint'ler (hepsi) | ✅ 200 OK |
