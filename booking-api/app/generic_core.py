@@ -2373,8 +2373,9 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
 
         # --- PHASE 4B — COMPLETED FOLLOW-UP ANSWER-FIRST ENFORCEMENT ---
         if enforce_completed_followups and not handoff and not appointment_created and final_reply_source != "fsm":
+            _collecting_slot = conversation.get("state") in ("collect_datetime",)
             _is_completed = is_confirmed_generic_appointment(conversation)
-            if _is_completed:
+            if _is_completed and not _collecting_slot:
                 from app.pipeline_wrapper import build_completed_followup_answer_first
                 try:
                     # AI reply_candidate: use the LLM reply that was produced before FSM overrides.
