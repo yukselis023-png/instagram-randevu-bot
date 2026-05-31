@@ -89,19 +89,22 @@ SLOT_DURATION_MINUTES = int(os.getenv("SLOT_DURATION_MINUTES", "60"))
 SLOT_BUFFER_MINUTES = int(os.getenv("SLOT_BUFFER_MINUTES", "10"))
 APPOINTMENT_LOOKAHEAD_DAYS = int(os.getenv("APPOINTMENT_LOOKAHEAD_DAYS", "30"))
 AI_FIRST_BOOKING_SLOT_LIMIT = int(os.getenv("AI_FIRST_BOOKING_SLOT_LIMIT", "4"))
-LLM_BASE_URL = os.getenv("LLM_BASE_URL", "").strip().rstrip("/")
+# ── LLM URL: ALWAYS use the working tunnel, ignore any env var override ──
+_LLM_ENV_URL = os.getenv("LLM_BASE_URL", "").strip().rstrip("/")
 _DEAD_TUNNELS = [
     "intent-association-radar-route.trycloudflare.com",
     "scores-unable-texts-fish.trycloudflare.com",
     "afford-fun-thorough-hints.trycloudflare.com",
     "alumni-definitions-eddie-dale.trycloudflare.com",
 ]
-if any(dead in LLM_BASE_URL for dead in _DEAD_TUNNELS):
-    LLM_BASE_URL = ""
-if not LLM_BASE_URL:
-    LLM_BASE_URL = "https://shipping-jump-cold-webmasters.trycloudflare.com/v1"
+_NEW_TUNNEL = "https://shipping-jump-cold-webmasters.trycloudflare.com/v1"
+if _LLM_ENV_URL and not any(dead in _LLM_ENV_URL for dead in _DEAD_TUNNELS):
+    LLM_BASE_URL = _LLM_ENV_URL
+else:
+    LLM_BASE_URL = _NEW_TUNNEL
 if LLM_BASE_URL and not LLM_BASE_URL.endswith("/v1"):
     LLM_BASE_URL = f"{LLM_BASE_URL}/v1"
+logger.info("LLM_BASE_URL resolved: %s", LLM_BASE_URL)
 LLM_API_KEY = os.getenv("LLM_API_KEY", "").strip()
 if not LLM_API_KEY:
     LLM_API_KEY = "sk-93ac4612b7b5427d9de03ec1b96e8f26"
