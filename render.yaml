@@ -47,7 +47,7 @@ services:
       - key: LLM_REPLY_POLISH_ENABLED
         value: "true"
       - key: LLM_BASE_URL
-        value: https://mrs-artificial-affordable-crops.trycloudflare.com/v1
+        value: https://alumni-definitions-eddie-dale.trycloudflare.com/v1
       - key: LLM_MODEL
         value: gemini-3-flash
       - key: LLM_REPLY_MICRO_MODEL
