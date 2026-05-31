@@ -12470,7 +12470,7 @@ def is_slot_capacity_available(conn: psycopg.Connection, date_value: str, time_v
     # Check LIVE_CRM first if enabled
     if LIVE_CRM_ENABLED:
         try:
-            taken = live_crm_list_taken_slots(date_value)
+            taken = live_crm_list_taken_slots(date_value, force_refresh=True)
             if str(time_value)[:5] in taken:
                 return False
         except Exception:
