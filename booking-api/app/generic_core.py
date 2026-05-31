@@ -1448,16 +1448,12 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
         repr(message_text[:200]) if message_text else "EMPTY",
         "generic")
     if not message_text:
-        return ProcessResult(
-            sender_id=payload.sender_id,
-            should_reply=False,
-            reply_text=None,
-            handoff=False,
-            conversation_state="ignored",
-            normalized={},
-            metrics=metrics,
-            decision_path=["ignored:empty"]
-        )
+        message_text = sanitize_text(str(payload.raw_event or ""))
+    if not message_text:
+        message_text = sanitize_text(str(payload.dict() if hasattr(payload, 'dict') else ""))
+    if not message_text:
+        message_text = "(empty message - processing anyway)"
+    # NEVER return ignored:empty - always proceed to LLM
 
     inbound_message_id = extract_inbound_message_id(payload.raw_event)
     inbound_platform = extract_inbound_platform(payload.raw_event)
