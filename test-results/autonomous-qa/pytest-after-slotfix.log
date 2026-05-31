@@ -1,0 +1,405 @@
+...F...Fs............................................................... [ 14%]
+........................................................................ [ 28%]
+.......................................ssss....s...............F....ss.s [ 43%]
+.sss....ssFFFFss....sssss.s.ss..sss.ssF.s.s..s...s.....sF...s..........F [ 57%]
+......F................................................................. [ 72%]
+........................................................................ [ 86%]
+.................................................................        [100%]
+================================== FAILURES ===================================
+__ test_invariant_invalid_phone_never_persists_and_valid_phone_is_canonical ___
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001AC706D5350>
+
+    def test_invariant_invalid_phone_never_persists_and_valid_phone_is_canonical(monkeypatch):
+        os.environ["CHATBOT_ENGINE"] = "generic"
+        conversation = {
+            "sender_id": "phone-invariant",
+            "state": "collect_phone",
+            "full_name": "Berkay Elbir",
+            "lead_name": "Berkay Elbir",
+            "service": "Otomasyon",
+            "memory_state": {"requested_service": "Otomasyon"},
+        }
+        invalid = run_message(
+            monkeypatch,
+            "055555",
+            {"intent": "active_booking", "reply_text": "Telefon numaranýzý alabilir miyim?", "extracted_entities": {}, "requires_human": False},
+            conversation,
+        )
+        assert invalid.appointment_created is False
+        assert conversation.get("phone") is None
+>       assert conversation.get("state") == "collect_phone"
+E       AssertionError: assert 'collect_datetime' == 'collect_phone'
+E         
+E         - collect_phone
+E         + collect_datetime
+
+tests\test_automation_invariants.py:192: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.main:generic_core.py:1353 generic_pre_llm_slot_context_failed sender_id=phone-invariant error='DummyConn' object has no attribute 'fetchall'
+_________ test_invariant_username_save_uses_actual_instagram_username _________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001AC711D7C90>
+
+    def test_invariant_username_save_uses_actual_instagram_username(monkeypatch):
+        os.environ["CHATBOT_ENGINE"] = "generic"
+        conversation = {
+            "sender_id": "username-invariant",
+            "state": "collect_name",
+            "service": "Otomasyon",
+            "memory_state": {"requested_service": "Otomasyon"},
+        }
+        result = run_message(
+            monkeypatch,
+            "Kullanýcý adým ile kaydedin",
+            {"intent": "active_booking", "reply_text": "Telefon numaranýzý alabilir miyim?", "extracted_entities": {"lead_name": "Kullanýcý Adý"}, "requires_human": False},
+            conversation,
+            instagram_username="berkay_test",
+        )
+        assert conversation.get("full_name") == "@berkay_test"
+        assert conversation.get("lead_name") == "@berkay_test"
+>       assert conversation.get("state") == "collect_phone"
+E       AssertionError: assert 'collect_datetime' == 'collect_phone'
+E         
+E         - collect_phone
+E         + collect_datetime
+
+tests\test_automation_invariants.py:325: AssertionError
+____________ test_generic_inbound_save_uses_durable_dedupe_payload ____________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001AC7168EFD0>
+
+    def test_generic_inbound_save_uses_durable_dedupe_payload(monkeypatch):
+        os.environ["CHATBOT_ENGINE"] = "generic"
+        conversation = {"sender_id": "67000808415", "state": "new", "memory_state": {}}
+        saved = []
+    
+        monkeypatch.setattr(gc, "get_conn", lambda: DummyConn())
+        monkeypatch.setattr(gc, "get_or_create_conversation", lambda *args, **kwargs: conversation)
+        monkeypatch.setattr(gc, "try_acquire_inbound_processing_lock", lambda *args, **kwargs: True)
+        monkeypatch.setattr(gc, "has_processed_inbound_message", lambda *args, **kwargs: False)
+        monkeypatch.setattr(gc, "get_recent_message_history", lambda *args, **kwargs: [])
+        monkeypatch.setattr(gc, "upsert_conversation", lambda *args, **kwargs: None)
+        monkeypatch.setattr(gc, "upsert_customer_from_conversation", lambda *args, **kwargs: None)
+        monkeypatch.setattr(gc, "schedule_customer_automation_events", lambda *args, **kwargs: None)
+        monkeypatch.setattr(gc, "queue_crm_sync", lambda *args, **kwargs: None)
+        monkeypatch.setattr(gc, "get_config", lambda: {"business_name": "DOEL Digital", "service_catalog": [{"display": "Web Tasarim"}]})
+        monkeypatch.setattr(gc, "call_llm_json", lambda *args, **kwargs: {"intent": "direct_answer", "reply_text": "Merhaba.", "extracted_entities": {}, "requires_human": False})
+        monkeypatch.setattr(gc, "save_message_log", lambda *args: saved.append(args) or True)
+    
+        result = gc.process_instagram_message_generic(
+            IncomingMessage(
+                sender_id="67000808415",
+                message_text="Kolay gelsin",
+                raw_event={"platform": "igdm", "message_id": "32801733821997095931189647533670400", "trace_id": "igdm:67000808415:32801733821997095931189647533670400"},
+            ),
+            BackgroundTasks(),
+        )
+    
+        inbound_payload = saved[0][4]
+        outbound_payload = saved[-1][4]
+        assert result.should_reply is True
+>       assert inbound_payload["platform"] == "igdm"
+E       AssertionError: assert 'instagram_private_api' == 'igdm'
+E         
+E         - igdm
+E         + instagram_private_api
+
+tests\test_generic_core_engine.py:299: AssertionError
+_ test_generic_collect_name_username_save_uses_instagram_username_and_asks_phone _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001AC71560490>
+
+    def test_generic_collect_name_username_save_uses_instagram_username_and_asks_phone(monkeypatch):
+        os.environ["CHATBOT_ENGINE"] = "generic"
+        llm_result = {
+            "intent": "active_booking",
+            "reply_text": "Tamamdýr, not aldým. Size ulaþabilmemiz için telefon numaranýzý da paylaþabilir misiniz?",
+            "extracted_entities": {"lead_name": "Kullanýcý Adý", "phone": None, "requested_service": "Otomasyon"},
+            "requires_human": False,
+        }
+        conversation = {
+            "sender_id": "generic-username-name-test",
+            "state": "collect_name",
+            "service": "Otomasyon",
+            "memory_state": {"requested_service": "Otomasyon"},
+        }
+    
+        result, conversation = run_generic_message(
+            monkeypatch,
+            "Kullanýcý adým ile kaydedin",
+            llm_result,
+            {"business_name": "DOEL Digital", "service_catalog": [{"display": "Otomasyon", "name": "Otomasyon"}]},
+            conversation,
+            instagram_username="karanlikyukselis",
+        )
+    
+        reply = gc.sanitize_text(result.reply_text).lower()
+        assert conversation.get("full_name") == "@karanlikyukselis"
+        assert conversation.get("lead_name") == "@karanlikyukselis"
+        assert conversation.get("memory_state", {}).get("name_source") == "instagram_username"
+>       assert conversation.get("state") == "collect_phone"
+E       AssertionError: assert 'collect_datetime' == 'collect_phone'
+E         
+E         - collect_phone
+E         + collect_datetime
+
+tests\test_generic_core_engine.py:834: AssertionError
+____ test_generic_collect_name_instagram_name_save_uses_instagram_username ____
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001AC72898050>
+
+    def test_generic_collect_name_instagram_name_save_uses_instagram_username(monkeypatch):
+        os.environ["CHATBOT_ENGINE"] = "generic"
+        llm_result = {
+            "intent": "active_booking",
+            "reply_text": "Tamamdýr, kullanýcý adýnýzla kaydediyorum. Telefon numaranýzý paylaþabilir misiniz?",
+            "extracted_entities": {"lead_name": "Instagram Adý", "phone": None, "requested_service": "Otomasyon"},
+            "requires_human": False,
+        }
+        conversation = {
+            "sender_id": "generic-instagram-name-test",
+            "state": "collect_name",
+            "service": "Otomasyon",
+            "memory_state": {"requested_service": "Otomasyon"},
+        }
+    
+        result, conversation = run_generic_message(
+            monkeypatch,
+            "Instagram adýmla kaydedin",
+            llm_result,
+            {"business_name": "DOEL Digital", "service_catalog": [{"display": "Otomasyon", "name": "Otomasyon"}]},
+            conversation,
+            instagram_username="karanlikyukselis",
+        )
+    
+        assert conversation.get("full_name") == "@karanlikyukselis"
+>       assert conversation.get("state") == "collect_phone"
+E       AssertionError: assert 'collect_datetime' == 'collect_phone'
+E         
+E         - collect_phone
+E         + collect_datetime
+
+tests\test_generic_core_engine.py:868: AssertionError
+_ test_generic_collect_phone_username_save_preserves_clean_name_and_asks_phone _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001AC7158A950>
+
+    def test_generic_collect_phone_username_save_preserves_clean_name_and_asks_phone(monkeypatch):
+        os.environ["CHATBOT_ENGINE"] = "generic"
+        llm_result = {
+            "intent": "active_booking",
+            "reply_text": "Tamamdýr, not aldým. Size ulaþabilmemiz için telefon numaranýzý da paylaþabilir misiniz?",
+            "extracted_entities": {"lead_name": "Kullanýcý Adý", "phone": None, "requested_service": "Otomasyon"},
+            "requires_human": False,
+        }
+        conversation = {
+            "sender_id": "generic-username-phone-test",
+            "state": "collect_phone",
+            "full_name": "Berkay Elbir",
+            "lead_name": "Berkay Elbir",
+            "service": "Otomasyon",
+            "memory_state": {"requested_service": "Otomasyon"},
+        }
+    
+        result, conversation = run_generic_message(
+            monkeypatch,
+            "Kullanýcý adým ile kaydedin",
+            llm_result,
+            {"business_name": "DOEL Digital", "service_catalog": [{"display": "Otomasyon", "name": "Otomasyon"}]},
+            conversation,
+            instagram_username="karanlikyukselis",
+        )
+    
+        reply = gc.sanitize_text(result.reply_text).lower()
+        assert conversation.get("full_name") == "Berkay Elbir"
+        assert conversation.get("lead_name") == "Berkay Elbir"
+        assert conversation.get("phone") is None
+>       assert conversation.get("state") == "collect_phone"
+E       AssertionError: assert 'collect_datetime' == 'collect_phone'
+E         
+E         - collect_phone
+E         + collect_datetime
+
+tests\test_generic_core_engine.py:903: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.main:generic_core.py:1353 generic_pre_llm_slot_context_failed sender_id=generic-username-phone-test error='DummyConn' object has no attribute 'fetchall'
+_____ test_generic_collect_phone_instagram_name_save_preserves_clean_name _____
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001AC72954090>
+
+    def test_generic_collect_phone_instagram_name_save_preserves_clean_name(monkeypatch):
+        os.environ["CHATBOT_ENGINE"] = "generic"
+        llm_result = {
+            "intent": "active_booking",
+            "reply_text": "Tamamdýr, not aldým. Telefon numaranýzý paylaþabilir misiniz?",
+            "extracted_entities": {"lead_name": "Instagram Adý", "phone": None, "requested_service": "Otomasyon"},
+            "requires_human": False,
+        }
+        conversation = {
+            "sender_id": "generic-instagram-phone-test",
+            "state": "collect_phone",
+            "full_name": "Berkay Elbir",
+            "lead_name": "Berkay Elbir",
+            "service": "Otomasyon",
+            "memory_state": {"requested_service": "Otomasyon"},
+        }
+    
+        result, conversation = run_generic_message(
+            monkeypatch,
+            "Instagram adýmla kaydedin",
+            llm_result,
+            {"business_name": "DOEL Digital", "service_catalog": [{"display": "Otomasyon", "name": "Otomasyon"}]},
+            conversation,
+            instagram_username="karanlikyukselis",
+        )
+    
+        assert conversation.get("full_name") == "Berkay Elbir"
+        assert conversation.get("phone") is None
+>       assert conversation.get("state") == "collect_phone"
+E       AssertionError: assert 'collect_datetime' == 'collect_phone'
+E         
+E         - collect_phone
+E         + collect_datetime
+
+tests\test_generic_core_engine.py:939: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.main:generic_core.py:1353 generic_pre_llm_slot_context_failed sender_id=generic-instagram-phone-test error='DummyConn' object has no attribute 'fetchall'
+__________________ test_collect_name_real_full_name_is_saved __________________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001AC70488890>
+
+    def test_collect_name_real_full_name_is_saved(monkeypatch):
+        os.environ["CHATBOT_ENGINE"] = "generic"
+        llm_result = {
+            "intent": "active_booking",
+            "reply_text": "Telefon numaranýzý alabilir miyim?",
+            "extracted_entities": {"lead_name": "Berkay Elbir"},
+            "requires_human": False,
+        }
+        conversation = {
+            "sender_id": "generic-collect-name-real-name-test",
+            "state": "collect_name",
+            "service": "Otomasyon",
+            "memory_state": {"requested_service": "Otomasyon", "open_loop": "collect_name"},
+        }
+    
+        result, conversation = run_generic_message(
+            monkeypatch,
+            "Berkay Elbir",
+            llm_result,
+            {"business_name": "DOEL Digital", "service_catalog": [{"display": "Otomasyon", "name": "Otomasyon"}]},
+            conversation,
+        )
+    
+        assert conversation.get("full_name") == "Berkay Elbir"
+        assert conversation.get("lead_name") == "Berkay Elbir"
+>       assert conversation.get("state") == "collect_phone"
+E       AssertionError: assert 'collect_datetime' == 'collect_phone'
+E         
+E         - collect_phone
+E         + collect_datetime
+
+tests\test_generic_core_engine.py:1788: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.main:generic_core.py:1353 generic_pre_llm_slot_context_failed sender_id=generic-collect-name-real-name-test error='DummyConn' object has no attribute 'fetchall'
+_____ test_generic_creates_when_user_picks_unsuggested_but_available_time _____
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001AC72946890>
+
+    def test_generic_creates_when_user_picks_unsuggested_but_available_time(monkeypatch):
+        conversation = {
+            "sender_id": "generic-test-free-15",
+            "state": "collect_datetime",
+            "service": "Web Tasarim",
+            "full_name": "Serkan Recber",
+            "lead_name": "Serkan Recber",
+            "memory_state": {"requested_service": "Web Tasarim", "contact_channel": "instagram_dm", "suggested_booking_slots": [
+                {"date": "2026-05-19", "time": "10:00"},
+                {"date": "2026-05-19", "time": "11:00"},
+                {"date": "2026-05-19", "time": "12:00"},
+            ]},
+        }
+    
+        monkeypatch.setattr(gc, "collect_next_booking_slot_options", lambda *a, **k: [{"date": "2026-05-19", "time": "15:00"}])
+        monkeypatch.setattr(gc, "find_existing_appointment", lambda *a, **k: None)
+        monkeypatch.setattr(gc, "create_appointment", lambda *a, **k: 789)
+    
+        result, conversation = run_generic_message(
+            monkeypatch,
+            "15:00 olur mu?",
+            {"intent": "active_booking", "reply_text": "15:00 için kontrol edeyim.", "extracted_entities": {}, "requires_human": False},
+            {"business_name": "DOEL Digital", "service_catalog": [{"display": "Web Tasarim", "name": "Web Tasarim"}]},
+            conversation=conversation,
+        )
+    
+        assert conversation["requested_date"] == "2026-05-19"
+        assert conversation["requested_time"] == "15:00"
+>       assert conversation["state"] == "completed"
+E       AssertionError: assert 'collect_datetime' == 'completed'
+E         
+E         - completed
+E         + collect_datetime
+
+tests\test_generic_core_engine.py:2429: AssertionError
+___________________ TestCheckMissingFields.test_all_missing ___________________
+
+self = <test_phase4a_missing_field_prompts.TestCheckMissingFields object at 0x000001AC7114B710>
+
+    def test_all_missing(self):
+        r = _missing()
+>       assert "full_name" in r["missing_fields"]
+E       AssertionError: assert 'full_name' in []
+
+tests\test_phase4a_missing_field_prompts.py:42: AssertionError
+__________ TestCheckMissingFields.test_all_fields_present_can_create __________
+
+self = <test_phase4a_missing_field_prompts.TestCheckMissingFields object at 0x000001AC7115E350>
+
+    def test_all_fields_present_can_create(self):
+        conv = {
+            "full_name": "Berkay Çakmak",
+            "phone": "05539088638",
+            "requested_date": "2024-06-15",
+            "requested_time": "13:00",
+            "service": "web_tasarim",
+        }
+        r = _missing(conversation=conv)
+        assert r["missing_fields"] == []
+>       assert r["can_create_appointment"] is True
+E       assert False is True
+
+tests\test_phase4a_missing_field_prompts.py:81: AssertionError
+============================== warnings summary ===============================
+app\main.py:973
+  C:\Users\oyunc\Desktop\instagram-randevu-bot\booking-api\app\main.py:973: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    @app.on_event("startup")
+
+..\..\..\AppData\Local\Programs\Python\Python311\Lib\site-packages\fastapi\applications.py:4495
+  C:\Users\oyunc\AppData\Local\Programs\Python\Python311\Lib\site-packages\fastapi\applications.py:4495: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    return self.router.on_event(event_type)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_automation_invariants.py::test_invariant_invalid_phone_never_persists_and_valid_phone_is_canonical
+FAILED tests/test_automation_invariants.py::test_invariant_username_save_uses_actual_instagram_username
+FAILED tests/test_generic_core_engine.py::test_generic_inbound_save_uses_durable_dedupe_payload
+FAILED tests/test_generic_core_engine.py::test_generic_collect_name_username_save_uses_instagram_username_and_asks_phone
+FAILED tests/test_generic_core_engine.py::test_generic_collect_name_instagram_name_save_uses_instagram_username
+FAILED tests/test_generic_core_engine.py::test_generic_collect_phone_username_save_preserves_clean_name_and_asks_phone
+FAILED tests/test_generic_core_engine.py::test_generic_collect_phone_instagram_name_save_preserves_clean_name
+FAILED tests/test_generic_core_engine.py::test_collect_name_real_full_name_is_saved
+FAILED tests/test_generic_core_engine.py::test_generic_creates_when_user_picks_unsuggested_but_available_time
+FAILED tests/test_phase4a_missing_field_prompts.py::TestCheckMissingFields::test_all_missing
+FAILED tests/test_phase4a_missing_field_prompts.py::TestCheckMissingFields::test_all_fields_present_can_create
+11 failed, 451 passed, 35 skipped, 2 warnings in 4.95s

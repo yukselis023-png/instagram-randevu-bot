@@ -1,0 +1,49 @@
+
+=======================================================
+YENÝ FULL JOURNEY (strict-journey-qbizdr) - BUG 1,2,3 FIXED
+Commit/Version in Production: c9d8196358e9
+=======================================================
+
+[OK M01] User: merhaba
+  BOT: Merhaba, size nasýl yardýmcý olabilirim?...
+  PATH: generic_intent:direct_answer
+[ERR M02] User: Bir arkadaþým sizi önerdi onun için yazdým
+  ERROR 'NoneType' object has no attribute 'lower'
+[ERR M03] User: Ben randevularýnýzý merak ettim?
+  ERROR 'NoneType' object has no attribute 'lower'
+[ERR M04] User: Hizmetleriniz neler?
+  ERROR 'NoneType' object has no attribute 'lower'
+[ERR M05] User: Bu kadar mý hizmetleriniz?
+  ERROR 'NoneType' object has no attribute 'lower'
+[ERR M06] User: siz saç kesiyor muydunuz?
+  ERROR 'NoneType' object has no attribute 'lower'
+[ERR M07] User: Ýþletmeniz ne zaman kuruldu?
+  ERROR 'NoneType' object has no attribute 'lower'
+[ERR M08] User: Berkay bey orada mý?
+  ERROR 'NoneType' object has no attribute 'lower'
+[ERR M09] User: Berkay siz misiniz?
+  ERROR 'NoneType' object has no attribute 'lower'
+[ERR M10] User: güzellik salonu için sosyal medya yapýyor musunuz?
+  ERROR 'NoneType' object has no attribute 'lower'
+[ERR M11] User: Sadece düz müþteri istiyorum
+  ERROR 'NoneType' object has no attribute 'lower'
+[ERR M12] User: Website hizmetinizi gördüm, bana uygun mu merak ediyorum
+  ERROR 'NoneType' object has no attribute 'lower'
+[ERR M13] User: fiyatlarý nedir?
+  ERROR 'NoneType' object has no attribute 'lower'
+[ERR M14] User: aylýk ne kadar tutar?
+  ERROR 'NoneType' object has no attribute 'lower'
+[ERR M15] User: tamam ilginç geldi, nasýl baþlayabiliriz?
+  ERROR 'NoneType' object has no attribute 'lower'
+[ERR M16] User: önce görüþme yapalým mý?
+  ERROR 'NoneType' object has no attribute 'lower'
+[ERR M17] User: sosyal medya yönetimi için
+  ERROR 'NoneType' object has no attribute 'lower'
+[ERR M18] User: Ön görüþmede ne konuþacaðýz?
+  ERROR 'NoneType' object has no attribute 'lower'
+[ERR M19] User: Ayþe Kaya
+  ERROR 'NoneType' object has no attribute 'lower'
+[ERR M20] User: ama ben sadece fiyat bilgisi almak istemiþtim
+  ERROR 'NoneType' object has no attribute 'lower'
+
+SONUC: 1/20 PASS | 19 SORUN

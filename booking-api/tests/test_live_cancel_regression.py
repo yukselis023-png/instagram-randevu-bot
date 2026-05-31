@@ -1,10 +1,15 @@
+import os
 from datetime import date, timedelta
 from unittest.mock import patch
 
+import pytest
 from fastapi import BackgroundTasks
 from fastapi.testclient import TestClient
 
 from app.main import IncomingMessage, app, process_instagram_message
+
+if not os.environ.get("DATABASE_URL"):
+    pytest.skip("DATABASE_URL not set; skipping live cancel regression", allow_module_level=True)
 
 
 def _raw(mid: str):

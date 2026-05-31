@@ -1,0 +1,21 @@
+N8N GIRIS BILGILERI
+===================
+
+URL
+---
+http://localhost:5678
+
+N8N OWNER HESABI
+----------------
+Email: y.ukselis023@gmail.com
+Password: Doel!0lkcHO7a7nQImV
+
+BASIC AUTH
+----------
+User: doel
+Password: Doel!0lkcHO7a7nQImV
+
+NOT
+---
+Istersen daha sonra bu sifreleri degistirebiliriz.
+Bu dosya sifreleri duz metin olarak icerir.

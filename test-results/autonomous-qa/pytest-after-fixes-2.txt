@@ -1,0 +1,203 @@
+........s............................................................... [ 14%]
+........................................................................ [ 28%]
+.......................................ssss....s..............FF....ss.s [ 43%]
+.sss....ss....ss....sssss.s.ss..sss.ss..s.s..s...s.....sF...s..........F [ 57%]
+......F................................................................. [ 72%]
+........................................................................ [ 86%]
+.................................................................        [100%]
+================================== FAILURES ===================================
+____ test_generic_igdm_sets_contact_channel_and_supplies_slots_after_name _____
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000022C38450D90>
+
+    def test_generic_igdm_sets_contact_channel_and_supplies_slots_after_name(monkeypatch):
+        os.environ["CHATBOT_ENGINE"] = "generic"
+        conversation = {
+            "sender_id": "67000808415",
+            "state": "collect_name",
+            "service": "Web Tasarim",
+            "memory_state": {"requested_service": "Web Tasarim"},
+        }
+        captured = {}
+    
+        class Slot:
+            date = "2026-05-19"
+            time = "10:00"
+    
+        def fake_slots(_conn, conv, limit=3):
+            return [{"date": "2026-05-19", "time": "10:00"}, {"date": "2026-05-19", "time": "11:00"}, {"date": "2026-05-19", "time": "13:00"}]
+    
+        def fake_llm(system_prompt, user_text):
+            captured["system_prompt"] = system_prompt
+            return {
+                "intent": "active_booking",
+                "reply_text": "Memnun oldum Ahmet Bey. Ön görüþme için 19 Mayýs 10:00, 11:00 veya 13:00 seçeneklerinden hangisi uygundur?",
+                "extracted_entities": {"lead_name": "Ahmet Vatansever", "requested_service": "Web Tasarim"},
+                "requires_human": False,
+            }
+    
+        monkeypatch.setattr(gc, "get_conn", lambda: DummyConn())
+        monkeypatch.setattr(gc, "get_or_create_conversation", lambda *args, **kwargs: conversation)
+        monkeypatch.setattr(gc, "try_acquire_inbound_processing_lock", lambda *args, **kwargs: True)
+        monkeypatch.setattr(gc, "has_processed_inbound_message", lambda *args, **kwargs: False)
+        monkeypatch.setattr(gc, "save_message_log", lambda *args, **kwargs: None)
+        monkeypatch.setattr(gc, "get_recent_message_history", lambda *args, **kwargs: [])
+        monkeypatch.setattr(gc, "upsert_conversation", lambda *args, **kwargs: None)
+        monkeypatch.setattr(gc, "upsert_customer_from_conversation", lambda *args, **kwargs: None)
+        monkeypatch.setattr(gc, "schedule_customer_automation_events", lambda *args, **kwargs: None)
+        monkeypatch.setattr(gc, "queue_crm_sync", lambda *args, **kwargs: None)
+        monkeypatch.setattr(gc, "get_config", lambda: {"business_name": "DOEL Digital", "service_catalog": [{"display": "Web Tasarim", "name": "Web Tasarim"}]})
+        monkeypatch.setattr(gc, "collect_next_booking_slot_options", fake_slots)
+        monkeypatch.setattr(gc, "call_llm_json", fake_llm)
+    
+        result = gc.process_instagram_message_generic(
+            IncomingMessage(sender_id="67000808415", instagram_username="bwrkkay", message_text="Ahmet Vatansever", raw_event={"platform": "igdm", "message_id": "m1"}),
+            BackgroundTasks(),
+        )
+    
+        assert conversation["memory_state"]["contact_channel"] == "instagram_dm"
+        assert conversation["available_slots"] == ["19.05.2026 10:00", "19.05.2026 11:00", "19.05.2026 13:00"]
+        assert "MÜSAÝT RANDEVU SLOTLARI" in captured["system_prompt"]
+        assert "19.05.2026 10:00" in captured["system_prompt"]
+>       assert result.conversation_state == "collect_datetime"
+E       AssertionError: assert 'collect_phone' == 'collect_datetime'
+E         
+E         - collect_datetime
+E         + collect_phone
+
+tests\test_generic_core_engine.py:266: AssertionError
+____________ test_generic_inbound_save_uses_durable_dedupe_payload ____________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000022C382C7350>
+
+    def test_generic_inbound_save_uses_durable_dedupe_payload(monkeypatch):
+        os.environ["CHATBOT_ENGINE"] = "generic"
+        conversation = {"sender_id": "67000808415", "state": "new", "memory_state": {}}
+        saved = []
+    
+        monkeypatch.setattr(gc, "get_conn", lambda: DummyConn())
+        monkeypatch.setattr(gc, "get_or_create_conversation", lambda *args, **kwargs: conversation)
+        monkeypatch.setattr(gc, "try_acquire_inbound_processing_lock", lambda *args, **kwargs: True)
+        monkeypatch.setattr(gc, "has_processed_inbound_message", lambda *args, **kwargs: False)
+        monkeypatch.setattr(gc, "get_recent_message_history", lambda *args, **kwargs: [])
+        monkeypatch.setattr(gc, "upsert_conversation", lambda *args, **kwargs: None)
+        monkeypatch.setattr(gc, "upsert_customer_from_conversation", lambda *args, **kwargs: None)
+        monkeypatch.setattr(gc, "schedule_customer_automation_events", lambda *args, **kwargs: None)
+        monkeypatch.setattr(gc, "queue_crm_sync", lambda *args, **kwargs: None)
+        monkeypatch.setattr(gc, "get_config", lambda: {"business_name": "DOEL Digital", "service_catalog": [{"display": "Web Tasarim"}]})
+        monkeypatch.setattr(gc, "call_llm_json", lambda *args, **kwargs: {"intent": "direct_answer", "reply_text": "Merhaba.", "extracted_entities": {}, "requires_human": False})
+        monkeypatch.setattr(gc, "save_message_log", lambda *args: saved.append(args) or True)
+    
+        result = gc.process_instagram_message_generic(
+            IncomingMessage(
+                sender_id="67000808415",
+                message_text="Kolay gelsin",
+                raw_event={"platform": "igdm", "message_id": "32801733821997095931189647533670400", "trace_id": "igdm:67000808415:32801733821997095931189647533670400"},
+            ),
+            BackgroundTasks(),
+        )
+    
+        inbound_payload = saved[0][4]
+        outbound_payload = saved[-1][4]
+        assert result.should_reply is True
+>       assert inbound_payload["platform"] == "igdm"
+E       AssertionError: assert 'instagram_private_api' == 'igdm'
+E         
+E         - igdm
+E         + instagram_private_api
+
+tests\test_generic_core_engine.py:299: AssertionError
+_____ test_generic_creates_when_user_picks_unsuggested_but_available_time _____
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000022C38341010>
+
+    def test_generic_creates_when_user_picks_unsuggested_but_available_time(monkeypatch):
+        conversation = {
+            "sender_id": "generic-test-free-15",
+            "state": "collect_datetime",
+            "service": "Web Tasarim",
+            "full_name": "Serkan Recber",
+            "lead_name": "Serkan Recber",
+            "memory_state": {"requested_service": "Web Tasarim", "contact_channel": "instagram_dm", "suggested_booking_slots": [
+                {"date": "2026-05-19", "time": "10:00"},
+                {"date": "2026-05-19", "time": "11:00"},
+                {"date": "2026-05-19", "time": "12:00"},
+            ]},
+        }
+    
+        monkeypatch.setattr(gc, "collect_next_booking_slot_options", lambda *a, **k: [{"date": "2026-05-19", "time": "15:00"}])
+        monkeypatch.setattr(gc, "find_existing_appointment", lambda *a, **k: None)
+        monkeypatch.setattr(gc, "create_appointment", lambda *a, **k: 789)
+    
+        result, conversation = run_generic_message(
+            monkeypatch,
+            "15:00 olur mu?",
+            {"intent": "active_booking", "reply_text": "15:00 için kontrol edeyim.", "extracted_entities": {}, "requires_human": False},
+            {"business_name": "DOEL Digital", "service_catalog": [{"display": "Web Tasarim", "name": "Web Tasarim"}]},
+            conversation=conversation,
+        )
+    
+        assert conversation["requested_date"] == "2026-05-19"
+        assert conversation["requested_time"] == "15:00"
+>       assert conversation["state"] == "completed"
+E       AssertionError: assert 'collect_phone' == 'completed'
+E         
+E         - completed
+E         + collect_phone
+
+tests\test_generic_core_engine.py:2429: AssertionError
+___________________ TestCheckMissingFields.test_all_missing ___________________
+
+self = <test_phase4a_missing_field_prompts.TestCheckMissingFields object at 0x0000022C37FBEBD0>
+
+    def test_all_missing(self):
+        r = _missing()
+>       assert "full_name" in r["missing_fields"]
+E       AssertionError: assert 'full_name' in []
+
+tests\test_phase4a_missing_field_prompts.py:42: AssertionError
+__________ TestCheckMissingFields.test_all_fields_present_can_create __________
+
+self = <test_phase4a_missing_field_prompts.TestCheckMissingFields object at 0x0000022C37FCD810>
+
+    def test_all_fields_present_can_create(self):
+        conv = {
+            "full_name": "Berkay Çakmak",
+            "phone": "05539088638",
+            "requested_date": "2024-06-15",
+            "requested_time": "13:00",
+            "service": "web_tasarim",
+        }
+        r = _missing(conversation=conv)
+        assert r["missing_fields"] == []
+>       assert r["can_create_appointment"] is True
+E       assert False is True
+
+tests\test_phase4a_missing_field_prompts.py:81: AssertionError
+============================== warnings summary ===============================
+app\main.py:973
+  C:\Users\oyunc\Desktop\instagram-randevu-bot\booking-api\app\main.py:973: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    @app.on_event("startup")
+
+..\..\..\AppData\Local\Programs\Python\Python311\Lib\site-packages\fastapi\applications.py:4495
+  C:\Users\oyunc\AppData\Local\Programs\Python\Python311\Lib\site-packages\fastapi\applications.py:4495: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    return self.router.on_event(event_type)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_generic_core_engine.py::test_generic_igdm_sets_contact_channel_and_supplies_slots_after_name
+FAILED tests/test_generic_core_engine.py::test_generic_inbound_save_uses_durable_dedupe_payload
+FAILED tests/test_generic_core_engine.py::test_generic_creates_when_user_picks_unsuggested_but_available_time
+FAILED tests/test_phase4a_missing_field_prompts.py::TestCheckMissingFields::test_all_missing
+FAILED tests/test_phase4a_missing_field_prompts.py::TestCheckMissingFields::test_all_fields_present_can_create
+5 failed, 457 passed, 35 skipped, 2 warnings in 5.17s

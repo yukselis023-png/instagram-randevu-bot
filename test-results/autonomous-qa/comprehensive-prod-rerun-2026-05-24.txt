@@ -1,0 +1,61 @@
+=== KAPSAMLI CANLI ÜRETÝM TESTÝ BAÞLIYOR ===
+
+
+--- SENARYO_A_HIZLI_RANDEVU (User: test_ux_456f86) ---
+[USER] Merhaba, hemen bir ön görüþme ayarlamak istiyorum.
+[BOT] Þu an yanýtý netleþtiremedim; mesajýnýzý aldým, birazdan devam edelim.
+
+[USER] Performans pazarlama hizmetinizle ilgileniyorum.
+[BOT] Tabii, Performans Pazarlama için 10 dakikalýk ön görüþme ayarlayabiliriz. Ad soyadýnýzý paylaþýr mýsýnýz?
+
+[USER] Telefonum 0532 999 88 77
+[BOT] Þu an yanýtý netleþtiremedim; mesajýnýzý aldým, birazdan devam edelim.
+
+[USER] Ýsmim Mehmet Yýlmaz
+[BOT] Teþekkürler. Ön görüþme için telefon numaranýzý paylaþýr mýsýnýz?
+
+[USER] Yarýn öðleden sonra saat 15:00 toplantý için uygun mu?
+[BOT] Þu an yanýtý netleþtiremedim; mesajýnýzý aldým, birazdan devam edelim.
+
+
+--- SENARYO_B_FIKIR_DEGISTIRME (User: test_ux_a10dad) ---
+[USER] Selamlar
+[BOT] Þu an yanýtý netleþtiremedim; mesajýnýzý aldým, birazdan devam edelim.
+
+[USER] Web tasarým paketiniz ne kadar?
+[BOT] Web tasarim için kýsa bir ön görüþmede ihtiyacý netleþtirebiliriz. Ýsterseniz planlayalým mý?
+
+[USER] Tamam onu almak istiyorum.
+[BOT] Þu an yanýtý netleþtiremedim; mesajýnýzý aldým, birazdan devam edelim.
+
+[USER] Yok hayýr vazgeçtim, web tasarým deðil CRM hizmeti olsun.
+[BOT] Web tasarim için kýsa bir ön görüþmede ihtiyacý netleþtirebiliriz. Ýsterseniz planlayalým mý?
+
+[USER] Bu arada pazar günleri açýk mýsýnýz?
+[BOT] Þu an yanýtý netleþtiremedim; mesajýnýzý aldým, birazdan devam edelim.
+
+[USER] Anladým, o zaman Pazartesi sabah 10:00 olsun. Ýsmim Ayþe, tel: 0555 444 33 22
+[BOT] Þu an yanýtý netleþtiremedim; mesajýnýzý aldým, birazdan devam edelim.
+
+
+--- SENARYO_C_AGRESIF_VE_SINIR_ZORLAMA (User: test_ux_892633) ---
+[USER] Hayýrdýr, siz de mi dolandýrýcýsýnýz her yer ajans doldu?
+[BOT] Þu an yanýtý netleþtiremedim; mesajýnýzý aldým, birazdan devam edelim.
+
+[USER] Bana bedavaya logo yapar mýsýnýz?
+[BOT] Þu an yanýtý netleþtiremedim; mesajýnýzý aldým, birazdan devam edelim.
+
+[USER] Fiyatlarýnýz aþýrý pahalý, kesin indirim yapmanýz lazým.
+[BOT] Þu an yanýtý netleþtiremedim; mesajýnýzý aldým, birazdan devam edelim.
+
+[USER] O zaman bana sadece diþ beyazlatma yapýn.
+[BOT] Þu an yanýtý netleþtiremedim; mesajýnýzý aldým, birazdan devam edelim.
+
+[USER] Þaka þaka. Sosyal medya yönetimi için görüþelim. Adým Can, 0533 111 22 33, Cuma 14:00
+[BOT] Ön görüþme kaydýnýz oluþturuldu: 29.05.2026 saat 14:00.
+Ad Soyad: Can
+Hizmet: Sosyal Medya Yonetimi
+Telefon: +905331112233
+Görüþme öncesinde gerekirse ekibimiz sizinle iletiþime geçer.
+
+=== TESTLER TAMAMLANDI ===

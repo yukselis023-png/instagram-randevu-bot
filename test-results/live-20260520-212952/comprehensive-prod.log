@@ -1,0 +1,57 @@
+=== KAPSAMLI CANLI ÜRETÝM TESTÝ BAÞLIYOR ===
+
+
+--- SENARYO_A_HIZLI_RANDEVU (User: test_ux_295206) ---
+[USER] Merhaba, hemen bir ön görüþme ayarlamak istiyorum.
+[BOT] Tabii, ön görüþme için adýnýzý ve soyadýnýzý alabilir miyim?
+
+[USER] Performans pazarlama hizmetinizle ilgileniyorum.
+[BOT] None
+
+[USER] Telefonum 0532 999 88 77
+[BOT] None
+
+[USER] Ýsmim Mehmet Yýlmaz
+[BOT] None
+
+[USER] Yarýn öðleden sonra saat 15:00 toplantý için uygun mu?
+[BOT] None
+
+
+--- SENARYO_B_FIKIR_DEGISTIRME (User: test_ux_2ecac4) ---
+[USER] Selamlar
+[BOT] Merhabalar! Size nasýl yardýmcý olabilirim?
+
+[USER] Web tasarým paketiniz ne kadar?
+[BOT] None
+
+[USER] Tamam onu almak istiyorum.
+[BOT] None
+
+[USER] Yok hayýr vazgeçtim, web tasarým deðil CRM hizmeti olsun.
+[BOT] None
+
+[USER] Bu arada pazar günleri açýk mýsýnýz?
+[BOT] None
+
+[USER] Anladým, o zaman Pazartesi sabah 10:00 olsun. Ýsmim Ayþe, tel: 0555 444 33 22
+[BOT] None
+
+
+--- SENARYO_C_AGRESIF_VE_SINIR_ZORLAMA (User: test_ux_22685d) ---
+[USER] Hayýrdýr, siz de mi dolandýrýcýsýnýz her yer ajans doldu?
+[BOT] Þüphenizi anlýyoruz. DOEL Digital olarak tüm süreçlerimizi yasal, faturalý ve sözleþmeli olarak þeffaf þekilde yürütüyoruz.
+
+[USER] Bana bedavaya logo yapar mýsýnýz?
+[BOT] None
+
+[USER] Fiyatlarýnýz aþýrý pahalý, kesin indirim yapmanýz lazým.
+[BOT] None
+
+[USER] O zaman bana sadece diþ beyazlatma yapýn.
+[BOT] None
+
+[USER] Þaka þaka. Sosyal medya yönetimi için görüþelim. Adým Can, 0533 111 22 33, Cuma 14:00
+[BOT] None
+
+=== TESTLER TAMAMLANDI ===

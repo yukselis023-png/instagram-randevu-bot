@@ -1,0 +1,45 @@
+GET /api/debug-state/{sender_id} -> debug_state
+POST /api/admin/cleanup-sender/{sender_id} -> cleanup_sender
+ON_EVENT startup -> on_startup
+GET /health -> health
+GET /debug-env -> debug_env
+GET /version -> version
+GET /api/llm-health -> llm_health
+GET /crm -> crm_panel
+GET /internal/reminders/morning/claim -> claim_morning_reminders
+POST /internal/reminders/morning/mark -> mark_morning_reminder_endpoint
+POST /internal/messages/voice-fallback -> record_voice_fallback
+GET /api/appointments -> list_appointments
+GET /api/appointments/calendar -> get_appointment_calendar
+GET /api/conversations -> list_conversations
+GET /api/customers -> list_customers
+GET /api/customers/ops/{list_slug} -> list_customer_operations
+GET /api/customers/{instagram_user_id} -> get_customer_detail
+GET /api/customers/{instagram_user_id}/timeline -> get_customer_timeline
+PATCH /api/customers/{instagram_user_id} -> update_customer_notes
+POST /api/appointments/{appointment_id}/attendance -> mark_appointment_attendance
+PATCH /api/appointments/{appointment_id} -> update_appointment
+GET /api/service-capacity -> list_service_capacity
+PATCH /api/service-capacity/{service_slug} -> update_service_capacity
+GET /api/customer-work-items -> list_customer_work_items
+POST /api/customer-work-items -> create_customer_work_item
+PATCH /api/customer-work-items/{item_id} -> update_customer_work_item
+GET /api/call-suggestions -> get_call_suggestions
+GET /api/crm/templates -> list_crm_templates
+GET /api/crm/rules -> list_crm_rules
+GET /api/crm/segments -> get_crm_segment_summary
+GET /api/roi-summary -> get_roi_summary
+GET /internal/automation/claim -> claim_due_automation_events
+POST /internal/automation/mark -> mark_automation_event
+GET /api/campaigns -> list_campaigns
+POST /api/campaigns -> create_campaign
+POST /api/campaigns/{campaign_id}/execute -> execute_campaign
+GET /api/campaigns/preview -> preview_campaign_audience
+POST /api/process-instagram-message -> process_instagram_message
+--- probes
+/health 200 {"status":"ok","time":"2026-05-20T21:55:07.620586+03:00"}
+/version 200 {"version":"c9d8196358e9cf2bb6d26c1cc3c8e360adb2736c","time":"2026-05-20T21:55:07.895251+03:00","full_ai_conversational_mode":true,"llm_reply_polish_enabled":true,"llm_configured":true,"llm_base_url_configured":true,"llm_api_key_configured":true,"llm_api_key_length":35,"llm_api_key_hash":"266a6c12e3b7","llm_model":"gemini-3-flash","llm_reply_advisory_model":"meta-llama/llama-4-scout-17b-16e-instruct","llm_reply_quality_model":"llama-3.3-70b-versatile","reply_engine":"ai_first_v5","ai_first_enabled":true,"reply_guarantee_enabled":true}
+/api/llm-health 200 {"ok":true,"configured":true,"primary_model":"gemini-3-flash","fallback_model":"gemini-3-flash","base_url_masked":"https://sing...trycloudflare.com/v1","provider_reachable":true,"latency_ms":2485,"status_code":200,"error":null,"primary":{"ok":true,"provider_reachable":true,"status_code":200,"latency_ms":2485,"error":null},"fallback":null}
+/api/conversations?limit=2 200 {"conversations":[{"id":396,"instagram_user_id":"67000808415","full_name":"Canli Test Kullanicisi","phone":"+905552223344","service":"Web Tasarým","requested_date":"2026-05-21","requested_time":"15:00:00","appointment_status":"collecting","state":"collect_name","updated_at":"2026-05-20T18:41:07.802060+00:00"},{"id":452,"instagram_user_id":"craft-probe-20260520-instagram-randevu-bot","full_name":"Test Kullanici","phone":"+905551112233","service":"Web Tasarim","requested_date":"2026-05-21","requested_time":"15:00:00","appointment_status":"confirmed","state":"completed","updated_at":"2026-05-20T18:35:07.553495+00:00"}]}
+/api/appointments 200 {"appointments":[{"id":9,"instagram_user_id":"67000808415","instagram_username":"bwrkkay","full_name":"Serkan Recber","phone":"Instagram DM","service":"Otomasyon","appointment_date":"2026-05-21","appointment_time":"15:00:00","status":"preconsultation","source":"instagram_dm","notes":null,"attendance_status":"scheduled","attendance_marked_at":null,"approval_status":null,"approval_reason":null,"rejection_reason":null,"cancellation_reason":null,"refund_status":null,"refund_amount":null,"refund_reason":null,"capacity_units":1,"created_at":"2026-05-20T17:38:53.832092+00:00","updated_at":"2026-05-20T17:38:53.832092+00:00"}]}
+/api/customers 200 {"customers":[{"id":200,"instagram_user_id":"strict-journey-qbizdr","instagram_username":null,"full_name":null,"phone":null,"sector":null,"segment":"new_customer","notes":null,"discount_code":null,"custom_offer":null,"subscription_renewal_date":null,"consent_status":null,"consent_updated_at":null,"voice_note_url":null,"customer_type":null,"approval_status":null,"approval_reason":null,"rejection_reason":null,"last_service":null,"total_visits":0,"total_spend":0.0,"no_show_count":0,"last_contact_at":"2026-05-20T18:30:06.949935+00:00","last_visit_at":null,"next_automation_at":"2026-05-22T18:30:07.044995+00:00","next_automation_type":"interest_followup"},{"id":199,"instagram_user_id":"craft-prod-live-20260520212953","instagram_username":"craft_prod_live_20260520212953","full_name":null,"phone":

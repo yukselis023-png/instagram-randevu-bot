@@ -1,0 +1,95 @@
+
+## auto-20260520-auto-single_shot_full-0e6c6f
+1 200 state= collect_name created= False id= None reply= Harika, web tasarim i�in �n g�r��me olu�tural�m. Ad soyad�n�z� alabilir miyim?
+
+## auto-20260520-auto-multi_turn_happy-a9a95c
+1 200 state= new created= False id= None reply= �u an yan�t� netle�tiremedim; mesaj�n�z� ald�m, birazdan devam edelim.
+2 200 state= collect_name created= False id= None reply= Harika, web tasarim i�in �n g�r��me olu�tural�m. Ad soyad�n�z� alabilir miyim?
+3 200 state= collect_name created= False id= None reply= �u an yan�t� netle�tiremedim; mesaj�n�z� ald�m, birazdan devam edelim.
+4 200 state= collect_name created= False id= None reply= �u an yan�t� netle�tiremedim; mesaj�n�z� ald�m, birazdan devam edelim.
+5 200 state= collect_name created= False id= None reply= �u an yan�t� netle�tiremedim; mesaj�n�z� ald�m, birazdan devam edelim.
+
+## auto-20260520-auto-invalid_phone_recovery-a93389
+1 200 state= new created= False id= None reply= �u an yan�t� netle�tiremedim; mesaj�n�z� ald�m, birazdan devam edelim.
+2 200 state= new created= False id= None reply= �u an yan�t� netle�tiremedim; mesaj�n�z� ald�m, birazdan devam edelim.
+3 200 state= new created= False id= None reply= �u an yan�t� netle�tiremedim; mesaj�n�z� ald�m, birazdan devam edelim.
+4 200 state= new created= False id= None reply= �u an yan�t� netle�tiremedim; mesaj�n�z� ald�m, birazdan devam edelim.
+5 200 state= new created= False id= None reply= �u an yan�t� netle�tiremedim; mesaj�n�z� ald�m, birazdan devam edelim.
+
+## auto-20260520-auto-malformed_noise-7e54e5
+1 200 state= new created= False id= None reply= �u an yan�t� netle�tiremedim; mesaj�n�z� ald�m, birazdan devam edelim.
+2 200 state= new created= False id= None reply= �u an yan�t� netle�tiremedim; mesaj�n�z� ald�m, birazdan devam edelim.
+3 200 state= new created= False id= None reply= �u an yan�t� netle�tiremedim; mesaj�n�z� ald�m, birazdan devam edelim.
+
+## auto-20260520-auto-empty_message-f61ec6
+1 200 state= ignored created= False id= None reply= None
+
+## auto-20260520-auto-concurrent-1-b2ff28
+1 200 state= completed created= True id= 173 reply= �n g�r��me kayd�n�z olu�turuldu: 21.05.2026 saat 14:00.
+Ad Soyad: Con User
+Hizmet: Otomasyon
+Telefon: +905557000001
+G�r��me �ncesinde gerekirse ekibimiz sizinle ileti�ime ge�er.
+
+## auto-20260520-auto-concurrent-2-dea425
+1 200 state= completed created= True id= 170 reply= �n g�r��me kayd�n�z olu�turuldu: 21.05.2026 saat 14:00.
+Ad Soyad: Con User
+Hizmet: Otomasyon
+Telefon: +905557000002
+G�r��me �ncesinde gerekirse ekibimiz sizinle ileti�ime ge�er.
+
+## auto-20260520-auto-concurrent-3-6320a7
+1 200 state= completed created= True id= 171 reply= �n g�r��me kayd�n�z olu�turuldu: 21.05.2026 saat 14:00.
+Ad Soyad: Con User
+Hizmet: Otomasyon
+Telefon: +905557000003
+G�r��me �ncesinde gerekirse ekibimiz sizinle ileti�ime ge�er.
+
+## auto-20260520-auto-concurrent-4-10254b
+1 200 state= completed created= True id= 174 reply= �n g�r��me kayd�n�z olu�turuldu: 21.05.2026 saat 14:00.
+Ad Soyad: Con User
+Hizmet: Otomasyon
+Telefon: +905557000004
+G�r��me �ncesinde gerekirse ekibimiz sizinle ileti�ime ge�er.
+
+## auto-20260520-auto-concurrent-5-da5c8a
+1 200 state= completed created= True id= 172 reply= �n g�r��me kayd�n�z olu�turuldu: 21.05.2026 saat 14:00.
+Ad Soyad: Con User
+Hizmet: Otomasyon
+Telefon: +905557000005
+G�r��me �ncesinde gerekirse ekibimiz sizinle ileti�ime ge�er.
+
+## auto-20260520-auto-concurrent-6-a3b014
+1 200 state= completed created= True id= 175 reply= �n g�r��me kayd�n�z olu�turuldu: 21.05.2026 saat 14:00.
+Ad Soyad: Con User
+Hizmet: Otomasyon
+Telefon: +905557000006
+G�r��me �ncesinde gerekirse ekibimiz sizinle ileti�ime ge�er.
+
+## auto-20260520-auto-concurrent-7-b59502
+1 200 state= completed created= True id= 176 reply= �n g�r��me kayd�n�z olu�turuldu: 21.05.2026 saat 14:00.
+Ad Soyad: Con User
+Hizmet: Otomasyon
+Telefon: +905557000007
+G�r��me �ncesinde gerekirse ekibimiz sizinle ileti�ime ge�er.
+
+## auto-20260520-auto-concurrent-8-c73598
+1 200 state= completed created= True id= 177 reply= �n g�r��me kayd�n�z olu�turuldu: 21.05.2026 saat 14:00.
+Ad Soyad: Con User
+Hizmet: Otomasyon
+Telefon: +905557000008
+G�r��me �ncesinde gerekirse ekibimiz sizinle ileti�ime ge�er.
+
+## auto-20260520-auto-concurrent-9-b0400d
+1 200 state= completed created= True id= 178 reply= �n g�r��me kayd�n�z olu�turuldu: 21.05.2026 saat 14:00.
+Ad Soyad: Con User
+Hizmet: Otomasyon
+Telefon: +905557000009
+G�r��me �ncesinde gerekirse ekibimiz sizinle ileti�ime ge�er.
+
+## auto-20260520-auto-concurrent-10-dd0362
+1 200 state= completed created= True id= 179 reply= �n g�r��me kayd�n�z olu�turuldu: 21.05.2026 saat 14:00.
+Ad Soyad: Con User
+Hizmet: Otomasyon
+Telefon: +905557000010
+G�r��me �ncesinde gerekirse ekibimiz sizinle ileti�ime ge�er.

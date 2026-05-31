@@ -1,0 +1,81 @@
+
+## auto-20260520-auto-single_shot_full-55b303
+1 200 state= collect_name created= False id= None reply= Yar�n saat 12:00 i�in �n g�r��me talebinizi not ald�m. Ekibimiz takvimi kontrol edip detaylar� sizinle payla�acakt�r.
+DBG collect_name collecting None 2026-05-21 12:00:00
+
+## auto-20260520-auto-multi_turn_happy-64e99c
+1 200 state= collect_name created= False id= None reply= Google uyumlu ve mobil uyumlu profesyonel web tasar�mlar� yap�yoruz. Detaylar� netle�tirmek i�in k�sa bir �n g�r��me planlayal�m m�?
+2 200 state= collect_name created= False id= None reply= �n g�r��me i�in ad�n�z� ve soyad�n�z� alabilir miyim?
+3 200 state= collect_name created= False id= None reply= Memnun oldum. �n g�r��meyi planlamak i�in telefon numaran�z� alabilir miyim?
+4 200 state= collect_name created= False id= None reply= Te�ekk�rler. �n g�r��me i�in uygun oldu�unuz g�n ve saati alabilir miyim?
+5 200 state= collect_name created= False id= None reply= Yar�n saat 12:00 i�in �n g�r��menizi not ald�m. Detaylar� sizinle payla�aca��z.
+DBG collect_name collecting None 2026-05-21 12:00:00
+
+## auto-20260520-auto-invalid_phone_recovery-316987
+1 200 state= collect_name created= False id= None reply= Tabii ki, web tasar�m i�in bir �n g�r��me planlayal�m. �n g�r��me i�in ad�n�z� ve soyad�n�z� alabilir miyim?
+2 200 state= collect_datetime created= False id= None reply= Memnun oldum. �n g�r��me i�in yar�n 10:00 veya 11:00 saatlerinden hangisi sizin i�in uygundur?
+3 200 state= collect_datetime created= False id= None reply= Numaran�z� ald�m. G�r��me i�in yar�n 10:00 veya 11:00 saatlerinden hangisi size uygundur?
+4 200 state= collect_datetime created= False id= None reply= Telefon numaran�z� g�ncelledim. G�r��me i�in yar�n 10:00, 11:00 veya 12:00 saatlerinden hangisi uygundur?
+5 200 state= completed created= True id= 12 reply= �n g�r��me kayd�n�z olu�turuldu: 21.05.2026 saat 13:00.
+Ad Soyad: Test Hatali
+Hizmet: Web Tasarim
+Telefon: +905554443324
+G�r��me �ncesinde g
+DBG completed confirmed 12 2026-05-21 13:00:00
+
+## auto-20260520-auto-malformed_noise-7bd8aa
+1 200 state= new created= False id= None reply= Merhaba! DOEL Digital olarak dijital b�y�menize nas�l destek olabiliriz? Hangi hizmetimizle ilgileniyorsunuz?
+2 200 state= new created= False id= None reply= G�nderdi�iniz mesaj� anlayamad�m. Size web tasar�m, dijital reklam veya otomasyon konular�nda nas�l yard�mc� olabiliriz?
+3 200 state= new created= False id= None reply= Web tasar�m paketimiz tek seferlik 12.900 TL'dir. Detaylar� netle�tirmek i�in k�sa bir �n g�r��me planlayal�m m�?
+DBG new collecting None None None
+
+## auto-20260520-auto-empty_message-6898f2
+1 200 state= ignored created= False id= None reply= None
+
+## auto-20260520-auto-concurrent-1-ed7f33
+1 200 state= completed created= True id= 13 reply= �n g�r��me kayd�n�z olu�turuldu: 21.05.2026 saat 14:00.
+Ad Soyad: Con User
+Hizmet: Otomasyon
+Telefon: +905557000001
+G�r��me �ncesinde gereki
+DBG completed confirmed 13 2026-05-21 14:00:00
+
+## auto-20260520-auto-concurrent-2-5103b5
+1 200 state= collect_datetime created= False id= None reply= Maalesef 14:00 dolu. Uygun se�enekler 13:30, 14:40, 12:20. Hangisi uygun olur?
+DBG collect_datetime collecting None 2026-05-21 None
+
+## auto-20260520-auto-concurrent-3-fe3ffb
+1 200 state= completed created= True id= 14 reply= �n g�r��me kayd�n�z olu�turuldu: 21.05.2026 saat 14:00.
+Ad Soyad: Con User
+Hizmet: Otomasyon
+Telefon: +905557000003
+G�r��me �ncesinde gereki
+DBG completed confirmed 14 2026-05-21 14:00:00
+
+## auto-20260520-auto-concurrent-4-c657a8
+1 200 state= collect_datetime created= False id= None reply= Maalesef 14:00 dolu. Uygun se�enekler 13:30, 14:40, 12:20. Hangisi uygun olur?
+DBG collect_datetime collecting None 2026-05-21 None
+
+## auto-20260520-auto-concurrent-5-fed0e2
+1 200 state= collect_datetime created= False id= None reply= Maalesef 14:00 dolu. Uygun se�enekler 13:30, 14:40, 12:20. Hangisi uygun olur?
+DBG collect_datetime collecting None 2026-05-21 None
+
+## auto-20260520-auto-concurrent-6-a38594
+1 200 state= collect_datetime created= False id= None reply= Maalesef 14:00 dolu. Uygun se�enekler 13:30, 14:40, 12:20. Hangisi uygun olur?
+DBG collect_datetime collecting None 2026-05-21 None
+
+## auto-20260520-auto-concurrent-7-06f322
+1 200 state= collect_datetime created= False id= None reply= Maalesef 14:00 dolu. Uygun se�enekler 13:30, 14:40, 12:20. Hangisi uygun olur?
+DBG collect_datetime collecting None 2026-05-21 None
+
+## auto-20260520-auto-concurrent-8-093e56
+1 200 state= collect_datetime created= False id= None reply= Maalesef 14:00 dolu. Uygun se�enekler 13:30, 14:40, 12:20. Hangisi uygun olur?
+DBG collect_datetime collecting None 2026-05-21 None
+
+## auto-20260520-auto-concurrent-9-17b59d
+1 200 state= collect_datetime created= False id= None reply= Maalesef 14:00 dolu. Uygun se�enekler 13:30, 14:40, 12:20. Hangisi uygun olur?
+DBG collect_datetime collecting None 2026-05-21 None
+
+## auto-20260520-auto-concurrent-10-ffc19a
+1 200 state= collect_datetime created= False id= None reply= Maalesef 14:00 dolu. Uygun se�enekler 13:30, 14:40, 12:20. Hangisi uygun olur?
+DBG collect_datetime collecting None 2026-05-21 None

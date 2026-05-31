@@ -1,0 +1,60 @@
+2026-05-24 13:25:54,251 INFO app.main INBOUND_RECEIVED sender_id=dbg-local-file text='Merhaba, hemen bir on gorusme ayarlamak istiyorum.' platform=generic
+Traceback (most recent call last):
+  File "<stdin>", line 8, in <module>
+  File "C:\Users\oyunc\Desktop\instagram-randevu-bot\booking-api\app\main.py", line 2491, in process_instagram_message
+    return process_instagram_message_generic(payload, background_tasks)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\oyunc\Desktop\instagram-randevu-bot\booking-api\app\generic_core.py", line 1423, in process_instagram_message_generic
+    with get_conn() as conn:
+         ^^^^^^^^^^
+  File "C:\Users\oyunc\Desktop\instagram-randevu-bot\booking-api\app\main.py", line 3492, in get_conn
+    raise RuntimeError("No database URL configured")
+RuntimeError: No database URL configured
+2026-05-24 13:25:54,258 INFO app.main INBOUND_RECEIVED sender_id=dbg-local-file text='Performans pazarlama hizmetinizle ilgileniyorum.' platform=generic
+Traceback (most recent call last):
+  File "<stdin>", line 8, in <module>
+  File "C:\Users\oyunc\Desktop\instagram-randevu-bot\booking-api\app\main.py", line 2491, in process_instagram_message
+    return process_instagram_message_generic(payload, background_tasks)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\oyunc\Desktop\instagram-randevu-bot\booking-api\app\generic_core.py", line 1423, in process_instagram_message_generic
+    with get_conn() as conn:
+         ^^^^^^^^^^
+  File "C:\Users\oyunc\Desktop\instagram-randevu-bot\booking-api\app\main.py", line 3492, in get_conn
+    raise RuntimeError("No database URL configured")
+RuntimeError: No database URL configured
+2026-05-24 13:25:54,259 INFO app.main INBOUND_RECEIVED sender_id=dbg-local-file text='Telefonum 0532 999 88 77' platform=generic
+Traceback (most recent call last):
+  File "<stdin>", line 8, in <module>
+  File "C:\Users\oyunc\Desktop\instagram-randevu-bot\booking-api\app\main.py", line 2491, in process_instagram_message
+    return process_instagram_message_generic(payload, background_tasks)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\oyunc\Desktop\instagram-randevu-bot\booking-api\app\generic_core.py", line 1423, in process_instagram_message_generic
+    with get_conn() as conn:
+         ^^^^^^^^^^
+  File "C:\Users\oyunc\Desktop\instagram-randevu-bot\booking-api\app\main.py", line 3492, in get_conn
+    raise RuntimeError("No database URL configured")
+RuntimeError: No database URL configured
+2026-05-24 13:25:54,260 INFO app.main INBOUND_RECEIVED sender_id=dbg-local-file text='Ismim Mehmet Yilmaz' platform=generic
+Traceback (most recent call last):
+  File "<stdin>", line 8, in <module>
+  File "C:\Users\oyunc\Desktop\instagram-randevu-bot\booking-api\app\main.py", line 2491, in process_instagram_message
+    return process_instagram_message_generic(payload, background_tasks)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\oyunc\Desktop\instagram-randevu-bot\booking-api\app\generic_core.py", line 1423, in process_instagram_message_generic
+    with get_conn() as conn:
+         ^^^^^^^^^^
+  File "C:\Users\oyunc\Desktop\instagram-randevu-bot\booking-api\app\main.py", line 3492, in get_conn
+    raise RuntimeError("No database URL configured")
+RuntimeError: No database URL configured
+2026-05-24 13:25:54,260 INFO app.main INBOUND_RECEIVED sender_id=dbg-local-file text='Yarin ogleden sonra saat 15:00 toplanti icin uygun mu?' platform=generic
+Traceback (most recent call last):
+  File "<stdin>", line 8, in <module>
+  File "C:\Users\oyunc\Desktop\instagram-randevu-bot\booking-api\app\main.py", line 2491, in process_instagram_message
+    return process_instagram_message_generic(payload, background_tasks)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\oyunc\Desktop\instagram-randevu-bot\booking-api\app\generic_core.py", line 1423, in process_instagram_message_generic
+    with get_conn() as conn:
+         ^^^^^^^^^^
+  File "C:\Users\oyunc\Desktop\instagram-randevu-bot\booking-api\app\main.py", line 3492, in get_conn
+    raise RuntimeError("No database URL configured")
+RuntimeError: No database URL configured

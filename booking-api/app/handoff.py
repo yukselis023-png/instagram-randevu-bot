@@ -17,13 +17,13 @@ logger = logging.getLogger("handoff")
 # ── Detection ───────────────────────────────────────────────────────
 
 HANDOFF_PATTERNS = [
-    r"\b(?:insanla|yetkili|müdür|midur|yönetici|yonetici|patron|sorumlu)\b.{0,50}\b(?:konuş|konus|bağla|bagla|görüş|goruş|gorus|ulaş|ulas|bağlan|baglan|devral|aktar)\b",
-    r"\b(?:beni (?:bir )?insana bağla|beni (?:bir )?yetkiliye bağla)\b",
-    r"\b(?:müdürle|midurle|yetkiliyle|yöneticiyle|yoneticiyle)\b.{0,30}\b(?:görüş|goruş|gorus|konuş|konus)\b",
+    r"\b(?:insan(?:la|a)?|yetkili(?:yle|ye)?|müdür(?:le|e)?|midur(?:le|e)?|yönetici(?:yle|ye)?|yonetici(?:yle|ye)?|patron|sorumlu)\b.{0,60}\b(?:konuş(?:mak|abilir|uruz|ürüz)?|konus(?:mak|abilir)?|bağla(?:r|n|m|abilir)?|bagla(?:r|m|abilir)?|görüş(?:mek|ebilir|ürüz|tür)?|goruş(?:mek|ebilir|tur|turuz)?|gorus(?:mek|ebilir|tur|turuz)?|ulaş|ulas|devral|aktar)\b",
+    r"\b(?:beni (?:bir )?(?:insana|yetkiliye) bağla(?:r)?|beni (?:bir )?insanla görüştür|beni (?:bir )?insanla gorustur)\b",
+    r"\b(?:müdürle|midurle|yetkiliyle|yöneticiyle|yoneticiyle|müşteri temsilcisiyle|musteri temsilcisiyle)\b.{0,40}\b(?:görüş(?:mek|ebilir|ürüz)?|goruş(?:mek|ebilir|tur)?|gorus(?:mek|ebilir|tur)?|konuş(?:mak|ebilir|uruz|ürüz)?|konus(?:mak|ebilir)?|bağla(?:r)?|bagla(?:r)?)\b",
     r"\b(?:robot değil|bot değil|yapay zeka değil|ai değil|otomatik değil)\b",
-    r"\b(?:gerçek|gercek|reel|canlı)\b.{0,20}\b(?:insan|kişi|kisi|yetkili)\b",
-    r"\binsan(?:la)?\b.{0,30}(?:goruş|goruşmek|gorusmek|konuşmak|konusmak)\b",
-    r"\b(?:operator|operatör|musteri hizmet|müşteri hizmet|destek)\b.{0,30}(?:bağla|bagla|ulaş|ulas|ara)\b",
+    r"\b(?:gerçek|gercek|reel|canlı)\b.{0,25}\b(?:insan|kişi|kisi|yetkili)\b",
+    r"\binsan(?:la|a)?\b.{0,40}\b(?:görüş(?:mek|tür)?|goruş(?:mek|tur)?|gorus(?:mek|tur)?|konuş(?:mak)?|konus(?:mak)?|destek)\b",
+    r"\b(?:operatör|operator|müşteri hizmet|destek)\w{0,12}.{0,40}\b(?:bağla(?:r|n|m|abilir)?|bagla(?:r|m|abilir)?|ulaş|ulas|ara|görüş|gorus|konuş|konus)\w{0,6}\b",
 ]
 
 HANDOFF_RE = re.compile("|".join(HANDOFF_PATTERNS), re.IGNORECASE)

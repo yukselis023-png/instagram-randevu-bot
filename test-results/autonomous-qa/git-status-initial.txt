@@ -1,0 +1,16 @@
+?? .last-live-test-dir
+?? META-TEST-BILGILERI.txt
+?? N8N-GIRIS-BILGILERI.txt
+?? booking-api/evaluate_clarification.py
+?? booking-api/evaluate_shadow.py
+?? booking-api/test_live_api.py
+?? fix_final_test.py
+?? n8n_recent.tmp
+?? patch_booking_api_fix.py
+?? poller_recent.tmp
+?? run_test.py
+?? scripts/test_memory_pekala.py
+?? scripts/test_memory_pekala_patch.py
+?? test-results/
+?? test_crm_live.py
+?? testsprite_tests/

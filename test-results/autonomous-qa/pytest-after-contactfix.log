@@ -1,0 +1,91 @@
+...F...Fs............................................................... [ 14%]
+........................................................................ [ 28%]
+.......................................ssss....s....................ss.s [ 43%]
+.sss....ss....ss....sssss.s.ss..sss.ss..s.s..s...s.....s....s........... [ 57%]
+........................................................................ [ 72%]
+........................................................................ [ 86%]
+.................................................................        [100%]
+================================== FAILURES ===================================
+__ test_invariant_invalid_phone_never_persists_and_valid_phone_is_canonical ___
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000002830229CAD0>
+
+    def test_invariant_invalid_phone_never_persists_and_valid_phone_is_canonical(monkeypatch):
+        os.environ["CHATBOT_ENGINE"] = "generic"
+        conversation = {
+            "sender_id": "phone-invariant",
+            "state": "collect_phone",
+            "full_name": "Berkay Elbir",
+            "lead_name": "Berkay Elbir",
+            "service": "Otomasyon",
+            "memory_state": {"requested_service": "Otomasyon"},
+        }
+        invalid = run_message(
+            monkeypatch,
+            "055555",
+            {"intent": "active_booking", "reply_text": "Telefon numaranýzý alabilir miyim?", "extracted_entities": {}, "requires_human": False},
+            conversation,
+        )
+        assert invalid.appointment_created is False
+        assert conversation.get("phone") is None
+>       assert conversation.get("state") == "collect_phone"
+E       AssertionError: assert 'collect_datetime' == 'collect_phone'
+E         
+E         - collect_phone
+E         + collect_datetime
+
+tests\test_automation_invariants.py:192: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.main:generic_core.py:1355 generic_pre_llm_slot_context_failed sender_id=phone-invariant error='DummyConn' object has no attribute 'fetchall'
+_________ test_invariant_username_save_uses_actual_instagram_username _________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000028302047BD0>
+
+    def test_invariant_username_save_uses_actual_instagram_username(monkeypatch):
+        os.environ["CHATBOT_ENGINE"] = "generic"
+        conversation = {
+            "sender_id": "username-invariant",
+            "state": "collect_name",
+            "service": "Otomasyon",
+            "memory_state": {"requested_service": "Otomasyon"},
+        }
+        result = run_message(
+            monkeypatch,
+            "Kullanýcý adým ile kaydedin",
+            {"intent": "active_booking", "reply_text": "Telefon numaranýzý alabilir miyim?", "extracted_entities": {"lead_name": "Kullanýcý Adý"}, "requires_human": False},
+            conversation,
+            instagram_username="berkay_test",
+        )
+        assert conversation.get("full_name") == "@berkay_test"
+        assert conversation.get("lead_name") == "@berkay_test"
+>       assert conversation.get("state") == "collect_phone"
+E       AssertionError: assert 'collect_datetime' == 'collect_phone'
+E         
+E         - collect_phone
+E         + collect_datetime
+
+tests\test_automation_invariants.py:325: AssertionError
+============================== warnings summary ===============================
+app\main.py:973
+  C:\Users\oyunc\Desktop\instagram-randevu-bot\booking-api\app\main.py:973: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    @app.on_event("startup")
+
+..\..\..\AppData\Local\Programs\Python\Python311\Lib\site-packages\fastapi\applications.py:4495
+  C:\Users\oyunc\AppData\Local\Programs\Python\Python311\Lib\site-packages\fastapi\applications.py:4495: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    return self.router.on_event(event_type)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_automation_invariants.py::test_invariant_invalid_phone_never_persists_and_valid_phone_is_canonical
+FAILED tests/test_automation_invariants.py::test_invariant_username_save_uses_actual_instagram_username
+2 failed, 460 passed, 35 skipped, 2 warnings in 5.12s

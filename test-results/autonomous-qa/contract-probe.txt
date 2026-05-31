@@ -1,0 +1,21 @@
+GET /health 200 {"status":"ok","time":"2026-05-20T21:50:46.573847+03:00"}
+GET /version 200 {"version":"local","time":"2026-05-20T21:50:46.577855+03:00","full_ai_conversational_mode":true,"llm_reply_polish_enabled":true,"llm_configured":false,"llm_base_url_configured":false,"llm_api_key_configured":false,"llm_api_key_length":0,"llm_api_key_hash":null,"llm_model":"llama-3.3-70b-versatile","
+GET /api/llm-health 200 {"ok":false,"configured":false,"primary_model":"llama-3.3-70b-versatile","fallback_model":"llama-3.1-8b-instant","base_url_masked":null,"provider_reachable":false,"latency_ms":null,"error":"LLM_BASE_URL, LLM_API_KEY or LLM_MODEL is not configured"}
+GET /crm 200 <!DOCTYPE html> <html lang="en"> <head>   <meta charset="UTF-8" />   <meta name="viewport" content="width=device-width, initial-scale=1.0" />   <title>CRM Panel</title>   <style>     :root {       --bg: #0b1020;       --panel: #121933;       --panel-soft: #182244;       --muted: #97a3c6;       --tex
+GET /api/appointments EXC RuntimeError('No database URL configured')
+GET /api/appointments/calendar 422 {"detail":[{"type":"missing","loc":["query","date"],"msg":"Field required","input":null}]}
+GET /api/conversations EXC RuntimeError('No database URL configured')
+GET /api/customers EXC RuntimeError('No database URL configured')
+GET /api/service-capacity EXC RuntimeError('No database URL configured')
+GET /api/customer-work-items EXC RuntimeError('No database URL configured')
+GET /api/call-suggestions EXC RuntimeError('No database URL configured')
+GET /api/crm/templates EXC RuntimeError('No database URL configured')
+GET /api/crm/rules EXC RuntimeError('No database URL configured')
+GET /api/crm/segments EXC RuntimeError('No database URL configured')
+GET /api/roi-summary EXC RuntimeError('No database URL configured')
+GET /api/campaigns EXC RuntimeError('No database URL configured')
+GET /api/campaigns/preview 422 {"detail":[{"type":"missing","loc":["query","template_slug"],"msg":"Field required","input":null}]}
+GET /internal/automation/claim EXC RuntimeError('No database URL configured')
+GET /internal/reminders/morning/claim EXC RuntimeError('No database URL configured')
+POST /api/process-instagram-message EXC RuntimeError('No database URL configured')
+POST /api/process-instagram-message 200 {"sender_id":"contract-probe-malformed","should_reply":false,"reply_text":null,"handoff":false,"conversation_state":"ignored","appointment_created":false,"appointment_id":null,"duplicate":false,"outbound_text":null,"llm_raw_reply_text":null,"final_reply_source":null,"normalized":{},"metrics":{"reply

@@ -1,0 +1,239 @@
+version: "2"
+type: backend
+tech_stack:
+  - Python 3
+  - FastAPI
+  - PostgreSQL via psycopg
+  - n8n workflows
+  - Instagram private poller service
+  - Docker Compose
+  - Render deployment
+  - pytest
+features:
+  - name: Health, diagnostics, and runtime visibility
+    description: Operational endpoints expose service health, build version, env diagnostics, LLM health, and a lightweight CRM panel.
+    files:
+      - booking-api/app/main.py
+      - render.yaml
+      - docker-compose.yml
+    endpoints:
+      - method: GET
+        path: /health
+        description: Health check and DB/runtime status.
+        auth_required: false
+        response_schema:
+          "200": object
+      - method: GET
+        path: /version
+        description: Build/runtime version metadata.
+        auth_required: false
+        response_schema:
+          "200": object
+      - method: GET
+        path: /debug-env
+        description: Debug environment values gated by token parameter.
+        auth_required: true
+        response_schema:
+          "200": object
+          "403": forbidden
+      - method: GET
+        path: /api/llm-health
+        description: Checks LLM provider configuration/connectivity.
+        auth_required: false
+        response_schema:
+          "200": object
+      - method: GET
+        path: /crm
+        description: HTML CRM panel preview.
+        auth_required: false
+        response_schema:
+          "200": HTML
+    depends_on: []
+  - name: Instagram DM processing pipeline
+    description: Receives Instagram messages, dedupes inbound events, extracts intent/entities, advances conversation state, persists messages, creates appointments, triggers CRM sync, and returns reply text.
+    files:
+      - booking-api/app/main.py
+      - booking-api/app/generic_core.py
+      - booking-api/app/pipeline_wrapper.py
+      - instagram-poller/app/main.py
+      - workflows/instagram-message-bot.json
+    endpoints:
+      - method: POST
+        path: /api/process-instagram-message
+        description: Process inbound Instagram DM payload and return bot reply/action result.
+        auth_required: false
+        request_schema:
+          body:
+            sender_id: string
+            message_text: string
+            raw_event: object
+        response_schema:
+          "200": ProcessResult
+          "422": validation error
+    depends_on:
+      - Health, diagnostics, and runtime visibility
+  - name: Conversation and customer CRM APIs
+    description: Lists conversations/customers, exposes customer detail/timeline, updates notes, and provides operational customer lists.
+    files:
+      - booking-api/app/main.py
+      - booking-api/app/generic_core.py
+    endpoints:
+      - method: GET
+        path: /api/conversations
+        description: List recent Instagram conversations.
+        auth_required: false
+        response_schema:
+          "200": object
+      - method: GET
+        path: /api/customers
+        description: List customers with filters/pagination.
+        auth_required: false
+        response_schema:
+          "200": CustomerListResponse
+      - method: GET
+        path: /api/customers/ops/{list_slug}
+        description: Return operational customer list by slug, e.g. follow-up/at-risk groups.
+        auth_required: false
+        response_schema:
+          "200": CustomerListResponse
+      - method: GET
+        path: /api/customers/{instagram_user_id}
+        description: Return customer detail for Instagram user.
+        auth_required: false
+        response_schema:
+          "200": CustomerDetailResponse
+          "404": not found
+      - method: GET
+        path: /api/customers/{instagram_user_id}/timeline
+        description: Return customer timeline events.
+        auth_required: false
+        response_schema:
+          "200": CustomerTimelineResponse
+      - method: PATCH
+        path: /api/customers/{instagram_user_id}
+        description: Update customer notes/metadata.
+        auth_required: false
+        request_schema:
+          body:
+            notes: string
+        response_schema:
+          "200": object
+    depends_on:
+      - Instagram DM processing pipeline
+  - name: Appointment management
+    description: Lists appointments, calendar view, updates appointment status/time, and marks attendance.
+    files:
+      - booking-api/app/main.py
+      - booking-api/app/generic_core.py
+    endpoints:
+      - method: GET
+        path: /api/appointments
+        description: List appointment records with filters.
+        auth_required: false
+        response_schema:
+          "200": object
+      - method: GET
+        path: /api/appointments/calendar
+        description: Calendar appointments for a given date.
+        auth_required: false
+        response_schema:
+          "200": object
+      - method: PATCH
+        path: /api/appointments/{appointment_id}
+        description: Update appointment fields/status.
+        auth_required: false
+        request_schema:
+          body: AppointmentUpdateRequest
+        response_schema:
+          "200": object
+      - method: POST
+        path: /api/appointments/{appointment_id}/attendance
+        description: Mark appointment attendance/no-show state.
+        auth_required: false
+        request_schema:
+          body: AttendanceUpdateRequest
+        response_schema:
+          "200": object
+    depends_on:
+      - Instagram DM processing pipeline
+  - name: CRM automation, reminders, and campaigns
+    description: Claims/marks due automation events and morning reminders, exposes templates/rules/segments/ROI, manages campaigns and audience previews.
+    files:
+      - booking-api/app/main.py
+      - scripts/replay-guardrail-regression.py
+    endpoints:
+      - method: GET
+        path: /internal/automation/claim
+        description: Claim due automation events for workers.
+        auth_required: false
+        response_schema:
+          "200": AutomationClaimResponse
+      - method: POST
+        path: /internal/automation/mark
+        description: Mark automation event result.
+        auth_required: false
+        request_schema:
+          body: AutomationMarkRequest
+        response_schema:
+          "200": object
+      - method: GET
+        path: /internal/reminders/morning/claim
+        description: Claim due morning reminder jobs.
+        auth_required: false
+        response_schema:
+          "200": ReminderClaimResponse
+      - method: POST
+        path: /internal/reminders/morning/mark
+        description: Mark reminder delivery result.
+        auth_required: false
+        request_schema:
+          body: ReminderMarkRequest
+        response_schema:
+          "200": object
+      - method: POST
+        path: /internal/messages/voice-fallback
+        description: Record fallback for oversized voice note/message URL.
+        auth_required: false
+        request_schema:
+          body: VoiceFallbackEvent
+        response_schema:
+          "200": VoiceFallbackResponse
+      - method: GET
+        path: /api/crm/templates
+        description: List CRM message templates.
+        auth_required: false
+        response_schema:
+          "200": object
+      - method: GET
+        path: /api/crm/rules
+        description: List CRM automation rules.
+        auth_required: false
+        response_schema:
+          "200": object
+      - method: GET
+        path: /api/crm/segments
+        description: Segment summary metrics.
+        auth_required: false
+        response_schema:
+          "200": object
+      - method: GET
+        path: /api/roi-summary
+        description: ROI summary metrics.
+        auth_required: false
+        response_schema:
+          "200": object
+      - method: GET
+        path: /api/campaigns
+        description: List campaigns.
+        auth_required: false
+        response_schema:
+          "200": object
+      - method: POST
+        path: /api/campaigns
+        description: Create campaign.
+        auth_required: false
+        request_schema:
+          body: CampaignCreateRequest
+        response_schema:
+          "200": object
+      - method: 
