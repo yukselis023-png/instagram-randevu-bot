@@ -76,13 +76,13 @@ services:
       - key: LIVE_CRM_PASSWORD
         value: "DoelCRM!2026"
       - key: CRM_SUPABASE_URL
-        value: "https://zkphfvqghdwwwvtlecyr.supabase.co"
+        value: "https://rnjkilyiqnqiyqhwqdly.supabase.co"
       - key: CRM_SUPABASE_ANON_KEY
-        value: "sb_publishable_qEzVCuQgakql5oTk_EWJ3Q_mvf97CLU"
+        value: "sb_publishable_DhA_HhaX9lX8HOzTiep9gQ__sthJ0fx"
       - key: CRM_SUPABASE_EMAIL
-        value: "doel@gmail.com"
+        value: "infodoeldigital+crm@gmail.com"
       - key: CRM_SUPABASE_PASSWORD
-        value: "123456"
+        value: "DoelCRM!2026"
       - key: CRM_WORKSPACE_ID
         value: "7a0583d1-18e0-4454-920e-b6c99f2202a1"
       - key: CRM_SYNC_SOURCE
