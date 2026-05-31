@@ -13353,7 +13353,7 @@ def live_crm_upsert_customer(headers: dict[str, str], user_id: str, conversation
 def live_crm_list_taken_slots(date_value: str, headers: dict[str, str] | None = None, user_id: str | None = None, force_refresh: bool = False) -> set[str]:
     headers = dict(headers or {})
     if not headers or not user_id:
-        headers, user_id = live_crm_auth_session()
+        headers, user_id = live_crm_auth_session(force_refresh)
     if not headers or not user_id:
         return set()
 
