@@ -254,11 +254,24 @@ Her ajan kendi worktree'sinde test script'i yazıp çalıştıracak. Sonuçlar d
 - /api/service-capacity: ✅ 200 OK
 - /api/roi-summary: ✅ 200 OK
 - /api/customers: ✅ 200 OK
-- Booking flow (service→confirm→name→phone→time): ⚠️ "Geçmiş tarih" hatası (1 Haziran 2026 geçmiş algılanıyor — saat 21:45, test 17:00 için)
+- Booking flow (service→confirm→name→phone→time): ✅ **FIXED** — `1 haziran 17:00` → Appt #73 created (01.06.2026 17:00) — date parsing bug resolved
 - Reschedule: ✅ "randevumu...alabilirmiyim" tespit ediliyor, slot önerisi çalışıyor
 - Pricing: ✅ "Web tasarım paketimiz tek seferlik 12.900 TL'dir"
 - Handoff: ✅ "operator bagla" → handoff=True
 - Invalid service: ✅ "mobil uygulama" → "hizmetimiz bulunmuyor"
+
+## Son Test Sonuçları (2026-05-31 21:55)
+| Test | Sonuç | Detay |
+|------|-------|-------|
+| Health / API endpoints | ✅ PASS | 200 OK, all endpoints responsive |
+| Date parsing fix (`7a9fe37`) | ✅ PASS | `1 haziran 17:00` → `2026-06-01` (was `0217-06-01`) |
+| Booking (happy path) | ✅ PASS | Appt #75, #76, #77 created |
+| Slot conflict → alternative | ✅ PASS | "10:00 dolu" → önerilen slot `11:10` → booking |
+| Reschedule (LLM flow) | ✅ PASS | `appointment_rescheduled` karar yolu aktive oldu |
+| Pricing | ✅ PASS | "Web tasarım 12.900 TL" |
+| Handoff | ✅ PASS | `operator bagla` → handoff=True |
+| Invalid service | ✅ PASS | `mobil uygulama` → "hizmetimiz bulunmuyor" |
+| CRM Tasks duplicate | ⚠️ 1 duplicate | `Smoke User` 2x (eski test), diğerleri unique |
 
 ## Fix Özeti (Bu Oturum)
 | # | Commit | Fix | Etki |
