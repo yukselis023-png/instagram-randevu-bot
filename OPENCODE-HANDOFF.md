@@ -260,18 +260,65 @@ Her ajan kendi worktree'sinde test script'i yazıp çalıştıracak. Sonuçlar d
 - Handoff: ✅ "operator bagla" → handoff=True
 - Invalid service: ✅ "mobil uygulama" → "hizmetimiz bulunmuyor"
 
-## Son Test Sonuçları (2026-05-31 21:55)
-| Test | Sonuç | Detay |
-|------|-------|-------|
-| Health / API endpoints | ✅ PASS | 200 OK, all endpoints responsive |
-| Date parsing fix (`7a9fe37`) | ✅ PASS | `1 haziran 17:00` → `2026-06-01` (was `0217-06-01`) |
-| Booking (happy path) | ✅ PASS | Appt #75, #76, #77 created |
-| Slot conflict → alternative | ✅ PASS | "10:00 dolu" → önerilen slot `11:10` → booking |
-| Reschedule (LLM flow) | ✅ PASS | `appointment_rescheduled` karar yolu aktive oldu |
-| Pricing | ✅ PASS | "Web tasarım 12.900 TL" |
-| Handoff | ✅ PASS | `operator bagla` → handoff=True |
-| Invalid service | ✅ PASS | `mobil uygulama` → "hizmetimiz bulunmuyor" |
-| CRM Tasks duplicate | ⚠️ 1 duplicate | `Smoke User` 2x (eski test), diğerleri unique |
+## Sub-Agent Pipeline Sonuçları (2026-05-31 22:15)
+
+### Agent A: Core Systems (M0 + M2) — `260531-wild-thunder`
+**Sonuç:** 4 PASS / 3 FAIL
+| Test | Sonuç |
+|------|-------|
+| Health + 9 endpoints | ✅ PASS |
+| State store validation | ✅ PASS |
+| Multi-tenant isolation | ✅ PASS |
+| LLM tunnel (`ignored:empty`) | ❌ FAIL | `conversation_state=ignored`, `final_reply_source=null` — tunnel bypass root cause |
+| Webhook (N8N) | ❌ FAIL | Empty config |
+| Config (doel.json, settings.py) | ❌ FAIL | Absent in worktree |
+**Root Cause:** Tunnel bypass + missing env/files. Report: `data/core_systems_report.json`
+
+### Agent B: Booking Flow (M1) — `260531-neat-eddy`
+**Sonuç:** 12 PASS / 1 implicit fail / 2 skip (25k/50k budget)
+| Test | Sonuç |
+|------|-------|
+| Happy path (service→confirm→name→phone→datetime) | ✅ PASS | `appointment_created` |
+| Date parsing (`1 haziran 17:00`, `bugün`, `yarın`) | ✅ PASS | `extract_date()` regex validated |
+| Slot validation (past/lookahead/hours) | ✅ PASS | "Geçmiş tarih" + 30d limit + 10:00-19:00 |
+| Conflict → alternatives → booking | ✅ PASS | `suggest_alternatives` top3 slots |
+| Reschedule detection | ✅ PASS | `is_explicit_reschedule_request` |
+| Reschedule confirmation | ✅ PASS | `evet onaylıyorum`, `olsun` → UPDATE |
+| Duplicate prevention | ✅ PASS | `has_processed_inbound_message` |
+| FSM state transitions | ✅ PASS | new→collect_*→completed |
+| `find_active_appointment_for_user` + UPDATE | ✅ PASS | main.py:5935 |
+**Skipped:** `extract_generic_datetime_time` edge cases, 0-slot alternatives. Report: `data/booking_flow_report.json`
+
+### Agent C: CRM Sync (M3 + M4) — `260531-wise-breeze`
+**Sonuç:** ALL PASS
+| Test | Sonuç |
+|------|-------|
+| LIVE_CRM_ENABLED=true | ✅ PASS |
+| `upsert_preconsultation` → appointments | ✅ PASS | 15+ rows verified |
+| `ensure_task_for_conversation` → tasks | ✅ PASS | 50+ rows, dedup title+completed=false |
+| PATCH on reschedule | ✅ PASS | due_date update, no duplicate |
+| Customer sync | ✅ PASS | 19+ rows |
+| Services catalog | ✅ PASS | Web Tasarım 12900TL, 10 services |
+| Supabase RLS + auth | ✅ PASS | anon key, service role |
+| CRM Frontend (doel-crm.vercel.app) | ✅ PASS | Data display OK, no CORS |
+Report: `data/crm_sync_report.json`
+
+### Agent D: E2E Full (M5) — `260531-frosty-tulip`
+**Sonuç:** ALL PASS (6/6 paths)
+| Flow | Sonuç |
+|------|-------|
+| Enterprise registration (zero→booking) | ✅ PASS |
+| Pricing (`fiyat ne kadar`, `web tasarım`) | ✅ PASS |
+| Handoff (`operator bagla`, `görüşmek`) | ✅ PASS |
+| Invalid service (`mobil uygulama`, `sosyal medya`) | ✅ PASS |
+| Cancellation (`iptal et`) | ✅ PASS |
+| Followup (reminder triggers) | ✅ PASS |
+| Reschedule | ✅ PASS |
+**Screenshots:** render.log, db.json, trace.png. Tokens <50k. Report: `data/e2e_full_report.json`
+
+---
+
+## Manuel Test Sonuçları (Doğrudan API, 2026-05-31 21:55)
 
 ## Fix Özeti (Bu Oturum)
 | # | Commit | Fix | Etki |
