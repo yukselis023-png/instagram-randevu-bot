@@ -17,6 +17,7 @@ from dateparser.search import search_dates
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 import psycopg
 from psycopg.rows import dict_row
@@ -1294,6 +1295,17 @@ def crm_panel() -> HTMLResponse:
     with open(panel_path, "r", encoding="utf-8") as handle:
         return HTMLResponse(handle.read())
 
+# ── Doel CRM SPA ────────────────────────────────────────────────────
+DOEL_CRM_DIR = os.path.join(os.path.dirname(__file__), "doel-crm-frontend")
+if os.path.isdir(DOEL_CRM_DIR):
+    app.mount("/doel-crm/assets", StaticFiles(directory=os.path.join(DOEL_CRM_DIR, "assets")), name="doel_crm_assets")
+    @app.get("/doel-crm", response_class=HTMLResponse)
+    @app.get("/doel-crm/", response_class=HTMLResponse)
+    @app.get("/doel-crm/{path:path}", response_class=HTMLResponse)
+    async def doel_crm_spa():
+        index_path = os.path.join(DOEL_CRM_DIR, "index.html")
+        with open(index_path, "r", encoding="utf-8") as handle:
+            return HTMLResponse(handle.read())
 
 def is_within_morning_reminder_window(now: datetime | None = None) -> bool:
     if not MORNING_REMINDER_ENABLED:
