@@ -12959,7 +12959,7 @@ def create_appointment(conn: psycopg.Connection, conversation: dict[str, Any], u
                 raise HTTPException(status_code=409, detail="Bu slot artık dolu.")
 
             if existing_slot:
-                if False and str(existing_slot.get("instagram_user_id") or "") != str(conversation.get("instagram_user_id") or ""):
+                if str(existing_slot.get("instagram_user_id") or "") != str(conversation.get("instagram_user_id") or ""):
                     raise HTTPException(status_code=409, detail="Bu slot artık dolu.")
                 resolved_status = "confirmed" if existing_slot.get("status") == "confirmed" else local_status
                 cur.execute(

@@ -489,6 +489,12 @@ def detect_requested_service_from_text(message_text: str, cfg: dict[str, Any]) -
     lowered = sanitize_text(message_text or "").lower()
     if not lowered:
         return None
+    # Check unavailable services first
+    unavailable = cfg.get("unavailable_services") or []
+    for service in unavailable:
+        clean = sanitize_text(str(service or "")).lower()
+        if clean and clean in lowered:
+            return None  # Don't match — user asked for unavailable service
     for service in cfg.get("service_catalog", []) or []:
         if not isinstance(service, dict):
             continue
@@ -2728,6 +2734,8 @@ TARİH VE DÜZELTME KURALLARI:
 - İSİM DÜZELTME KURALI: Kullanıcı ismini düzeltirse ("Ben X değilim, adım Y"), ÖNCELİKLE özür dile ve düzelttiğini belirt ("Kusura bakmayın, hemen düzeltiyorum [yeni isim] Bey"), SONRA bir sonraki adıma geç. Asla düzeltmeyi atlayıp direkt sonraki soruya geçme.
 - ENTITY ÇIKARIM KURALLARI (KRİTİK): lead_name çıkarırken SADECE saf isim ve soyismi al. Konuşma dolgusu, zamir ve bağlaçları ("aslında", "ben", "adım", "diye", "yani", "işte") KESİNLİKLE dahil etme. AYNI KURAL phone, requested_date, requested_time için de geçerli: sadece saf veriyi çıkar, ekstra kelime ekleme.
 - KONUŞMA BAĞLAMI KURALI: Her yeni mesajı bağımsız değerlendir. Müşteri yeni bir konu açarsa ("dövme yapıyor musunuz?", "randevuyu iptal et", "indirim var mı?"), öncelikle O konuyu cevapla. Önceki konuşma bağlamını sadece aynı konu devam ediyorsa veya eksik bilgi (isim, telefon, tarih) tamamlamak için kullan. Asla eski konuyu yeni sorunun önüne geçirme.
+- İPTAL/DEĞİŞİKLİK KURALLARI: Kullanıcı "iptal", "iptal etmek istiyorum", "vazgeçtim", "randevuyu sil" derse "/cancel" komutu işleneceğini bildir ve "Talebiniz işleme alındı" de. ASLA "kaydınız korunuyor" veya "aktif kayıt bulamadım" gibi yanıltıcı veya pasif yanıt verme. Her iptal/silme talebini ciddiye al ve intent'i "human_handoff" olarak işaretle.
+- SUNULMAYAN HİZMET KURALI: Müşteri Business Context'teki sunulmayan hizmetler listesindeki bir hizmeti sorarsa (örn: saç kesimi, dövme, lazer, emlak), DOĞRUDAN ve NAZİKÇE bu hizmeti sunmadığını belirt. "Şu anda sadece dijital hizmetler sunuyoruz; web tasarım, otomasyon, reklam yönetimi ve sosyal medya yönetimi konularında yardımcı olabilirim. İlgilenir misiniz?" benzeri yönlendirici yanıt ver.
 
 GEÇMİŞ VE ŞİMDİ AYIRIMI (KRİTİK):
 - SON gelen mesaj, önceki tüm mesajlardan ve geçmiş bilgilerden daha önceliklidir.
