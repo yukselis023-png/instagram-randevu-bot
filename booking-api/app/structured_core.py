@@ -206,11 +206,16 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
             # 2. Deterministik Varlık Çıkarımı
             extracted_name = extract_name(message_text, conversation.get("state", "new"))
             extracted_phone = extract_phone(message_text)
-            # Fallback: csv formatında "İsim, 05XX..." veya direkt numara
+            # Fallback regex: "05XXXXXXXXX" formatında telefon
             if not extracted_phone:
                 _phone_raw = re.search(r'\b0?\d{10,11}\b', sanitize_text(message_text))
                 if _phone_raw:
                     extracted_phone = _phone_raw.group(0)
+            # Fallback: "İsim Soyisim, 05XXXXXXXXX" formatında aynı mesajda isim+telefon
+            if not extracted_phone:
+                _combo = re.search(r'([A-ZÇĞİÖŞÜ][a-zçğıöşü]+\s+[A-ZÇĞİÖŞÜ][a-zçğıöşü]+)\s*[,;]\s*(\d{10,11})', message_text)
+                if _combo:
+                    extracted_phone = _combo.group(2)
             extracted_date = extract_date(message_text)
             extracted_time = extract_time(message_text)
             
@@ -280,7 +285,7 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
             if effective_time and not conversation.get("requested_time"):
                 conversation["requested_time"] = effective_time
             
-            if not deterministic_handled and has_name and has_phone and has_date and has_time and has_service and conversation.get("state") != "completed" and llm_intent in ("book_appointment", "collect_datetime"):
+            if not deterministic_handled and has_name and has_phone and has_date and has_time and has_service and conversation.get("state") != "completed":
                 if not conversation.get("requested_date") or not conversation.get("requested_time"):
                     pass
                 else:
@@ -314,6 +319,8 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
                             decision_path.append("action:appointment_created")
                             queue_crm_sync(background_tasks, conversation, appointment_id, metrics)
             elif not llm_reply:
+                if not has_service:
+                    conversation["state"] = "collect_service"
                 if not has_service:
                     conversation["state"] = "collect_service"
                     reply_text = "Hangi hizmet için ön görüşme planlamak istersiniz?"
