@@ -289,27 +289,23 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
                 if not conversation.get("requested_date") or not conversation.get("requested_time"):
                     pass
                 else:
-                    slot_error = validate_slot(conversation.get("requested_date"), 
-                                              conversation.get("requested_time"))
+                    from datetime import date as date_cls, time as time_cls, timedelta
+                    slot_error = validate_slot(conversation.get("requested_date"), conversation.get("requested_time"))
+                    if not slot_error:
+                        try:
+                            req_date = date_cls.fromisoformat(normalize_date_string(conversation.get("requested_date")))
+                            req_time = time_cls.fromisoformat(normalize_time_string(conversation.get("requested_time")))
+                            now = datetime.datetime.now(TZ)
+                            if req_date == now.date() and req_time <= now.time():
+                                slot_error = f"Geçmiş bir saat seçilemez. Şu an saat {now.strftime('%H:%M')}. Lütfen ileri bir saat yazın."
+                        except Exception:
+                            pass
                     if slot_error:
                         reply_text = slot_error
                         conversation["state"] = "collect_datetime"
                         decision_path.append("validation:slot_error")
                     else:
-                        conflict = find_existing_appointment(conn, 
-                            normalize_date_string(conversation.get("requested_date")), 
-                            normalize_time_string(conversation.get("requested_time")), 
-                            conversation.get("service"))
-                        if conflict:
-                            alternatives = suggest_alternatives(conn, 
-                                normalize_date_string(conversation.get("requested_date")), 
-                                normalize_time_string(conversation.get("requested_time")), 
-                                conversation.get("service"))
-                            alt_text = ", ".join(alternatives[:3])
-                            reply_text = f"Maalesef o saat dolu. Uygun seçenekler: {alt_text}. Hangisi uygun olur?"
-                            conversation["state"] = "collect_datetime"
-                            decision_path.append("validation:slot_conflict")
-                        else:
+                        try:
                             conversation["state"] = "completed"
                             conversation["appointment_status"] = "confirmed"
                             created = create_appointment(conn, conversation, payload.instagram_username)
@@ -318,6 +314,24 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
                             reply_text = build_confirmation_message(conversation)
                             decision_path.append("action:appointment_created")
                             queue_crm_sync(background_tasks, conversation, appointment_id, metrics)
+                        except HTTPException as http_exc:
+                            conversation["state"] = "collect_datetime"
+                            conversation["appointment_status"] = "collecting"
+                            alt_slots = []
+                            try:
+                                raw_alts = suggest_alternatives(conn, 
+                                    normalize_date_string(conversation.get("requested_date")),
+                                    normalize_time_string(conversation.get("requested_time")),
+                                    conversation.get("service"))
+                                alt_slots = raw_alts[:5]
+                            except Exception:
+                                pass
+                            if alt_slots:
+                                alt_text = ", ".join(alt_slots)
+                                reply_text = f"Maalesef {normalize_time_string(conversation.get('requested_time')) or 'o saat'} dolu. Aynı gün uygun seçenekler: {alt_text}. Hangisi uygun olur?"
+                            else:
+                                reply_text = f"Maalesef {normalize_time_string(conversation.get('requested_time')) or 'o saat'} dolu ve o gün için boş slot kalmadı. Farklı bir gün yazar mısınız?"
+                            decision_path.append("validation:slot_conflict_create")
             elif not llm_reply:
                 if not has_service:
                     conversation["state"] = "collect_service"
