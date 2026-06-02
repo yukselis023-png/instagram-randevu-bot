@@ -835,12 +835,45 @@ def is_service_overview_question(message_text: str, intent: str | None = None) -
             "hizmetleriniz",
             "neler yapiyorsunuz",
             "neler yapıyorsunuz",
+            "hangi hizmetleriniz var",
+            "hizmetleriniz nelerdir",
+            "hangi konularda hizmet",
+            "hangi hizmeti",
+            "hangi hizmetler",
+            "ne is yapiyorsunuz",
+            "ne iş yapıyorsunuz",
+            "is alaniniz",
+            "iş alanınız",
         )
     )
 
 
 def build_natural_service_overview_reply(cfg: dict[str, Any]) -> str | None:
-    return None
+    catalog = cfg.get("service_catalog") or []
+    if not catalog:
+        return None
+    parts: list[str] = []
+    for svc in catalog:
+        if not isinstance(svc, dict):
+            continue
+        name = str(svc.get("display") or svc.get("name") or svc.get("slug") or "").strip()
+        if not name:
+            continue
+        price = svc.get("price")
+        if isinstance(price, (int, float)) and price > 0:
+            if price >= 1000:
+                price_str = f"{price/1000:.0f}.{int(price%1000):03d} TL".rstrip(".000")
+            else:
+                price_str = f"{int(price)} TL"
+            parts.append(f"{name} ({price_str})")
+        else:
+            parts.append(name)
+    if not parts:
+        return None
+    joined = _join_natural_list(parts)
+    if not joined:
+        return None
+    return f"Doel olarak {joined} alanlarında hizmet veriyoruz. Detaylı bilgi almak istediğiniz bir hizmet var mı?"
 
 
 def build_user_business_identity_reply(cfg: dict[str, Any]) -> str:
