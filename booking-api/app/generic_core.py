@@ -205,6 +205,34 @@ def is_booking_opt_in(message_text: str, intent: str | None) -> bool:
     direct_booking = any(term in lowered for term in booking_terms) and any(action in lowered for action in booking_actions)
     return intent == "booking_request" or direct_booking or any(phrase in lowered for phrase in BOOKING_OPT_IN_PHRASES)
 
+EXPLICIT_NEW_BOOKING_PHRASES = (
+    "yeni randevu oluştur", "yeni randevu olustur", "yeni randevu",
+    "yeniden randevu", "yeni görüşme", "yeni gorusme", "tekrar randevu",
+    "yeni bir randevu", "yeni bir görüşme", "yeni bir gorusme",
+    "başka bir randevu", "baska bir randevu", "bir randevu daha",
+    "bir görüşme daha", "bir gorusme daha", "yeni ön görüşme",
+    "yeni on gorusme", "baştan randevu", "bastan randevu",
+)
+
+def is_explicit_new_booking_intent(message_text: str, intent: str | None) -> bool:
+    lowered = sanitize_text(message_text or "").lower()
+    if any(phrase in lowered for phrase in EXPLICIT_NEW_BOOKING_PHRASES):
+        return True
+    if intent == "new_booking_request":
+        return True
+    return lowered.startswith(("yeni randevu", "yeniden randevu", "tekrar randevu"))
+
+def reset_stale_booking_fields(conversation: dict[str, Any], memory: dict[str, Any]) -> None:
+    for key in ("requested_date", "requested_time", "appointment_id", "appointment_status", "available_slots", "lead_name", "full_name", "phone", "service"):
+        conversation.pop(key, None)
+    for key in ("reschedule_requested_date", "reschedule_requested_time", "suggested_booking_slots", "last_availability_date", "last_availability_slots"):
+        memory.pop(key, None)
+    memory["open_loop"] = "new_booking_request"
+    memory["last_bot_question_type"] = "service_selection"
+    conversation["state"] = "collect_service"
+    conversation["assigned_human"] = False
+    conversation["memory_state"] = memory
+
 
 def clear_stale_active_booking_state(conversation: dict[str, Any], memory: dict[str, Any], conn: Any | None = None) -> None:
     has_confirmed_appointment = is_confirmed_generic_appointment(conversation) or bool(existing_generic_appointment_id(conversation, conn))
@@ -671,6 +699,64 @@ def build_preconsultation_explanation_reply(service_label: str | None) -> str:
 
 def build_completed_followup_reply(message_text: str, cfg: dict[str, Any]) -> tuple[str | None, str | None]:
     return None, None
+
+EXISTING_APPT_RECALL_PHRASES = (
+    "randevum vardı", "randevum vardi", "randevum var", "var mıydı randevum",
+    "varmiydi randevum", "var mi randevum", "hatırlıyor musun", "hatirliyor musun",
+    "randevumu hatırla", "randevumu hatirla", "mevcut randevum", "mevcut randevun",
+    "randevum ne zaman", "randevum ne zaman", "randevumuz ne zaman", "randevum vardı",
+    "hatırlatır mısın", "hatirlatir misin", "sıradaki randevu", "siradaki randevu",
+    "yaklaşan randevu", "yaklasan randevu", "randevumuz vardı", "randevumuz vardi",
+    "randevumuz var mı", "randevumuz var mi", "var mı randevum", "varmi randevum",
+    "önceki randevu", "onceki randevu",
+)
+
+def is_existing_appointment_recall_question(message_text: str) -> bool:
+    lowered = sanitize_text(message_text or "").lower()
+    if any(phrase in lowered for phrase in EXISTING_APPT_RECALL_PHRASES):
+        return True
+    return False
+
+def build_existing_appointment_recall_reply(conn: Any, conversation: dict[str, Any]) -> str | None:
+    """Look up the user's active/confirmed appointments and summarize them."""
+    sender_id = str(conversation.get("sender_id") or conversation.get("instagram_user_id") or "").strip()
+    if not sender_id:
+        return None
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, full_name, appointment_date, appointment_time, service, status, phone
+                FROM appointments
+                WHERE instagram_user_id = %s
+                  AND status IN ('confirmed', 'preconsultation', 'scheduled')
+                  AND COALESCE(attendance_status, 'scheduled') NOT IN ('completed', 'no_show', 'canceled', 'cancelled')
+                ORDER BY appointment_date ASC, appointment_time ASC
+                LIMIT 5
+                """,
+                (sender_id,),
+            )
+            rows = cur.fetchall()
+    except Exception:
+        return None
+    if not rows:
+        return "Aktif bir randevunuz görünmüyor. Yeni bir ön görüşme planlamak isterseniz yazabilirsiniz."
+    name = str(rows[0].get("full_name") or "").strip() or "değerli kullanıcımız"
+    lines: list[str] = []
+    for row in rows:
+        date_str = str(row.get("appointment_date") or "")[:10]
+        time_str = str(row.get("appointment_time") or "")[:5]
+        svc = str(row.get("service") or "").strip()
+        if not date_str or not time_str:
+            continue
+        if svc:
+            lines.append(f"• {date_str} {time_str} ({svc})")
+        else:
+            lines.append(f"• {date_str} {time_str}")
+    if not lines:
+        return "Aktif bir randevunuz görünmüyor. Yeni bir ön görüşme planlamak isterseniz yazabilirsiniz."
+    header = f"{name} Bey/Hanım, aktif randevunuz:"
+    return header + "\n" + "\n".join(lines)
 
 
 def reply_repeats_service_question(reply_text: str | None) -> bool:
@@ -1746,6 +1832,13 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
             intent = deterministic_intent_hint
             decision_path.append(f"generic_intent_hint:{intent}")
         booking_opt_in = is_booking_opt_in(message_text, intent)
+        explicit_new_booking = is_explicit_new_booking_intent(message_text, intent)
+        if explicit_new_booking:
+            reset_stale_booking_fields(conversation, memory)
+            memory = ensure_conversation_memory(conversation)
+            booking_opt_in = True
+            intent = "booking_request"
+            decision_path.append("fsm:explicit_new_booking_reset")
         deterministic_reply = False
         if is_explicit_cancel_request(message_text):
             existing_cancel_id = existing_generic_appointment_id(conversation, conn)
@@ -1772,6 +1865,15 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
                 booking_opt_in = False
                 deterministic_reply = True
                 decision_path.append("reply:who_to_call")
+        elif is_existing_appointment_recall_question(message_text):
+            recall_reply = build_existing_appointment_recall_reply(conn, conversation)
+            if recall_reply:
+                reply_text = recall_reply
+                final_reply_source = "config_formatter"
+                intent = "direct_answer"
+                booking_opt_in = False
+                deterministic_reply = True
+                decision_path.append("reply:existing_appointment_recall")
         elif is_company_capability_question(message_text):
             capability_reply = build_company_capability_reply(message_text)
             if capability_reply:
