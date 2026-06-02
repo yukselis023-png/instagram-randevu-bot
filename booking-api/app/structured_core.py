@@ -244,17 +244,23 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
                     decision_path.append("direct:appointment_recall")
                     deterministic_handled = True
             
-            if not deterministic_handled and has_name and has_phone and has_date and has_time and has_service and conversation.get("state") != "completed":
-                # Alanları create_appointment ÖNCESİNDE set et - create_appointment bu alanları doğrudan okur
-                if effective_name and not conversation.get("full_name"):
+            # İsim/telefon/tarih/saat alanlarını her zaman güncelle (state'ten bağımsız)
+            if effective_name:
+                if not conversation.get("full_name"):
                     conversation["full_name"] = effective_name
                     conversation["lead_name"] = effective_name
-                if effective_phone and not conversation.get("phone"):
-                    conversation["phone"] = effective_phone
-                if effective_date and not conversation.get("requested_date"):
-                    conversation["requested_date"] = effective_date
-                if effective_time and not conversation.get("requested_time"):
-                    conversation["requested_time"] = effective_time
+                elif effective_name != conversation.get("full_name"):
+                    # LLM isim düzeltmesi tespit ettiyse güncelle
+                    conversation["full_name"] = effective_name
+                    conversation["lead_name"] = effective_name
+            if effective_phone and not conversation.get("phone"):
+                conversation["phone"] = effective_phone
+            if effective_date and not conversation.get("requested_date"):
+                conversation["requested_date"] = effective_date
+            if effective_time and not conversation.get("requested_time"):
+                conversation["requested_time"] = effective_time
+            
+            if not deterministic_handled and has_name and has_phone and has_date and has_time and has_service and conversation.get("state") != "completed":
                     
                 slot_error = validate_slot(conversation.get("requested_date"), 
                                           conversation.get("requested_time"))
