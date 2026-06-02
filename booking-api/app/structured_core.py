@@ -232,44 +232,48 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
         
         # Kullanıcı net bir şekilde tüm bilgileri verdiyse ve randevu istiyorsa
         if has_name and has_phone and has_date and has_time and has_service:
-            # Slot doğrulama
-            slot_error = validate_slot(conversation.get("requested_date") or effective_date, 
-                                      conversation.get("requested_time") or effective_time)
-            if slot_error:
-                reply_text = slot_error
-                conversation["state"] = "collect_datetime"
-                decision_path.append("validation:slot_error")
-            else:
-                # Çakışma kontrolü
-                conflict = find_existing_appointment(conn, 
-                    normalize_date_string(conversation.get("requested_date") or effective_date), 
-                    normalize_time_string(conversation.get("requested_time") or effective_time), 
-                    conversation.get("service"))
-                if conflict:
-                    alternatives = suggest_alternatives(conn, 
+            try:
+                # Slot doğrulama
+                slot_error = validate_slot(conversation.get("requested_date") or effective_date, 
+                                          conversation.get("requested_time") or effective_time)
+                if slot_error:
+                    reply_text = slot_error
+                    conversation["state"] = "collect_datetime"
+                    decision_path.append("validation:slot_error")
+                else:
+                    # Çakışma kontrolü
+                    conflict = find_existing_appointment(conn, 
                         normalize_date_string(conversation.get("requested_date") or effective_date), 
                         normalize_time_string(conversation.get("requested_time") or effective_time), 
                         conversation.get("service"))
-                    alt_text = ", ".join(alternatives[:3])
-                    reply_text = f"Maalesef o saat dolu. Uygun seçenekler: {alt_text}. Hangisi uygun olur?"
-                    conversation["state"] = "collect_datetime"
-                    decision_path.append("validation:slot_conflict")
-                else:
-                    # Randevu oluştur
-                    if effective_date and not conversation.get("requested_date"):
-                        conversation["requested_date"] = effective_date
-                    if effective_time and not conversation.get("requested_time"):
-                        conversation["requested_time"] = effective_time
-                    conversation["state"] = "completed"
-                    conversation["appointment_status"] = "confirmed"
-                    created = create_appointment(conn, conversation, payload.instagram_username)
-                    appointment_id = int(created[0] if isinstance(created, tuple) else created)
-                    conversation["appointment_id"] = appointment_id
-                    reply_text = build_confirmation_message(conversation)
-                    decision_path.append("action:appointment_created")
-                    
-                    # CRM Senkronizasyonu
-                    queue_crm_sync(background_tasks, conversation, appointment_id, metrics)
+                    if conflict:
+                        alternatives = suggest_alternatives(conn, 
+                            normalize_date_string(conversation.get("requested_date") or effective_date), 
+                            normalize_time_string(conversation.get("requested_time") or effective_time), 
+                            conversation.get("service"))
+                        alt_text = ", ".join(alternatives[:3])
+                        reply_text = f"Maalesef o saat dolu. Uygun seçenekler: {alt_text}. Hangisi uygun olur?"
+                        conversation["state"] = "collect_datetime"
+                        decision_path.append("validation:slot_conflict")
+                    else:
+                        # Randevu oluştur
+                        if effective_date and not conversation.get("requested_date"):
+                            conversation["requested_date"] = effective_date
+                        if effective_time and not conversation.get("requested_time"):
+                            conversation["requested_time"] = effective_time
+                        conversation["state"] = "completed"
+                        conversation["appointment_status"] = "confirmed"
+                        created = create_appointment(conn, conversation, payload.instagram_username)
+                        appointment_id = int(created[0] if isinstance(created, tuple) else created)
+                        conversation["appointment_id"] = appointment_id
+                        reply_text = build_confirmation_message(conversation)
+                        decision_path.append("action:appointment_created")
+                        queue_crm_sync(background_tasks, conversation, appointment_id, metrics)
+            except Exception as e:
+                logger.exception("structured_core appointment create failed: %s", e)
+                reply_text = "Randevu kaydınızı oluştururken bir sorun oluştu, ekibimize iletiyorum. En kısa sürede dönüş yapacağız."
+                conversation["state"] = "human_handoff"
+                decision_path.append("error:appointment_create_failed")
         elif not llm_reply:
             # LLM cevap vermediyse FSM template'i ile devam et
             if not has_service:
