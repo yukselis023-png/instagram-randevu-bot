@@ -231,31 +231,38 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
             reply_text = llm_reply if llm_reply else ""
             
             if has_name and has_phone and has_date and has_time and has_service:
-                slot_error = validate_slot(conversation.get("requested_date") or effective_date, 
-                                          conversation.get("requested_time") or effective_time)
+                # Alanları create_appointment ÖNCESİNDE set et - create_appointment bu alanları doğrudan okur
+                if effective_name and not conversation.get("full_name"):
+                    conversation["full_name"] = effective_name
+                    conversation["lead_name"] = effective_name
+                if effective_phone and not conversation.get("phone"):
+                    conversation["phone"] = effective_phone
+                if effective_date and not conversation.get("requested_date"):
+                    conversation["requested_date"] = effective_date
+                if effective_time and not conversation.get("requested_time"):
+                    conversation["requested_time"] = effective_time
+                    
+                slot_error = validate_slot(conversation.get("requested_date"), 
+                                          conversation.get("requested_time"))
                 if slot_error:
                     reply_text = slot_error
                     conversation["state"] = "collect_datetime"
                     decision_path.append("validation:slot_error")
                 else:
                     conflict = find_existing_appointment(conn, 
-                        normalize_date_string(conversation.get("requested_date") or effective_date), 
-                        normalize_time_string(conversation.get("requested_time") or effective_time), 
+                        normalize_date_string(conversation.get("requested_date")), 
+                        normalize_time_string(conversation.get("requested_time")), 
                         conversation.get("service"))
                     if conflict:
                         alternatives = suggest_alternatives(conn, 
-                            normalize_date_string(conversation.get("requested_date") or effective_date), 
-                            normalize_time_string(conversation.get("requested_time") or effective_time), 
+                            normalize_date_string(conversation.get("requested_date")), 
+                            normalize_time_string(conversation.get("requested_time")), 
                             conversation.get("service"))
                         alt_text = ", ".join(alternatives[:3])
                         reply_text = f"Maalesef o saat dolu. Uygun seçenekler: {alt_text}. Hangisi uygun olur?"
                         conversation["state"] = "collect_datetime"
                         decision_path.append("validation:slot_conflict")
                     else:
-                        if effective_date and not conversation.get("requested_date"):
-                            conversation["requested_date"] = effective_date
-                        if effective_time and not conversation.get("requested_time"):
-                            conversation["requested_time"] = effective_time
                         conversation["state"] = "completed"
                         conversation["appointment_status"] = "confirmed"
                         created = create_appointment(conn, conversation, payload.instagram_username)
@@ -282,16 +289,6 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
                     reply_text = "Uygun gün ve saati net yazar mısınız? (Örn: Yarın 14:00)"
                     decision_path.append("fsm:collect_datetime")
 
-            if effective_name and not conversation.get("full_name"):
-                conversation["lead_name"] = effective_name
-                conversation["full_name"] = effective_name
-            if effective_phone and not conversation.get("phone"):
-                conversation["phone"] = effective_phone
-            if effective_date and not conversation.get("requested_date"):
-                conversation["requested_date"] = effective_date
-            if effective_time and not conversation.get("requested_time"):
-                conversation["requested_time"] = effective_time
-                
             conversation["memory_state"] = memory
             update_conversation_memory_after_bot_reply(conversation, reply_text, "|".join(decision_path))
             upsert_conversation(conn, conversation)
