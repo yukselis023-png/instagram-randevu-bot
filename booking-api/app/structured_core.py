@@ -269,37 +269,39 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
             if effective_time and not conversation.get("requested_time"):
                 conversation["requested_time"] = effective_time
             
-            if not deterministic_handled and has_name and has_phone and has_date and has_time and has_service and conversation.get("state") != "completed":
-                    
-                slot_error = validate_slot(conversation.get("requested_date"), 
-                                          conversation.get("requested_time"))
-                if slot_error:
-                    reply_text = slot_error
-                    conversation["state"] = "collect_datetime"
-                    decision_path.append("validation:slot_error")
+            if not deterministic_handled and has_name and has_phone and has_date and has_time and has_service and conversation.get("state") != "completed" and llm_intent in ("book_appointment", "collect_datetime"):
+                if not conversation.get("requested_date") or not conversation.get("requested_time"):
+                    pass
                 else:
-                    conflict = find_existing_appointment(conn, 
-                        normalize_date_string(conversation.get("requested_date")), 
-                        normalize_time_string(conversation.get("requested_time")), 
-                        conversation.get("service"))
-                    if conflict:
-                        alternatives = suggest_alternatives(conn, 
+                    slot_error = validate_slot(conversation.get("requested_date"), 
+                                              conversation.get("requested_time"))
+                    if slot_error:
+                        reply_text = slot_error
+                        conversation["state"] = "collect_datetime"
+                        decision_path.append("validation:slot_error")
+                    else:
+                        conflict = find_existing_appointment(conn, 
                             normalize_date_string(conversation.get("requested_date")), 
                             normalize_time_string(conversation.get("requested_time")), 
                             conversation.get("service"))
-                        alt_text = ", ".join(alternatives[:3])
-                        reply_text = f"Maalesef o saat dolu. Uygun seçenekler: {alt_text}. Hangisi uygun olur?"
-                        conversation["state"] = "collect_datetime"
-                        decision_path.append("validation:slot_conflict")
-                    else:
-                        conversation["state"] = "completed"
-                        conversation["appointment_status"] = "confirmed"
-                        created = create_appointment(conn, conversation, payload.instagram_username)
-                        appointment_id = int(created[0] if isinstance(created, tuple) else created)
-                        conversation["appointment_id"] = appointment_id
-                        reply_text = build_confirmation_message(conversation)
-                        decision_path.append("action:appointment_created")
-                        queue_crm_sync(background_tasks, conversation, appointment_id, metrics)
+                        if conflict:
+                            alternatives = suggest_alternatives(conn, 
+                                normalize_date_string(conversation.get("requested_date")), 
+                                normalize_time_string(conversation.get("requested_time")), 
+                                conversation.get("service"))
+                            alt_text = ", ".join(alternatives[:3])
+                            reply_text = f"Maalesef o saat dolu. Uygun seçenekler: {alt_text}. Hangisi uygun olur?"
+                            conversation["state"] = "collect_datetime"
+                            decision_path.append("validation:slot_conflict")
+                        else:
+                            conversation["state"] = "completed"
+                            conversation["appointment_status"] = "confirmed"
+                            created = create_appointment(conn, conversation, payload.instagram_username)
+                            appointment_id = int(created[0] if isinstance(created, tuple) else created)
+                            conversation["appointment_id"] = appointment_id
+                            reply_text = build_confirmation_message(conversation)
+                            decision_path.append("action:appointment_created")
+                            queue_crm_sync(background_tasks, conversation, appointment_id, metrics)
             elif not llm_reply:
                 if not has_service:
                     conversation["state"] = "collect_service"
