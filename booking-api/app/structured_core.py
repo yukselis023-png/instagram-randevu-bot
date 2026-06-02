@@ -38,15 +38,19 @@ LLM_SYSTEM_PROMPT = """Sen bir randevu asistanısın. SADECE aşağıdaki JSON �
     "time": "HH:MM veya null",
     "service": "string veya null"
   },
-  "missing_fields": ["name", "phone", "date", "time"] (eksik olanları listele, tamamsa []),
+  "missing_fields": ["name", "phone", "date", "time"],
   "reply": "Kullanıcıya verilecek doğal, kısa (max 160 karakter) ve nazik Türkçe yanıt."
 }
 
-KURALLAR:
-1. Kullanıcı bir soru soruyorsa, önce soruyu cevapla ("reply"), ardından eksikse bir sonraki adımı sor.
-2. Asla "takvimi göremiyorum", "kontrol edip döneceğim" deme. Sistem sana slot verirse sadece onları öner.
-3. Kullanıcı "iptal" veya "değiştir" derse intent'i "human_handoff" yap.
-4. "reply" alanı asla "randevunuzu oluşturdum/güncelledim" gibi kesin sistem ifadeleri içermez. Bu, arka plan sistemi tarafından doğrulandıktan sonra eklenir.
+KESİN KURALLAR:
+1. SADECE JSON DÖNDÜR: Yanıtın ilk karakteri '{', son karakteri '}' olmalı.
+2. KISA YAZ: "reply" alanı 160 karakteri geçmesin. En fazla 2 kısa cümle.
+3. SORU CEVAPLA: Kullanıcı bir soru soruyorsa, önce soruyu cevapla, ardından eksikse bir sonraki adımı sor.
+4. ASLA UYDURMA: Business Context'teki bilgiye sadık kal. Fiyat, süre, hizmet uydurma.
+5. ASLA PASİF OLMA: "Takvimi göremiyorum", "kontrol edip döneceğim", "ekibe aktarıyorum" deme.
+6. İPTAL/DEĞİŞİKLİK: Kullanıcı "iptal" veya "değiştir" derse intent'i "human_handoff" yap.
+7. İSİM DÜZELTME: Sadece kullanıcı açıkça "Adımı Y olarak değiştir" derse "name" alanını güncelle. "Ben Mehmet bey" gibi selamlamalar kayıt değiştirmez.
+8. RANDEVU ONAYI: "reply" alanı asla "randevunuzu oluşturdum/güncelledim" gibi kesin sistem ifadeleri içermez.
 """
 
 def extract_balanced_json(text: str) -> Optional[Dict[str, Any]]:
@@ -82,6 +86,45 @@ def extract_balanced_json(text: str) -> Optional[Dict[str, Any]]:
                     return None
     return None
 
+def call_llm_structured(system_prompt: str, user_text: str) -> dict:
+    """LLM'e sadeleştirilmiş structured JSON çağrısı."""
+    import requests, os, time as t
+    from app.main import LLM_BASE_URL, LLM_API_KEY, LLM_MODEL
+    
+    model = os.getenv("LLM_FALLBACK_MODEL") or LLM_MODEL
+    headers = {"Authorization": f"Bearer {LLM_API_KEY}", "Content-Type": "application/json"}
+    
+    for model_name in [LLM_MODEL, model]:
+        try:
+            payload = {
+                "model": model_name,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_text}
+                ],
+                "temperature": 0.0,
+                "max_tokens": 500
+            }
+            resp = requests.post(f"{LLM_BASE_URL}/chat/completions", headers=headers, json=payload, timeout=25)
+            resp.raise_for_status()
+            content = resp.json()["choices"][0]["message"]["content"]
+            match = extract_balanced_json(content)
+            if match:
+                match["_llm_model_used"] = model_name
+                return match
+            return {
+                "intent": "answer_question",
+                "reply_text": content,
+                "extracted_entities": {},
+                "_llm_model_used": model_name,
+            }
+        except Exception as e:
+            if model_name == model:
+                raise
+            continue
+    return {"intent": "fallback", "reply_text": "Mesajınızı aldım.", "extracted_entities": {}}
+
+
 def process_message_structured(payload: IncomingMessage, background_tasks: BackgroundTasks) -> ProcessResult:
     """Sadeleştirilmiş, şema tabanlı mesaj işleme akışı."""
     request_started_at = datetime.datetime.now().timestamp()
@@ -96,11 +139,66 @@ def process_message_structured(payload: IncomingMessage, background_tasks: Backg
         conversation = get_or_create_conversation(conn, payload.sender_id, payload.instagram_username)
         sanitize_conversation_state(conversation)
         memory = ensure_conversation_memory(conversation)
+        cfg = get_config()
         
-        # 1. LLM'e yapısal istek gönder
-        # (Not: Gerçek implementasyonda call_llm_json kullanılacak, burada basitleştirilmiş çağrı)
-        # Bu kısım mevcut invoke_generic_llm'in sadeleştirilmiş versiyonu olacak.
-        # Şimdilik mevcut sistemi bozmadan geçiş için hybrid bir yaklaşım kullanıyoruz.
+        # 1. LLM'e yapısal istek gönder - Eskiden invoke_generic_llm'in yaptığı iş
+        recent_history = get_recent_message_history(conn, payload.sender_id)
+        recent = "\n".join([f"{msg.get('direction', 'IN').upper()}: {msg.get('message_text', '')}" 
+                           for msg in (recent_history or [])[-10:]])
+        
+        known_context = {
+            key: memory.get(key)
+            for key in ["customer_goal", "requested_service", "selected_service", 
+                       "service_interest", "customer_sector", "customer_subsector",
+                       "contact_channel"]
+            if memory.get(key)
+        }
+        
+        available_slots = conversation.get("available_slots") or []
+        slot_context = ""
+        if available_slots:
+            slot_lines = []
+            for slot in available_slots[:12]:
+                if isinstance(slot, dict):
+                    slot_lines.append(f"- {slot.get('date')} {slot.get('time')}")
+            slot_context = "\nMÜSAİT SLOTLAR:\n" + "\n".join(slot_lines)
+        
+        missing = []
+        if not conversation.get("service") and not memory.get("requested_service"): 
+            missing.append("service")
+        if not conversation.get("lead_name") and not conversation.get("full_name"): 
+            missing.append("name")
+        if not conversation.get("phone"): 
+            missing.append("phone")
+        if not conversation.get("requested_date") or not conversation.get("requested_time"): 
+            missing.append("datetime")
+        
+        today = datetime.datetime.now(TZ).date().strftime('%Y-%m-%d')
+        business_context = json.dumps(cfg, ensure_ascii=False, default=str)
+        
+        system_prompt = LLM_SYSTEM_PROMPT + f"""
+
+BUGÜN: {today}
+İŞLETME: {cfg.get('business_name', 'DOEL Digital')}
+BİLİNEN BAĞLAM: {json.dumps(known_context, ensure_ascii=False) if known_context else '{}'}
+EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
+İŞLETME BİLGİSİ:
+{business_context}
+{slot_context}
+"""
+        
+        # LLM çağrısı
+        try:
+            result_dict = call_llm_structured(system_prompt, f"KULLANICI: {message_text}\nKONUŞMA:\n{recent}")
+            llm_intent = (result_dict.get("intent") or "answer_question").strip()
+            llm_reply = (result_dict.get("reply_text") or result_dict.get("reply") or "").strip()
+            llm_extracted = result_dict.get("extracted_entities") or result_dict.get("extracted") or {}
+            metrics["llm_model_used"] = result_dict.get("_llm_model_used")
+            metrics["llm_intent"] = llm_intent
+        except Exception:
+            llm_intent = "answer_question"
+            llm_reply = ""
+            llm_extracted = {}
         
         # 2. Deterministik Varlık Çıkarımı (LLM hata yaparsa diye güvenlik ağı)
         extracted_name = extract_name(message_text, conversation.get("state", "new"))
@@ -108,37 +206,60 @@ def process_message_structured(payload: IncomingMessage, background_tasks: Backg
         extracted_date = extract_date(message_text)
         extracted_time = extract_time(message_text)
         
+        # LLM'den gelen verileri deterministik olanlarla birleştir
+        effective_name = llm_extracted.get("name") or extracted_name
+        effective_phone = llm_extracted.get("phone") or extracted_phone
+        effective_date = llm_extracted.get("date") or extracted_date
+        effective_time = llm_extracted.get("time") or extracted_time
+        effective_service = llm_extracted.get("service") or conversation.get("service") or memory.get("requested_service")
+        
         # 3. Basitleştirilmiş Durum Makinesi (FSM)
-        curr_state = conversation.get("state", "new")
-        has_name = bool(conversation.get("full_name") or conversation.get("lead_name") or extracted_name)
-        has_phone = bool(conversation.get("phone") or extracted_phone)
-        has_date = bool(conversation.get("requested_date") or extracted_date)
-        has_time = bool(conversation.get("requested_time") or extracted_time)
-        has_service = bool(conversation.get("service") or memory.get("requested_service"))
+        has_name = bool(conversation.get("full_name") or conversation.get("lead_name") or effective_name)
+        has_phone = bool(conversation.get("phone") or effective_phone)
+        has_date = bool(conversation.get("requested_date") or effective_date)
+        has_time = bool(conversation.get("requested_time") or effective_time)
+        has_service = bool(effective_service)
+        
+        # Servisi otomatik tespit et ve kaydet
+        if effective_service and not conversation.get("service"):
+            conversation["service"] = effective_service
+            memory["requested_service"] = effective_service
+            memory["selected_service"] = effective_service
+            memory["service_interest"] = effective_service
+        
+        # LLM reply'ı varsa onu kullan, yoksa FSM template'i
+        reply_text = llm_reply if llm_reply else llm_intent
         
         # Kullanıcı net bir şekilde tüm bilgileri verdiyse ve randevu istiyorsa
         if has_name and has_phone and has_date and has_time and has_service:
             # Slot doğrulama
-            slot_error = validate_slot(conversation.get("requested_date"), conversation.get("requested_time"))
+            slot_error = validate_slot(conversation.get("requested_date") or effective_date, 
+                                      conversation.get("requested_time") or effective_time)
             if slot_error:
                 reply_text = slot_error
                 conversation["state"] = "collect_datetime"
                 decision_path.append("validation:slot_error")
             else:
                 # Çakışma kontrolü
-                conflict = find_existing_appointment(conn, normalize_date_string(conversation.get("requested_date")), 
-                                                     normalize_time_string(conversation.get("requested_time")), 
-                                                     conversation.get("service"))
+                conflict = find_existing_appointment(conn, 
+                    normalize_date_string(conversation.get("requested_date") or effective_date), 
+                    normalize_time_string(conversation.get("requested_time") or effective_time), 
+                    conversation.get("service"))
                 if conflict:
-                    alternatives = suggest_alternatives(conn, normalize_date_string(conversation.get("requested_date")), 
-                                                        normalize_time_string(conversation.get("requested_time")), 
-                                                        conversation.get("service"))
+                    alternatives = suggest_alternatives(conn, 
+                        normalize_date_string(conversation.get("requested_date") or effective_date), 
+                        normalize_time_string(conversation.get("requested_time") or effective_time), 
+                        conversation.get("service"))
                     alt_text = ", ".join(alternatives[:3])
                     reply_text = f"Maalesef o saat dolu. Uygun seçenekler: {alt_text}. Hangisi uygun olur?"
                     conversation["state"] = "collect_datetime"
                     decision_path.append("validation:slot_conflict")
                 else:
                     # Randevu oluştur
+                    if effective_date and not conversation.get("requested_date"):
+                        conversation["requested_date"] = effective_date
+                    if effective_time and not conversation.get("requested_time"):
+                        conversation["requested_time"] = effective_time
                     conversation["state"] = "completed"
                     conversation["appointment_status"] = "confirmed"
                     created = create_appointment(conn, conversation, payload.instagram_username)
@@ -149,8 +270,8 @@ def process_message_structured(payload: IncomingMessage, background_tasks: Backg
                     
                     # CRM Senkronizasyonu
                     queue_crm_sync(background_tasks, conversation, appointment_id, metrics)
-        else:
-            # Eksik alanları tamamla (Basitleştirilmiş FSM)
+        elif not llm_reply:
+            # LLM cevap vermediyse FSM template'i ile devam et
             if not has_service:
                 conversation["state"] = "collect_service"
                 reply_text = "Hangi hizmet için ön görüşme planlamak istersiniz?"
@@ -167,21 +288,17 @@ def process_message_structured(payload: IncomingMessage, background_tasks: Backg
                 conversation["state"] = "collect_datetime"
                 reply_text = "Uygun gün ve saati net yazar mısınız? (Örn: Yarın 14:00)"
                 decision_path.append("fsm:collect_datetime")
-            else:
-                # Beklenmedik durum, LLM'e bırak
-                reply_text = "Mesajınızı aldım. Nasıl yardımcı olabilirim?"
-                decision_path.append("fsm:fallback")
 
         # Bellek ve veritabanı güncellemeleri
-        if extracted_name and not conversation.get("full_name"):
-            conversation["lead_name"] = extracted_name
-            conversation["full_name"] = extracted_name
-        if extracted_phone and not conversation.get("phone"):
-            conversation["phone"] = extracted_phone
-        if extracted_date and not conversation.get("requested_date"):
-            conversation["requested_date"] = extracted_date
-        if extracted_time and not conversation.get("requested_time"):
-            conversation["requested_time"] = extracted_time
+        if effective_name and not conversation.get("full_name"):
+            conversation["lead_name"] = effective_name
+            conversation["full_name"] = effective_name
+        if effective_phone and not conversation.get("phone"):
+            conversation["phone"] = effective_phone
+        if effective_date and not conversation.get("requested_date"):
+            conversation["requested_date"] = effective_date
+        if effective_time and not conversation.get("requested_time"):
+            conversation["requested_time"] = effective_time
             
         conversation["memory_state"] = memory
         update_conversation_memory_after_bot_reply(conversation, reply_text, "|".join(decision_path))
