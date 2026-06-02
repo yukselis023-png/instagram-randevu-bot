@@ -326,11 +326,12 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
                                 alt_slots = raw_alts[:5]
                             except Exception:
                                 pass
+                            req_t = normalize_time_string(conversation.get("requested_time")) or "o saat"
                             if alt_slots:
                                 alt_text = ", ".join(alt_slots)
-                                reply_text = f"Maalesef {normalize_time_string(conversation.get('requested_time')) or 'o saat'} dolu. Aynı gün uygun seçenekler: {alt_text}. Hangisi uygun olur?"
+                                reply_text = f"{req_t} dolu. Aynı gün uygun: {alt_text}. Hangisi uygun olur?"
                             else:
-                                reply_text = f"Maalesef {normalize_time_string(conversation.get('requested_time')) or 'o saat'} dolu ve o gün için boş slot kalmadı. Farklı bir gün yazar mısınız?"
+                                reply_text = f"{req_t} dolu ve o gün boş slot kalmadı. Başka bir gün yazar mısınız?"
                             decision_path.append("validation:slot_conflict_create")
             elif not llm_reply:
                 if not has_service:
