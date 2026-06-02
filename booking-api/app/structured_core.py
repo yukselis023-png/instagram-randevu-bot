@@ -250,9 +250,18 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
                     conversation["full_name"] = effective_name
                     conversation["lead_name"] = effective_name
                 elif effective_name != conversation.get("full_name"):
-                    # LLM isim düzeltmesi tespit ettiyse güncelle
                     conversation["full_name"] = effective_name
                     conversation["lead_name"] = effective_name
+                    # İsim değiştiyse appointment tablosunu da güncelle
+                    if conversation.get("appointment_id"):
+                        try:
+                            with conn.cursor() as cur:
+                                cur.execute(
+                                    "UPDATE appointments SET full_name = %s, updated_at = NOW() WHERE id = %s",
+                                    (effective_name, conversation["appointment_id"]),
+                                )
+                        except Exception:
+                            pass
             if effective_phone and not conversation.get("phone"):
                 conversation["phone"] = effective_phone
             if effective_date and not conversation.get("requested_date"):
