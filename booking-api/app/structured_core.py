@@ -230,18 +230,21 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
             
             reply_text = llm_reply if llm_reply else ""
             
-            # Deterministik direkt yanıtlar (LLM bypass)
+            # Deterministik direkt yanıtlar (LLM bypass) - bunlardan biri tetiklendiyse FSM'ye girme
             from app.generic_core import is_who_to_call_question, build_who_to_call_reply, is_existing_appointment_recall_question, build_existing_appointment_recall_reply
+            deterministic_handled = False
             if is_who_to_call_question(message_text):
                 reply_text = build_who_to_call_reply(conn)
                 decision_path.append("direct:who_to_call")
+                deterministic_handled = True
             elif is_existing_appointment_recall_question(message_text):
                 recall = build_existing_appointment_recall_reply(conn, conversation)
                 if recall:
                     reply_text = recall
                     decision_path.append("direct:appointment_recall")
+                    deterministic_handled = True
             
-            if has_name and has_phone and has_date and has_time and has_service and conversation.get("state") != "completed":
+            if not deterministic_handled and has_name and has_phone and has_date and has_time and has_service and conversation.get("state") != "completed":
                 # Alanları create_appointment ÖNCESİNDE set et - create_appointment bu alanları doğrudan okur
                 if effective_name and not conversation.get("full_name"):
                     conversation["full_name"] = effective_name
