@@ -10,6 +10,7 @@ import logging
 from typing import Any, Dict, Optional, Tuple
 
 from fastapi import BackgroundTasks
+from fastapi import HTTPException
 from app.main import (
     ProcessResult, IncomingMessage, get_conn, get_or_create_conversation, 
     sanitize_conversation_state, ensure_conversation_memory, 
@@ -269,6 +270,8 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
                         reply_text = build_confirmation_message(conversation)
                         decision_path.append("action:appointment_created")
                         queue_crm_sync(background_tasks, conversation, appointment_id, metrics)
+            except HTTPException:
+                raise
             except Exception as e:
                 logger.exception("structured_core appointment create failed: %s", e)
                 reply_text = "Randevu kaydınızı oluştururken bir sorun oluştu, ekibimize iletiyorum. En kısa sürede dönüş yapacağız."
