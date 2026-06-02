@@ -157,25 +157,38 @@ def is_booking_acknowledgement_message(message_text: str) -> bool:
     }
 
 
+COLLECT_NAME_ACCEPTANCE_WORDS = {
+    "tamam", "olur", "evet", "goruselim", "görüşelim",
+    "planlayalim", "planlayalım", "tabi", "tabii", "hadi", "başlayalım", "baslayalim",
+    "yapalim", "yapalım", "ayarlayalim", "ayarlayalım",
+}
+
+ACCEPTANCE_OPENERS = {
+    "tamam", "olur", "evet", "tabi", "tabii", "hadi",
+    "iyi olur", "tamam olur", "tamam görüşelim", "tamam goruselim",
+    "olur görüşelim", "olur goruselim", "evet olur",
+}
+
 def is_collect_name_continue_signal(message_text: str) -> bool:
     lowered = sanitize_text(message_text or "").lower().strip(" .!?…")
     if not lowered:
         return False
-    return lowered in {
-        "tamam",
-        "olur",
-        "evet",
-        "goruselim",
-        "görüşelim",
-        "planlayalim",
-        "planlayalım",
-        "iyi olur",
-        "tamam olur",
-        "tamam goruselim",
-        "tamam görüşelim",
-        "olur goruselim",
-        "olur görüşelim",
-    }
+    # Exact match
+    if lowered in ACCEPTANCE_OPENERS:
+        return True
+    # Starts with accepted keyword + more info (e.g. "Evet planlayalım, adım Ahmet...")
+    parts = lowered.split(None, 1)
+    if parts and parts[0] in COLLECT_NAME_ACCEPTANCE_WORDS:
+        # Must have additional content beyond just the acceptance word
+        if len(parts) > 1 and len(parts[1].strip(" ,.!?…")) >= 2:
+            return True
+    # Multi-word openers like "tamam olur" followed by more
+    for opener in sorted(ACCEPTANCE_OPENERS, key=len, reverse=True):
+        if lowered.startswith(opener) and len(lowered) > len(opener):
+            remaining = lowered[len(opener):].strip(" ,.!?…")
+            if remaining and len(remaining) >= 2:
+                return True
+    return False
 
 
 def is_price_question(message_text: str) -> bool:
