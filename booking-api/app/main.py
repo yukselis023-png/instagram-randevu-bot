@@ -2662,8 +2662,8 @@ def _channel_post_process(
 def process_instagram_message(payload: IncomingMessage, background_tasks: BackgroundTasks) -> ProcessResult:
     import os
     if os.getenv("CHATBOT_ENGINE", "generic") == "generic":
-        from app.generic_core import process_instagram_message_generic
-        result = process_instagram_message_generic(payload, background_tasks)
+        from app.structured_core import process_message_structured
+        result = process_message_structured(payload, background_tasks)
         # ── Post-processing: scoring + handoff ──
         _channel_post_process(
             message_text=payload.message_text or "",
@@ -14800,8 +14800,8 @@ def api_update_tenant_config(slug: str, body: dict[str, Any]):
 @app.post("/api/channel/whatsapp")
 def api_whatsapp_webhook(body: dict[str, Any], background_tasks: BackgroundTasks):
     """WhatsApp inbound webhook (Meta)."""
-    from app.generic_core import process_instagram_message_generic
-    results = handle_whatsapp_inbound(body, process_instagram_message_generic, background_tasks)
+    from app.structured_core import process_message_structured
+    results = handle_whatsapp_inbound(body, process_message_structured, background_tasks)
     # Post-process: handoff detection (reply already sent inside handle_whatsapp_inbound)
     for r in results:
         if r.get("processed"):
@@ -15045,7 +15045,7 @@ async def serve_webchat_widget():
 @app.post("/api/channel/webchat")
 def api_webchat_message(body: dict[str, Any], background_tasks: BackgroundTasks):
     """Web Chat message."""
-    from app.generic_core import process_instagram_message_generic
+    from app.structured_core import process_message_structured
     session_id = body.get("session_id")
     tenant_slug = body.get("tenant", DEFAULT_TENANT_SLUG)
     text = body.get("message", "")
@@ -15053,7 +15053,7 @@ def api_webchat_message(body: dict[str, Any], background_tasks: BackgroundTasks)
     phone = body.get("phone")
     if not text:
         return {"ok": False, "error": "message required"}
-    result = handle_webchat_message(session_id, tenant_slug, text, process_instagram_message_generic, background_tasks, name, phone)
+    result = handle_webchat_message(session_id, tenant_slug, text, process_message_structured, background_tasks, name, phone)
     # Post-process: scoring + handoff
     if isinstance(result, dict):
         sender = result.get("session_id", "")

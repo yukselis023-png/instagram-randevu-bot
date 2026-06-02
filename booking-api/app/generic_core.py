@@ -10,6 +10,7 @@ from typing import Any, Tuple, Optional
 
 from fastapi import BackgroundTasks
 from app.handoff import is_handoff_request
+from app.action_policy import classify_user_action, should_allow_appointment_name_update
 from app.main import (
     ProcessResult, IncomingMessage, get_conn, get_or_create_conversation, 
     sanitize_conversation_state, ensure_conversation_memory, 
@@ -138,6 +139,30 @@ def can_preserve_valid_llm_reply_from_overwrite(reply_text: str | None, *, appoi
     if is_appointment_confirmation_like_reply(clean) and (not appointment_created or not appointment_id):
         return False
     return True
+
+def sanitize_unsafe_llm_reply(reply_text: str | None, *, appointment_created: bool = False, appointment_id: Any = None, appointment_updated: bool = False) -> str | None:
+    """Strip LLM phrasings that claim appointment/customer updates without backend confirmation.
+
+    The LLM may draft wording that should never appear before the deterministic action
+    has actually mutated the database.
+    """
+    if reply_text is None:
+        return reply_text
+    text = str(reply_text)
+    blocked_patterns = (
+        r"kayd[ıi]n[ıi]z[ıi]?[^.]{0,120}?g[üu]ncelledim",
+        r"kayd[ıi]n[ıi]z[ıi]?[^.]{0,120}?d[üu]zelttim",
+        r"randevu(?:yu|nuzu|nuz)?[^.]{0,120}?g[üu]ncelledim",
+        r"randevu(?:yu|nuzu|nuz)?[^.]{0,120}?d[üu]zelttim",
+        r"hemen\s+d[üu]zeltiyorum",
+        r"d[üu]zeltiyorum[^.]{0,80}?Bey",
+        r"bu\s+[şs]ekilde\s+g[üu]ncelledim",
+    )
+    if not (appointment_created or appointment_id or appointment_updated):
+        for pattern in blocked_patterns:
+            text = re.sub(pattern, "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\s{2,}", " ", text).strip()
+    return text or reply_text
 
 
 def build_active_direct_clarification_reply(message_text: str, cfg: dict[str, Any], conversation: dict[str, Any], memory: dict[str, Any]) -> str | None:
@@ -718,27 +743,57 @@ def is_existing_appointment_recall_question(message_text: str) -> bool:
     return False
 
 def build_existing_appointment_recall_reply(conn: Any, conversation: dict[str, Any]) -> str | None:
-    """Look up the user's active/confirmed appointments and summarize them."""
+    """Look up the user's active/confirmed appointments. Source of truth = live CRM."""
+    from app.main import crm_auth_session, normalize_crm_payload, CRM_SUPABASE_URL, CRM_WORKSPACE_ID, CRM_SYNC_TIMEOUT_SECONDS
+    from app.crm_state import extract_crm_state_from_payload
+    import requests as _req
+
     sender_id = str(conversation.get("sender_id") or conversation.get("instagram_user_id") or "").strip()
     if not sender_id:
         return None
+
+    rows: list[dict[str, Any]] = []
     try:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT id, full_name, appointment_date, appointment_time, service, status, phone
-                FROM appointments
-                WHERE instagram_user_id = %s
-                  AND status IN ('confirmed', 'preconsultation', 'scheduled')
-                  AND COALESCE(attendance_status, 'scheduled') NOT IN ('completed', 'no_show', 'canceled', 'cancelled')
-                ORDER BY appointment_date ASC, appointment_time ASC
-                LIMIT 5
-                """,
-                (sender_id,),
+        headers, _crm_user = crm_auth_session()
+        if headers:
+            state_resp = _req.get(
+                f"{CRM_SUPABASE_URL}/rest/v1/workspace_state?select=workspace_id,payload&workspace_id=eq.{CRM_WORKSPACE_ID}",
+                headers=headers,
+                timeout=CRM_SYNC_TIMEOUT_SECONDS,
             )
-            rows = cur.fetchall()
-    except Exception:
-        return None
+            state_resp.raise_for_status()
+            state_rows = state_resp.json()
+            payload = normalize_crm_payload(state_rows[0].get("payload") if state_rows else {})
+            crm_state = extract_crm_state_from_payload(payload, sender_id)
+            for apt in crm_state.active_appointments:
+                rows.append({
+                    "full_name": apt.customer_name,
+                    "appointment_date": apt.date,
+                    "appointment_time": apt.time,
+                    "service": apt.service,
+                    "status": apt.status,
+                })
+    except Exception as exc:
+        logger.info("crm_recall_unreachable sender_id=%s err=%s", sender_id, exc)
+
+    if not rows:
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id, full_name, appointment_date, appointment_time, service, status, phone
+                    FROM appointments
+                    WHERE instagram_user_id = %s
+                      AND status IN ('confirmed', 'preconsultation', 'scheduled')
+                      AND COALESCE(attendance_status, 'scheduled') NOT IN ('completed', 'no_show', 'canceled', 'cancelled')
+                    ORDER BY appointment_date ASC, appointment_time ASC
+                    LIMIT 5
+                    """,
+                    (sender_id,),
+                )
+                rows = cur.fetchall() or []
+        except Exception:
+            rows = []
     if not rows:
         return "Aktif bir randevunuz görünmüyor. Yeni bir ön görüşme planlamak isterseniz yazabilirsiniz."
     name = str(rows[0].get("full_name") or "").strip() or "değerli kullanıcımız"
@@ -1565,6 +1620,9 @@ def is_appointment_confirmation_like_reply(reply: str) -> bool:
         r"\bsizi\s+arayac(?:agiz|aktir|ak)\b",
         r"\bislem\b.{0,40}\btamamlandi\b",
         r"\bsaat(?:iniz|inizi|i)?\b.{0,40}\b(?:guncelledim|guncellendi|degistirdim|degisti)\b",
+        r"\b(?:randevu|on gorusme|gorusme|kayit|kaydiniz|kaydinizi)\b.{0,120}\b(?:guncelledim|guncellendi|degistirdim|degisti|duzelttim|duzeltildi)\b",
+        r"\b(?:hemen\s+)?(?:duzeltiyorum|düzeltiyorum)\b.{0,120}\b(?:randevu|on gorusme|gorusme|kayit|kaydiniz|kaydinizi)\b",
+        r"\bbu\s+sekilde\s+guncelledim\b",
         r"\b(?:confirmed|scheduled)\b",
     ]
     cancellation_claim_patterns = [
@@ -1831,8 +1889,12 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
         if deterministic_intent_hint:
             intent = deterministic_intent_hint
             decision_path.append(f"generic_intent_hint:{intent}")
+        user_action = classify_user_action(message_text)
+        if user_action.get("action") == "greeting_with_name":
+            memory["display_name_override"] = user_action.get("proposed_name") or memory.get("display_name_override")
+            decision_path.append("policy:greeting_name_no_mutation")
         booking_opt_in = is_booking_opt_in(message_text, intent)
-        explicit_new_booking = is_explicit_new_booking_intent(message_text, intent)
+        explicit_new_booking = is_explicit_new_booking_intent(message_text, intent) or user_action.get("action") == "new_booking"
         if explicit_new_booking:
             reset_stale_booking_fields(conversation, memory)
             memory = ensure_conversation_memory(conversation)
@@ -2094,6 +2156,10 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
                 memory["name_source"] = memory.get("name_source") or "existing_name_preserved"
                 decision_path.append("noted:name_instagram_username")
         deterministic_name = None if suppress_active_field_updates or username_save_requested else extract_name(message_text, state_before_entities)
+        if deterministic_name and state_before_entities not in ("collect_name", "new_booking_request") and not should_allow_appointment_name_update(user_action, message_text):
+            memory["display_name_override"] = user_action.get("proposed_name") or deterministic_name
+            deterministic_name = None
+            decision_path.append("policy:block_implicit_name_mutation")
         name_candidate = deterministic_name
         require_full_name = state_before_entities == "collect_name"
         if is_time_acceptance_message or is_booking_acknowledgement_message(message_text) or not is_valid_name_candidate(name_candidate, require_full_name=require_full_name):
@@ -2275,6 +2341,7 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
                 recovery_reply = build_active_state_recovery_reply(curr_state)
                 if recovery_reply:
                     if final_reply_source == "llm_raw" and can_preserve_valid_llm_reply_from_overwrite(reply_text, appointment_created=appointment_created, appointment_id=appointment_id):
+                        reply_text = sanitize_unsafe_llm_reply(reply_text, appointment_created=appointment_created, appointment_id=appointment_id, appointment_updated=appointment_updated)
                         intent = "direct_answer"
                         decision_path.append("fsm:active_state_recovery_preserved_llm")
                     else:
@@ -3002,7 +3069,7 @@ RANDEVU SLOTLARI KURALLARI (KRİTİK):
 
 TARİH VE DÜZELTME KURALLARI:
 - Müşteri "yarın öğlen", "cumartesi 15:00" gibi göreceli tarih/saat söylerse, bunu KABUL ET. "Uygun gün ve saati net yazın" diyerek inat etme.
-- Eğer müşteri tarih ve saati zaten verdiyse ve sonradan ismini/telefonunu düzeltmek isterse, düzeltmeyi hemen yap ve özür dile. Tarih/saati tekrar sorma, akışa devam et.
+- Eğer müşteri tarih ve saati zaten verdiyse ve sonradan ismini/telefonunu düzeltmek isterse, sadece kullanıcı açıkça "Adımı Y olarak değiştir" gibi net bir düzeltme cümlesi kullandıysa düzeltmeyi kabul et. "Ben Mehmet bey" gibi selamlamalar kayıt değiştirmez; sadece hitap için kullanılır. Tarih/saati tekrar sorma, akışa devam et. LLM hiçbir koşulda "güncelledim" ifadesini önceden söylemez; sadece arka plan sistemi yazma onayı verdikten sonra söyler.
 - Tarih ve saat alındığında, görüşmeyi kabul ettiğini gösteren güvenli ve kararlı bir kapanış yap.
 - ASLA "Takvimi göremiyorum", "Müsaitliği kontrol edeceğim", "Size döneceğim", "Bakıp haber vereceğim", "Berkay'a aktarıyorum" gibi pasif ve şüphe uyandıran ifadeler kullanma. Takvim kararını sistem verir; sen sadece sonucu doğal dille söylersin.
 - "Randevunuz oluşturuldu/onaylandı" gibi kesin sistem mesajları verme (Bunu arka plan sistemi yapacak).
@@ -3011,7 +3078,7 @@ TARİH VE DÜZELTME KURALLARI:
 - Her yanıtta en fazla 1 soru sor; cevaplar kısa, doğal, profesyonel ve Instagram DM dilinde kalsın.
 - Yanıt uzuyorsa kısalt: önce soruyu cevapla, sonra gerekiyorsa tek kısa yönlendirme ekle.
 - İSİM ÇAKIŞMASI KURALI: "{cfg.get('human_contact_name')} Çakmak" tam adı bizim ekip liderimizdir. Müşteri tam olarak "Ali" değil "{cfg.get('human_contact_name')} Çakmak" yazarsa nazikçe "Sizin adınızı ve soyadınızı alabilir miyim?" diye sor. Tek başına "Berkay" normal bir isimdir, engelleme.
-- İSİM DÜZELTME KURALI: Kullanıcı ismini düzeltirse ("Ben X değilim, adım Y"), ÖNCELİKLE özür dile ve düzelttiğini belirt ("Kusura bakmayın, hemen düzeltiyorum [yeni isim] Bey"), SONRA bir sonraki adıma geç. Asla düzeltmeyi atlayıp direkt sonraki soruya geçme.
+- İSİM DÜZELTME KURALI: Bu kural LLM'in mutasyon yapmasını tetiklememelidir. Sadece kullanıcı açıkça "Ben X değilim, adım Y", "adımı değiştir" gibi net ifade kullanıyorsa ve kullanıcı eylemi (iptal/yeni randevu) ile birlikte geliyorsa, sistem bunu kayıt sonrası sadece görüşmede hitap olarak kullanır; LLM "güncelledim" gibi ifadeler kullanmaz, önce onay alır. "Ben Mehmet bey" gibi selamlama ifadeleri sadece hitap içindir, kayıt değiştirmez.
 - ENTITY ÇIKARIM KURALLARI (KRİTİK): lead_name çıkarırken SADECE saf isim ve soyismi al. Konuşma dolgusu, zamir ve bağlaçları ("aslında", "ben", "adım", "diye", "yani", "işte") KESİNLİKLE dahil etme. AYNI KURAL phone, requested_date, requested_time için de geçerli: sadece saf veriyi çıkar, ekstra kelime ekleme.
 - KONUŞMA BAĞLAMI KURALI: Her yeni mesajı bağımsız değerlendir. Müşteri yeni bir konu açarsa ("dövme yapıyor musunuz?", "randevuyu iptal et", "indirim var mı?"), öncelikle O konuyu cevapla. Önceki konuşma bağlamını sadece aynı konu devam ediyorsa veya eksik bilgi (isim, telefon, tarih) tamamlamak için kullan. Asla eski konuyu yeni sorunun önüne geçirme.
 - İPTAL/DEĞİŞİKLİK KURALLARI: Kullanıcı "iptal", "iptal etmek istiyorum", "vazgeçtim", "randevuyu sil" derse "/cancel" komutu işleneceğini bildir ve "Talebiniz işleme alındı" de. ASLA "kaydınız korunuyor" veya "aktif kayıt bulamadım" gibi yanıltıcı veya pasif yanıt verme. Her iptal/silme talebini ciddiye al ve intent'i "human_handoff" olarak işaretle.
@@ -3019,7 +3086,8 @@ TARİH VE DÜZELTME KURALLARI:
 
 GEÇMİŞ VE ŞİMDİ AYIRIMI (KRİTİK):
 - SON gelen mesaj, önceki tüm mesajlardan ve geçmiş bilgilerden daha önceliklidir.
-- Eğer müşteri son mesajında adını veya bilgisini düzeltiyorsa (örn: "Ben Burak değilim, adım Selin"), geçmişte ne yazıyorsa yoksay ve YENİ bilgiye göre hitap et.
+- "Ben Mehmet bey" gibi sadece selamlama/hitap ifadeleri kayıt değiştirmez; sadece hitap için kullanılır.
+- Sadece açık bir düzeltme cümlesi ("Ben X değilim, adım Y", "ismimi Y olarak değiştir") kayıt değişikliği tetikler.
 - Eğer müşteri "Randevumu değiştirmek istiyorum" derse, geçmiş randevu bilgisini hatırla ve kullan. Ancak müşteri yeni bir taleple sıfırdan geldiyse, eski randevu bilgileriyle kendi başına yeni bir randevu OLUŞTURMA; bilgileri mutlaka teyit et.
 
 RANDEVU AKIŞI:
