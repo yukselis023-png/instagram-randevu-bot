@@ -141,6 +141,7 @@ def process_message_structured(payload: IncomingMessage, background_tasks: Backg
             conversation = get_or_create_conversation(conn, payload.sender_id, payload.instagram_username)
             sanitize_conversation_state(conversation)
             memory = ensure_conversation_memory(conversation)
+            conversation["instagram_user_id"] = payload.sender_id
             cfg = get_config()
             
             # 1. LLM'e yapısal istek gönder
