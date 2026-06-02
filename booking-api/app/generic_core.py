@@ -41,6 +41,18 @@ BOOKING_OPT_IN_PHRASES = (
     "randevu alalim",
     "ön görüşme",
     "on gorusme",
+    "randevu için",
+    "randevum",
+    "randevu istiyorum",
+    "randevu olustur",
+    "randevu oluştur",
+    "randevu talebi",
+    "randevu talep",
+    "randevu planla",
+    "randevu planlama",
+    "randevu kaydı",
+    "randevu kaydi",
+    "randevu yap",
 )
 
 SERVICE_REPEAT_QUESTION_FRAGMENTS = (
@@ -176,7 +188,7 @@ def is_booking_opt_in(message_text: str, intent: str | None) -> bool:
         return False
     lowered = sanitize_text(message_text or "").lower()
     booking_terms = ("randevu", "ön görüşme", "on gorusme", "görüşme", "gorusme")
-    booking_actions = ("istiyorum", "almak", "alabilir", "ayarla", "planla", "uygun mu", "müsait mi", "musait mi")
+    booking_actions = ("istiyorum", "almak", "alabilir", "ayarla", "planla", "uygun mu", "müsait mi", "musait mi", "randevu", "randevusu", "randevum", "randevuya", "randevuyu")
     direct_booking = any(term in lowered for term in booking_terms) and any(action in lowered for action in booking_actions)
     return intent == "booking_request" or direct_booking or any(phrase in lowered for phrase in BOOKING_OPT_IN_PHRASES)
 
