@@ -1755,7 +1755,16 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
                 metrics["total_ms"] = elapsed_ms(request_started_at)
                 queue_crm_sync(background_tasks, conversation, int(cancelled_appointment_id), metrics)
                 return ProcessResult(sender_id=payload.sender_id, should_reply=True, reply_text=reply, outbound_text=reply, llm_raw_reply_text=llm_raw_reply_text, final_reply_source="fsm", handoff=False, conversation_state=conversation.get("state", "new"), appointment_created=True, appointment_id=int(cancelled_appointment_id), normalized=build_normalized(conversation), metrics=metrics, decision_path=decision_path + [label or "appointment_cancelled"])
-        if is_company_capability_question(message_text):
+        if is_who_to_call_question(message_text):
+            who_reply = build_who_to_call_reply(conn)
+            if who_reply:
+                reply_text = who_reply
+                final_reply_source = "config_formatter"
+                intent = "direct_answer"
+                booking_opt_in = False
+                deterministic_reply = True
+                decision_path.append("reply:who_to_call")
+        elif is_company_capability_question(message_text):
             capability_reply = build_company_capability_reply(message_text)
             if capability_reply:
                 reply_text = capability_reply
@@ -1828,15 +1837,6 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
             reply_text = recommendation_engine(conversation, message_text, recent_history)
             decision_path.append("reply:business_fit")
             deterministic_reply = True
-        elif is_who_to_call_question(message_text):
-            who_reply = build_who_to_call_reply(conn)
-            if who_reply:
-                reply_text = who_reply
-                final_reply_source = "config_formatter"
-                intent = "direct_answer"
-                booking_opt_in = False
-                deterministic_reply = True
-                decision_path.append("reply:who_to_call")
 
         if "persist:user_business_identity" not in decision_path and persist_user_business_identity_context(message_text, recent_history, conversation, memory):
             decision_path.append("persist:user_business_identity")
