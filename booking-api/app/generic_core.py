@@ -880,6 +880,72 @@ def build_user_business_identity_reply(cfg: dict[str, Any]) -> str:
     return None
 
 
+def is_who_to_call_question(message_text: str) -> bool:
+    """Detect "bugün kimi arayayım" type questions from business owner."""
+    lowered = sanitize_text(message_text or "").lower()
+    fragments = (
+        "bugün kimi arayayım",
+        "bugün kimi aramalıyım",
+        "kimi arayayım",
+        "kimi aramalıyım",
+        "bugünkü randevular",
+        "bugünkü görüşmeler",
+        "bugün kimlerle",
+        "bugün kim var",
+        "günün programı",
+        "gunun programi",
+        "bugünün programı",
+        "bugunun programi",
+        "bugün planlanan",
+        "bugun planlanan",
+        "planlanmış görüşme",
+        "planlanmis gorusme",
+    )
+    for frag in fragments:
+        if frag in lowered:
+            return True
+    return False
+
+
+def build_who_to_call_reply(conn: Any) -> str:
+    """Query today's appointments from the local DB for the business owner."""
+    import datetime as _dt
+    today = _dt.datetime.now(TZ).date().isoformat()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT full_name, phone, appointment_time, service
+                FROM appointments
+                WHERE appointment_date = %s::date
+                  AND status IN ('confirmed', 'preconsultation')
+                  AND COALESCE(attendance_status, 'scheduled')
+                      NOT IN ('completed', 'no_show', 'canceled', 'cancelled')
+                ORDER BY appointment_time ASC
+                """,
+                (today,),
+            )
+            rows = cur.fetchall()
+    except Exception:
+        return "Program sorgulanırken bir hata oluştu. Lütfen daha sonra tekrar deneyin."
+    if not rows:
+        return "Bugün için planlanmış bir görüşme bulunmuyor."
+    parts: list[str] = []
+    for row in rows:
+        name = str(row.get("full_name") or "İsimsiz").strip()
+        time_str = str(row.get("appointment_time") or "")[:5]
+        svc = str(row.get("service") or "").strip()
+        if name and time_str:
+            if svc:
+                parts.append(f"• {time_str} — {name} ({svc})")
+            else:
+                parts.append(f"• {time_str} — {name}")
+    if not parts:
+        return "Bugün için planlanmış bir görüşme bulunmuyor."
+    header = f"Bugün ({today}) planlanan görüşmeler:"
+    return header + "\n" + "\n".join(parts)
+
+
 def generic_llm_reply_rejection_reason(reply_text: str | None) -> str | None:
     """Return a generic reason when an LLM reply should be repaired by config fallback.
 
@@ -1762,6 +1828,15 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
             reply_text = recommendation_engine(conversation, message_text, recent_history)
             decision_path.append("reply:business_fit")
             deterministic_reply = True
+        elif is_who_to_call_question(message_text):
+            who_reply = build_who_to_call_reply(conn)
+            if who_reply:
+                reply_text = who_reply
+                final_reply_source = "config_formatter"
+                intent = "direct_answer"
+                booking_opt_in = False
+                deterministic_reply = True
+                decision_path.append("reply:who_to_call")
 
         if "persist:user_business_identity" not in decision_path and persist_user_business_identity_context(message_text, recent_history, conversation, memory):
             decision_path.append("persist:user_business_identity")
@@ -2198,16 +2273,46 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
                                 decision_path.append("fsm:silent_appointment_created")
                         except Exception as exc:  # noqa: BLE001
                             logger.error("FSM appointment create/update failed: %s", exc)
-                            conversation["state"] = "human_handoff"
-                            conversation["appointment_status"] = "handoff"
-                            conversation["assigned_human"] = True
-                            appointment_created = False
-                            appointment_id = None
-                            handoff = True
-                            reply_text = "Randevu kaydını şu an kesinleştiremedim; bilgilerinizi ekibin kontrol etmesi için not aldım."
-                            final_reply_source = "calendar_authority"
-                            decision_path.append("fsm:silent_appointment_failed")
-                            decision_path.append("guard:appointment_create_failed")
+                            # Distinguish capacity-full (409) from other failures
+                            _is_capacity_error = False
+                            _exc_str = str(exc)
+                            if hasattr(exc, 'status_code') and exc.status_code == 409:
+                                _is_capacity_error = True
+                            elif '409' in _exc_str or 'dolu' in _exc_str.lower() or 'capacity' in _exc_str.lower():
+                                _is_capacity_error = True
+                            if _is_capacity_error:
+                                _b4_date = normalize_date_string(conversation.get("requested_date"))
+                                _b4_time = normalize_time_string(conversation.get("requested_time"))
+                                _b4_svc = conversation.get("service")
+                                _b4_alts = []
+                                try:
+                                    if _b4_date:
+                                        _b4_alts = suggest_alternatives(conn, _b4_date, _b4_time, _b4_svc)
+                                except Exception:
+                                    pass
+                                if _b4_alts:
+                                    reply_text = build_slot_conflict_reply(conversation, _b4_time or "bu saat", _b4_alts)
+                                else:
+                                    reply_text = f"Maalesef {_b4_time or 'bu saat'} artık dolu. Farklı bir gün veya saat yazarsanız tekrar kontrol edeyim."
+                                conversation["state"] = "collect_datetime"
+                                conversation["appointment_status"] = "collecting"
+                                appointment_created = False
+                                appointment_id = None
+                                handoff = False
+                                final_reply_source = "calendar_authority"
+                                decision_path.append("calendar:slot_capacity_full")
+                                decision_path.append("guard:appointment_create_failed")
+                            else:
+                                conversation["state"] = "human_handoff"
+                                conversation["appointment_status"] = "handoff"
+                                conversation["assigned_human"] = True
+                                appointment_created = False
+                                appointment_id = None
+                                handoff = True
+                                reply_text = "Randevu kaydını şu an kesinleştiremedim; bilgilerinizi ekibin kontrol etmesi için not aldım."
+                                final_reply_source = "calendar_authority"
+                                decision_path.append("fsm:silent_appointment_failed")
+                                decision_path.append("guard:appointment_create_failed")
             else:
                 appointment_created = False
                 appointment_id = None
