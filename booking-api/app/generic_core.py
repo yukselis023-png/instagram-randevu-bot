@@ -1564,6 +1564,13 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
             conversation["available_slots"] = [normalize_booking_slot_option(slot) or slot for slot in slot_options[:12]]
             remember_booking_slot_options(conversation, slot_options[:12])
             memory = ensure_conversation_memory(conversation)
+            if not memory.get("last_availability_date"):
+                first_slot_date = normalize_date_string(slot_options[0].get("date")) if slot_options else None
+                if first_slot_date:
+                    memory["last_availability_date"] = first_slot_date
+                    day_slots = [s["time"] for s in slot_options if normalize_date_string(s.get("date")) == first_slot_date]
+                    memory["last_availability_slots"] = day_slots[:12]
+                    conversation["memory_state"] = memory
         elif not conversation.get("available_slots"):
             conversation.pop("available_slots", None)
         sync_conversation_memory_summary(conversation)
