@@ -2301,7 +2301,7 @@ def process_instagram_message_generic(payload: IncomingMessage, background_tasks
                                 handoff = False
                                 final_reply_source = "calendar_authority"
                                 decision_path.append("calendar:slot_capacity_full")
-                                decision_path.append("guard:appointment_create_failed")
+                                # Do NOT add guard:appointment_create_failed — reply is already a valid slot conflict
                             else:
                                 conversation["state"] = "human_handoff"
                                 conversation["appointment_status"] = "handoff"
