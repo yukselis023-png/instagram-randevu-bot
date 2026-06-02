@@ -206,6 +206,11 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
             # 2. Deterministik Varlık Çıkarımı
             extracted_name = extract_name(message_text, conversation.get("state", "new"))
             extracted_phone = extract_phone(message_text)
+            # Fallback: csv formatında "İsim, 05XX..." veya direkt numara
+            if not extracted_phone:
+                _phone_raw = re.search(r'\b0?\d{10,11}\b', sanitize_text(message_text))
+                if _phone_raw:
+                    extracted_phone = _phone_raw.group(0)
             extracted_date = extract_date(message_text)
             extracted_time = extract_time(message_text)
             
@@ -221,6 +226,12 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
             has_date = bool(conversation.get("requested_date") or effective_date)
             has_time = bool(conversation.get("requested_time") or effective_time)
             has_service = bool(effective_service)
+            
+            # effective_date/time varsa hemen conversation'a yaz (sonraki turlar için)
+            if effective_date and not conversation.get("requested_date"):
+                conversation["requested_date"] = effective_date
+            if effective_time and not conversation.get("requested_time"):
+                conversation["requested_time"] = effective_time
             
             if effective_service and not conversation.get("service"):
                 conversation["service"] = effective_service
