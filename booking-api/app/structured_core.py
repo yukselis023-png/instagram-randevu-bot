@@ -220,6 +220,15 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
             extracted_time = extract_time(message_text)
             
             effective_name = llm_extracted.get("name") or extracted_name
+            # İsim temizleme: "Zeynep Kaya olacak", "adım X olsun" gibi ifadeleri temizle
+            if effective_name:
+                effective_name = re.sub(r'\s+(olacak|olur|olsun|yap|yapal[ıi]m|yapalim|ekler|ekle|misin|musun|m[ıi]s[ıi]n|musun)\b.*$', '', effective_name, flags=re.IGNORECASE).strip()
+            if not effective_name:
+                _name_from_msg = extract_name(message_text, conversation.get("state", "new"))
+                if _name_from_msg:
+                    _name_from_msg = re.sub(r'\s+(olacak|olur|olsun|yap|yapal[ıi]m|yapalim|ekler|ekle|misin|musun|m[ıi]s[ıi]n|musun)\b.*$', '', _name_from_msg, flags=re.IGNORECASE).strip()
+                    if len(_name_from_msg.split()) >= 2:
+                        effective_name = _name_from_msg
             effective_phone = llm_extracted.get("phone") or extracted_phone
             effective_date = llm_extracted.get("date") or extracted_date
             effective_time = llm_extracted.get("time") or extracted_time
