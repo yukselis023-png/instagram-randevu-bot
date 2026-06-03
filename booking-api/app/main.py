@@ -6845,7 +6845,7 @@ def extract_time(text: str) -> str | None:
         if "." in raw:
             has_explicit_time_cue = re.search(r"(saat|saatte|saati)\s*$", context_before)
             has_change_cue = re.search(r"(a|e|ya|ye)\s*(al|aldir|aldır|cek|çek|kaydir|kaydır|tas|taşı|degis|değiş|guncelle|güncelle)", context_after)
-            has_availability_cue = re.search(r"(uygun|musait|müsait|olur|tamam|bos|boş|bostayim|boştayım|bosum|boşum|var|yok|alsana|alalim|alın|olsun|yapalim|yapalım)", context_after)
+            has_availability_cue = re.search(r"(uygun|musait|müsait|olur|tamam|bos|boş|bostayim|boştayım|bosum|boşum|var|yok|alsana|alalim|alın|olsun|yapalim|yapalım|iyi|güzel|guzel|tercih|bundan|ondan)", context_after)
             if not has_explicit_time_cue and not has_change_cue and not has_availability_cue:
                 continue
         hour = int(match.group(1))
