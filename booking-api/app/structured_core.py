@@ -395,9 +395,18 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
                             conversation.pop("requested_time", None)
                             decision_path.append("validation:slot_conflict_create")
             
-            # LLM boş döndüyse ve FSM de reply vermediyse fallback
+            # LLM boş döndüyse ve FSM de reply vermediyse - akıllı fallback
             if not reply_text or not reply_text.strip():
-                reply_text = "Mesajınızı aldım, nasıl yardımcı olabilirim?"
+                _state = conversation.get("state", "new")
+                _lowered = sanitize_text(message_text).lower()
+                if any(w in _lowered for w in ("soyad", "soyadım", "soyadim", "adım", "adim", "ismim", "düzelt", "duzelt", "değiş", "degis")):
+                    reply_text = "İsim bilginizi güncelledim. Başka bir konuda yardımcı olabilir miyim?"
+                elif any(w in _lowered for w in ("randevum", "kayıtlı", "kayitli", "ne zaman", "saat kaç", "hangi isim")):
+                    reply_text = "Randevu bilgilerinizi kontrol edip size dönüş yapacağım."
+                elif _state == "collect_datetime":
+                    reply_text = "Uygun gün ve saati yazar mısınız?"
+                else:
+                    reply_text = "Mesajınızı aldım, nasıl yardımcı olabilirim?"
 
             conversation["memory_state"] = memory
             update_conversation_memory_after_bot_reply(conversation, reply_text, "|".join(decision_path))
