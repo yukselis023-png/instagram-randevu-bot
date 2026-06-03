@@ -398,8 +398,9 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
                             alt_slots = []
                             if req_d:
                                 try:
+                                    from app.main import is_slot_capacity_available as _cap_ok
                                     raw_slots = get_slots(conn, req_d, conversation.get("service"))
-                                    alt_slots = [s for s in raw_slots if s != req_t][:4]
+                                    alt_slots = [s for s in raw_slots if s != req_t and _cap_ok(conn, req_d, s, conversation.get("service"))][:4]
                                 except Exception:
                                     pass
                             if alt_slots:
