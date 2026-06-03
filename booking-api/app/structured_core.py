@@ -392,8 +392,21 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
                             conversation["state"] = "collect_datetime"
                             conversation["appointment_status"] = "collecting"
                             req_t = normalize_time_string(conversation.get("requested_time")) or "o saat"
-                            reply_text = f"{req_t} dolu. Başka bir gün veya saat yazar mısınız?"
+                            req_d = normalize_date_string(conversation.get("requested_date"))
+                            alt_slots = []
+                            if req_d:
+                                try:
+                                    from app.main import get_available_slots_for_date as _avail
+                                    alt_slots = [s for s in _avail(conn, req_d, conversation.get("service")) if s != req_t][:4]
+                                except Exception:
+                                    pass
+                            if alt_slots:
+                                alt_text = ", ".join(alt_slots)
+                                reply_text = f"{req_t} dolu. Aynı gün boş: {alt_text}. Hangisi uygun olur?"
+                            else:
+                                reply_text = f"{req_t} dolu ve o gün boş slot kalmadı. Başka bir gün yazar mısınız?"
                             conversation.pop("requested_time", None)
+                            decision_path.append("validation:slot_conflict_create")
                             decision_path.append("validation:slot_conflict_create")
             
             # LLM boş döndüyse ve FSM de reply vermediyse - akıllı fallback
