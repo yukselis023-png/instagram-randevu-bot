@@ -232,6 +232,9 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
             effective_phone = llm_extracted.get("phone") or extracted_phone
             effective_date = llm_extracted.get("date") or extracted_date
             effective_time = llm_extracted.get("time") or extracted_time
+            # Normalize dotted time format (17.00 → 17:00)
+            if effective_time and "." in effective_time:
+                effective_time = effective_time.replace(".", ":")
             effective_service = llm_extracted.get("service") or conversation.get("service") or memory.get("requested_service")
             # Fallback: kullanıcı mesajından servis tespiti (LLM bulamadıysa)
             if not effective_service:
