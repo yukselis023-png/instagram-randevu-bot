@@ -394,10 +394,8 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
                             req_t = normalize_time_string(conversation.get("requested_time")) or "o saat"
                             req_d = normalize_date_string(conversation.get("requested_date"))
                             alt_slots = []
-                            if req_d:
+                            if req_d and req_t:
                                 try:
-                                    from app.main import normalize_date_string, SLOT_DURATION_MINUTES, SLOT_BUFFER_MINUTES, WORKING_HOURS_START, WORKING_HOURS_END, LIVE_CRM_PRECONSULTATION_SERVICE
-                                    _buffer = SLOT_DURATION_MINUTES + SLOT_BUFFER_MINUTES
                                     with conn.cursor() as cur:
                                         cur.execute("""
                                             WITH slots AS (
@@ -413,20 +411,20 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
                                                 SELECT 1 FROM appointments a
                                                 WHERE a.appointment_date = %s::date
                                                   AND a.status IN ('confirmed', 'preconsultation', 'scheduled')
-                                                  AND COALESCE(a.attendance_status, 'scheduled') NOT IN ('completed', 'no_show', 'canceled', 'cancelled')
-                                                  AND (
-                                                    (a.appointment_time >= (s.slot_start - (%s || ' minutes')::interval)::time
-                                                     AND a.appointment_time < (s.slot_start + (%s || ' minutes')::interval)::time)
-                                                  )
+                                                  AND COALESCE(a.attendance_status, 'scheduled') 
+                                                      NOT IN ('completed', 'no_show', 'canceled', 'cancelled')
+                                                  AND a.appointment_time >= to_char(s.slot_start - (%s || ' minutes')::interval, 'HH24:MI')::time
+                                                  AND a.appointment_time < to_char(s.slot_start + (%s || ' minutes')::interval, 'HH24:MI')::time
                                             )
                                             AND to_char(s.slot_start, 'HH24:MI') != %s
+                                            ORDER BY s.slot_start
                                             LIMIT 4
-                                        """, (req_d[:10], WORKING_HOURS_START, req_d[:10], WORKING_HOURS_END,
-                                                _buffer, req_d[:10],
-                                                SLOT_BUFFER_MINUTES, _buffer, req_t))
+                                        """, (req_d, WORKING_HOURS_START, req_d, WORKING_HOURS_END,
+                                                str(SLOT_DURATION_MINUTES + SLOT_BUFFER_MINUTES), req_d,
+                                                str(SLOT_BUFFER_MINUTES), str(SLOT_DURATION_MINUTES + SLOT_BUFFER_MINUTES), req_t))
                                         alt_slots = [row["slot_time"] for row in cur.fetchall()]
-                                except Exception:
-                                    pass
+                                except Exception as alt_exc:
+                                    logger.warning("slot_alt_sql_failed: %s", alt_exc)
                             if alt_slots:
                                 alt_text = ", ".join(alt_slots)
                                 reply_text = f"{req_t} dolu. Aynı gün boş: {alt_text}. Hangisi uygun olur?"
