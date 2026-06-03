@@ -241,6 +241,10 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
                 conversation["requested_date"] = effective_date
             if effective_time and not conversation.get("requested_time"):
                 conversation["requested_time"] = effective_time
+            # Slot conflict sonrası yeni değer gelirse eskisini override et
+            if effective_date and effective_time:
+                conversation["requested_date"] = effective_date
+                conversation["requested_time"] = effective_time
             
             if effective_service and not conversation.get("service"):
                 conversation["service"] = effective_service
@@ -294,6 +298,7 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
                     pass
                 else:
                     from datetime import date as date_cls, time as time_cls, timedelta
+                    from app.main import get_available_slots_for_date as get_slots
                     slot_error = validate_slot(conversation.get("requested_date"), conversation.get("requested_time"))
                     if not slot_error:
                         try:
@@ -321,21 +326,22 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
                         except HTTPException as http_exc:
                             conversation["state"] = "collect_datetime"
                             conversation["appointment_status"] = "collecting"
-                            alt_slots = []
-                            try:
-                                raw_alts = suggest_alternatives(conn, 
-                                    normalize_date_string(conversation.get("requested_date")),
-                                    normalize_time_string(conversation.get("requested_time")),
-                                    conversation.get("service"))
-                                alt_slots = raw_alts[:5]
-                            except Exception:
-                                pass
+                            # Buffer-expanded gerçek boş slotları kullan
                             req_t = normalize_time_string(conversation.get("requested_time")) or "o saat"
+                            req_d = normalize_date_string(conversation.get("requested_date"))
+                            alt_slots = []
+                            if req_d:
+                                try:
+                                    alt_slots = get_slots(conn, req_d, conversation.get("service"))[:5]
+                                except Exception:
+                                    pass
                             if alt_slots:
                                 alt_text = ", ".join(alt_slots)
-                                reply_text = f"{req_t} dolu. En yakın: {alt_text}. Hangisi uygun olur?"
+                                reply_text = f"{req_t} dolu. Aynı gün boş: {alt_text}. Hangisi uygun olur?"
                             else:
                                 reply_text = f"{req_t} dolu ve o gün boş slot kalmadı. Başka bir gün yazar mısınız?"
+                            # Eski requested_time'ı temizle ki yeni seçim kaydedilebilsin (tarih kalsın)
+                            conversation.pop("requested_time", None)
                             decision_path.append("validation:slot_conflict_create")
             elif not llm_reply:
                 if not has_service:
