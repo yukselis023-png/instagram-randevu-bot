@@ -373,7 +373,8 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
                             alt_slots = []
                             if req_d:
                                 try:
-                                    alt_slots = get_slots(conn, req_d, conversation.get("service"))[:5]
+                                    raw_slots = get_slots(conn, req_d, conversation.get("service"))
+                                    alt_slots = [s for s in raw_slots if s != req_t][:4]
                                 except Exception:
                                     pass
                             if alt_slots:
