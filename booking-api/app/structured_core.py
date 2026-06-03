@@ -254,6 +254,13 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
             
             reply_text = llm_reply if llm_reply else ""
             
+            # İsim düzeltme tespiti - FSM'e girmeden önce kontrol et
+            _is_name_correction = False
+            if effective_name and conversation.get("full_name") and effective_name != conversation.get("full_name"):
+                _name_lowered = sanitize_text(message_text).lower()
+                if any(w in _name_lowered for w in ("adım", "adim", "ismim", "ismini", "düzeltt", "duzeltt", "değişti", "degisti", "değil", "degil", "olarak", "kaydet")):
+                    _is_name_correction = True
+            
             # Deterministik direkt yanıtlar (LLM bypass) - bunlardan biri tetiklendiyse FSM'ye girme
             from app.generic_core import is_who_to_call_question, build_who_to_call_reply, is_existing_appointment_recall_question, build_existing_appointment_recall_reply
             deterministic_handled = False
@@ -293,7 +300,18 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
             if effective_time and not conversation.get("requested_time"):
                 conversation["requested_time"] = effective_time
             
-            if not deterministic_handled and has_name and has_phone and has_date and has_time and has_service and conversation.get("state") != "completed":
+            # İsim düzeltme tespiti - FSM'e girmeden önce kontrol et
+            _is_name_correction = False
+            _name_correction_regex = re.search(
+                r'(?:ad[ıi]m[ıi]?\s+)?(?:asl[ıi]nda\s+)?[A-ZÇĞİÖŞÜ][a-zçğıöşü]+\s+[A-ZÇĞİÖŞÜ][a-zçğıöşü]+',
+                message_text
+            )
+            if effective_name and effective_name != conversation.get("full_name"):
+                _name_lowered = sanitize_text(message_text).lower()
+                if any(w in _name_lowered for w in ("adım", "adim", "ismim", "ismini", "düzeltt", "duzeltt", "değişti", "degisti", "değil", "degil")):
+                    _is_name_correction = True
+            
+            if not deterministic_handled and has_name and has_phone and has_date and has_time and has_service and conversation.get("state") != "completed" and not _is_name_correction:
                 if not conversation.get("requested_date") or not conversation.get("requested_time"):
                     pass
                 else:
