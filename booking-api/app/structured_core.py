@@ -386,6 +386,10 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
                             decision_path.append("action:appointment_created")
                             queue_crm_sync(background_tasks, conversation, appointment_id, metrics)
                         except HTTPException as http_exc:
+                            try:
+                                conn.rollback()
+                            except Exception:
+                                pass
                             conversation["state"] = "collect_datetime"
                             conversation["appointment_status"] = "collecting"
                             # Buffer-expanded gerçek boş slotları kullan
