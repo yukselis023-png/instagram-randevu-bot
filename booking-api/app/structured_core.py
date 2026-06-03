@@ -370,6 +370,9 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
             crm_customer = upsert_customer_from_conversation(conn, conversation)
             if crm_customer:
                 schedule_customer_automation_events(conn, int(crm_customer["id"]), crm_customer.get("sector", ""))
+            
+            if not reply_text or not reply_text.strip():
+                reply_text = "Mesajınızı aldım, en kısa sürede dönüş yapacağım."
                 
             save_message_log(conn, payload.sender_id, "out", reply_text, {"type": "reply", "decision_path": decision_path})
             metrics["total_ms"] = elapsed_ms(request_started_at)
