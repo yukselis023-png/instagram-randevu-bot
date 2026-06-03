@@ -250,11 +250,13 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
                 conversation["requested_date"] = effective_date
             if effective_time and not conversation.get("requested_time"):
                 conversation["requested_time"] = effective_time
-            # Yeni saat/tarih geldiyse her zaman override et (slot conflict sonrası kalıntıları temizle)
-            if effective_date:
-                conversation["requested_date"] = effective_date
-            if effective_time:
+            # Slot conflict durumunda kullanıcı yeni saat verdiyse eskiyi ezip yenisini yaz
+            if effective_time and conversation.get("requested_time") and effective_time != conversation.get("requested_time"):
                 conversation["requested_time"] = effective_time
+                conversation.pop("available_slots", None)
+            if effective_date and conversation.get("requested_date") and effective_date != conversation.get("requested_date"):
+                conversation["requested_date"] = effective_date
+                conversation.pop("available_slots", None)
             
             if effective_service and not conversation.get("service"):
                 conversation["service"] = effective_service
