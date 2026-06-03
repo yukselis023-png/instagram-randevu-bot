@@ -311,6 +311,27 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
                 if any(w in _name_lowered for w in ("adım", "adim", "ismim", "ismini", "düzeltt", "duzeltt", "değişti", "degisti", "değil", "degil")):
                     _is_name_correction = True
             
+            # Completed state'te yeni booking opt-in varsa, eski alanları tamamen temizle
+            _new_booking_reset = (
+                conversation.get("state") == "completed" 
+                and any(w in sanitize_text(message_text).lower() for w in ("randevu", "görüşme", "gorusme", "alalım", "alayım", "planla", "ayarla", "yeni"))
+                and not deterministic_handled
+            )
+            if _new_booking_reset:
+                for _key in ("requested_date", "requested_time", "service", "appointment_id", "appointment_status"):
+                    conversation.pop(_key, None)
+                conversation["state"] = "collect_service"
+                conversation["appointment_status"] = "collecting"
+                memory.pop("requested_service", None)
+                memory.pop("selected_service", None)
+                memory.pop("service_interest", None)
+                decision_path.append("fsm:completed_new_booking_reset")
+                effective_date = None
+                effective_time = None
+                has_date = False
+                has_time = False
+                has_service = False
+            
             if not deterministic_handled and has_name and has_phone and has_date and has_time and has_service and conversation.get("state") != "completed" and not _is_name_correction:
                 if not conversation.get("requested_date") or not conversation.get("requested_time"):
                     pass
