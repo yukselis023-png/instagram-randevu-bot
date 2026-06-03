@@ -316,9 +316,9 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
                             pass
             if effective_phone and not conversation.get("phone"):
                 conversation["phone"] = effective_phone
-            if effective_date and not conversation.get("requested_date"):
+            if effective_date and not conversation.get("requested_date") and conversation.get("state") != "completed":
                 conversation["requested_date"] = effective_date
-            if effective_time and not conversation.get("requested_time"):
+            if effective_time and not conversation.get("requested_time") and conversation.get("state") != "completed":
                 conversation["requested_time"] = effective_time
             
             # İsim düzeltme tespiti - FSM'e girmeden önce kontrol et
@@ -377,13 +377,20 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
                         try:
                             conversation["state"] = "completed"
                             conversation["appointment_status"] = "confirmed"
-                            conversation["booking_kind"] = "appointment"
+                            conversation["booking_kind"] = conversation.get("booking_kind") or "preconsultation"
                             created = create_appointment(conn, conversation, payload.instagram_username)
                             appointment_id = int(created[0] if isinstance(created, tuple) else created)
                             conversation["appointment_id"] = appointment_id
                             reply_text = build_confirmation_message(conversation)
                             decision_path.append("action:appointment_created")
                             queue_crm_sync(background_tasks, conversation, appointment_id, metrics)
+                            # Live CRM'e de yaz (Vercel panelin okuduğu Supabase)
+                            try:
+                                from app.main import live_crm_upsert_preconsultation
+                                live_crm_upsert_preconsultation(conversation)
+                                decision_path.append("action:live_crm_synced")
+                            except Exception:
+                                logger.exception("live_crm_sync_failed_in_structured_core")
                         except HTTPException as http_exc:
                             try:
                                 conn.rollback()
@@ -413,7 +420,9 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
             if not reply_text or not reply_text.strip():
                 _state = conversation.get("state", "new")
                 _lowered = sanitize_text(message_text).lower()
-                if any(w in _lowered for w in ("soyad", "soyadım", "soyadim", "adım", "adim", "ismim", "düzelt", "duzelt", "değiş", "degis")):
+                if _state == "completed":
+                    reply_text = "Başka bir konuda yardımcı olabilir miyim?"
+                elif any(w in _lowered for w in ("soyad", "soyadım", "soyadim", "adım", "adim", "ismim", "düzelt", "duzelt", "değiş", "degis")):
                     reply_text = "İsim bilginizi güncelledim. Başka bir konuda yardımcı olabilir miyim?"
                 elif any(w in _lowered for w in ("randevum", "kayıtlı", "kayitli", "ne zaman", "saat kaç", "hangi isim")):
                     reply_text = "Randevu bilgilerinizi kontrol edip size dönüş yapacağım."

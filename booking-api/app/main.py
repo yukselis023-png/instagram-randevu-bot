@@ -14153,11 +14153,16 @@ def sync_conversation_to_crm_safe(
             )
             return
     try:
-        success = sync_conversation_to_crm(conversation, appointment_id, request_metrics)
+        # Direct live CRM write (Vercel'in okudugu Supabase)
+        booking_kind = conversation.get("booking_kind") or "preconsultation"
+        if booking_kind == "appointment":
+            live_crm_upsert_appointment(conversation)
+        else:
+            live_crm_upsert_preconsultation(conversation)
+            live_crm_ensure_task_for_conversation(dict(conversation))
         logger.info(
-            "crm_sync_finished sender_id=%s success=%s crm_sync_ms=%s appointment_id=%s",
+            "crm_sync_finished sender_id=%s crm_sync_ms=%s appointment_id=%s",
             conversation.get("instagram_user_id"),
-            success,
             elapsed_ms(started_at),
             appointment_id,
         )
