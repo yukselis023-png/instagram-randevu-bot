@@ -218,6 +218,11 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
                     extracted_phone = _combo.group(2)
             extracted_date = extract_date(message_text)
             extracted_time = extract_time(message_text)
+            # Ham noktalı saat formatı fallback (extract_time bazen kaçırabiliyor)
+            if not extracted_time:
+                _dot_time = re.search(r'\b(\d{1,2})\.(\d{2})\b', message_text)
+                if _dot_time:
+                    extracted_time = f"{int(_dot_time.group(1)):02d}:{_dot_time.group(2)}"
             
             effective_name = llm_extracted.get("name") or extracted_name
             # İsim temizleme: "Zeynep Kaya olacak", "adım X olsun" gibi ifadeleri temizle
