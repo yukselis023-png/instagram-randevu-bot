@@ -357,6 +357,7 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
                         try:
                             conversation["state"] = "completed"
                             conversation["appointment_status"] = "confirmed"
+                            conversation["booking_kind"] = "appointment"
                             created = create_appointment(conn, conversation, payload.instagram_username)
                             appointment_id = int(created[0] if isinstance(created, tuple) else created)
                             conversation["appointment_id"] = appointment_id
