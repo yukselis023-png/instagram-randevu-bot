@@ -396,35 +396,10 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
                             alt_slots = []
                             if req_d and req_t:
                                 try:
-                                    with conn.cursor() as cur:
-                                        cur.execute("""
-                                            WITH slots AS (
-                                                SELECT generate_series(
-                                                    (%s::date + %s::time)::timestamp,
-                                                    (%s::date + %s::time - interval '1 minute')::timestamp,
-                                                    (%s || ' minutes')::interval
-                                                ) AS slot_start
-                                            )
-                                            SELECT to_char(s.slot_start, 'HH24:MI') AS slot_time
-                                            FROM slots s
-                                            WHERE NOT EXISTS (
-                                                SELECT 1 FROM appointments a
-                                                WHERE a.appointment_date = %s::date
-                                                  AND a.status IN ('confirmed', 'preconsultation', 'scheduled')
-                                                  AND COALESCE(a.attendance_status, 'scheduled') 
-                                                      NOT IN ('completed', 'no_show', 'canceled', 'cancelled')
-                                                  AND a.appointment_time >= to_char(s.slot_start - (%s || ' minutes')::interval, 'HH24:MI')::time
-                                                  AND a.appointment_time < to_char(s.slot_start + (%s || ' minutes')::interval, 'HH24:MI')::time
-                                            )
-                                            AND to_char(s.slot_start, 'HH24:MI') != %s
-                                            ORDER BY s.slot_start
-                                            LIMIT 4
-                                        """, (req_d, WORKING_HOURS_START, req_d, WORKING_HOURS_END,
-                                                str(SLOT_DURATION_MINUTES + SLOT_BUFFER_MINUTES), req_d,
-                                                str(SLOT_BUFFER_MINUTES), str(SLOT_DURATION_MINUTES + SLOT_BUFFER_MINUTES), req_t))
-                                        alt_slots = [row["slot_time"] for row in cur.fetchall()]
-                                except Exception as alt_exc:
-                                    logger.warning("slot_alt_sql_failed: %s", alt_exc)
+                                    alt_slots = suggest_alternatives(conn, req_d, req_t, conversation.get("service"))
+                                    alt_slots = [s for s in alt_slots if s != req_t][:4]
+                                except Exception:
+                                    pass
                             if alt_slots:
                                 alt_text = ", ".join(alt_slots)
                                 reply_text = f"{req_t} dolu. Aynı gün boş: {alt_text}. Hangisi uygun olur?"
