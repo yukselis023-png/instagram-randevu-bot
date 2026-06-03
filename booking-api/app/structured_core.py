@@ -224,6 +224,10 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
             effective_date = llm_extracted.get("date") or extracted_date
             effective_time = llm_extracted.get("time") or extracted_time
             effective_service = llm_extracted.get("service") or conversation.get("service") or memory.get("requested_service")
+            # Fallback: kullanıcı mesajından servis tespiti (LLM bulamadıysa)
+            if not effective_service:
+                from app.generic_core import detect_requested_service_from_text
+                effective_service = detect_requested_service_from_text(message_text, cfg)
             
             # 3. Basitleştirilmiş FSM
             has_name = bool(conversation.get("full_name") or conversation.get("lead_name") or effective_name)
@@ -329,7 +333,7 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
                             req_t = normalize_time_string(conversation.get("requested_time")) or "o saat"
                             if alt_slots:
                                 alt_text = ", ".join(alt_slots)
-                                reply_text = f"{req_t} dolu. Aynı gün uygun: {alt_text}. Hangisi uygun olur?"
+                                reply_text = f"{req_t} dolu. En yakın: {alt_text}. Hangisi uygun olur?"
                             else:
                                 reply_text = f"{req_t} dolu ve o gün boş slot kalmadı. Başka bir gün yazar mısınız?"
                             decision_path.append("validation:slot_conflict_create")
