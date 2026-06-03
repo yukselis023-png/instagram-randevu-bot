@@ -6845,7 +6845,9 @@ def extract_time(text: str) -> str | None:
         if "." in raw:
             has_explicit_time_cue = re.search(r"(saat|saatte|saati)\s*$", context_before)
             has_change_cue = re.search(r"(a|e|ya|ye)\s*(al|aldir|aldır|cek|çek|kaydir|kaydır|tas|taşı|degis|değiş|guncelle|güncelle)", context_after)
-            if not has_explicit_time_cue and not has_change_cue:
+            # "14.40 uygun" gibi bağlamlarda da noktalı formatı zaman olarak kabul et
+            has_availability_cue = re.search(r"(uygun|musait|müsait|olur|tamam|bos|boş|var|alsana|alalim|alın)", context_after)
+            if not has_explicit_time_cue and not has_change_cue and not has_availability_cue:
                 continue
         hour = int(match.group(1))
         minute = int(match.group(2))
@@ -7085,21 +7087,25 @@ def extract_date(text: str) -> str | None:
     if explicit:
         day = int(explicit.group(1))
         month = int(explicit.group(2))
-        year_raw = explicit.group(3)
-        year = int(year_raw) if year_raw else today.year
-        if year_raw and len(year_raw) == 2:
-            year += 2000
-        if year < today.year or year > 2100:
-            year = today.year
-        try:
-            parsed = date(year, month, day)
-            if not year_raw and parsed < today:
-                next_year = date(today.year + 1, month, day)
-                if next_year <= today + timedelta(days=APPOINTMENT_LOOKAHEAD_DAYS):
-                    parsed = next_year
-            return parsed.isoformat()
-        except ValueError:
-            pass
+        # "." ile ayrılmış ve ikinci sayı > 31 ise saat formatıdır (14.40), tarih değil
+        if "." in explicit.group(0) and month > 31:
+            pass  # skip, this is a time
+        else:
+            year_raw = explicit.group(3)
+            year = int(year_raw) if year_raw else today.year
+            if year_raw and len(year_raw) == 2:
+                year += 2000
+            if year < today.year or year > 2100:
+                year = today.year
+            try:
+                parsed = date(year, month, day)
+                if not year_raw and parsed < today:
+                    next_year = date(today.year + 1, month, day)
+                    if next_year <= today + timedelta(days=APPOINTMENT_LOOKAHEAD_DAYS):
+                        parsed = next_year
+                return parsed.isoformat()
+            except ValueError:
+                pass
 
     for word, weekday in WEEKDAY_MAP.items():
         if re.search(rf"\b{re.escape(word)}\b", lowered):
