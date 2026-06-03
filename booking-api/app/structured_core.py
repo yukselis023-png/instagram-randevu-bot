@@ -396,8 +396,35 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
                             alt_slots = []
                             if req_d:
                                 try:
-                                    from app.main import get_available_slots_for_date as _avail
-                                    alt_slots = [s for s in _avail(conn, req_d, conversation.get("service")) if s != req_t][:4]
+                                    from app.main import normalize_date_string, SLOT_DURATION_MINUTES, SLOT_BUFFER_MINUTES, WORKING_HOURS_START, WORKING_HOURS_END, LIVE_CRM_PRECONSULTATION_SERVICE
+                                    _buffer = SLOT_DURATION_MINUTES + SLOT_BUFFER_MINUTES
+                                    with conn.cursor() as cur:
+                                        cur.execute("""
+                                            WITH slots AS (
+                                                SELECT generate_series(
+                                                    (%s::date + %s::time)::timestamp,
+                                                    (%s::date + %s::time - interval '1 minute')::timestamp,
+                                                    (%s || ' minutes')::interval
+                                                ) AS slot_start
+                                            )
+                                            SELECT to_char(s.slot_start, 'HH24:MI') AS slot_time
+                                            FROM slots s
+                                            WHERE NOT EXISTS (
+                                                SELECT 1 FROM appointments a
+                                                WHERE a.appointment_date = %s::date
+                                                  AND a.status IN ('confirmed', 'preconsultation', 'scheduled')
+                                                  AND COALESCE(a.attendance_status, 'scheduled') NOT IN ('completed', 'no_show', 'canceled', 'cancelled')
+                                                  AND (
+                                                    (a.appointment_time >= (s.slot_start - (%s || ' minutes')::interval)::time
+                                                     AND a.appointment_time < (s.slot_start + (%s || ' minutes')::interval)::time)
+                                                  )
+                                            )
+                                            AND to_char(s.slot_start, 'HH24:MI') != %s
+                                            LIMIT 4
+                                        """, (req_d[:10], WORKING_HOURS_START, req_d[:10], WORKING_HOURS_END,
+                                                _buffer, req_d[:10],
+                                                SLOT_BUFFER_MINUTES, _buffer, req_t))
+                                        alt_slots = [row["slot_time"] for row in cur.fetchall()]
                                 except Exception:
                                     pass
                             if alt_slots:
