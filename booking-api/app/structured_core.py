@@ -358,7 +358,6 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
                     pass
                 else:
                     from datetime import date as date_cls, time as time_cls, timedelta
-                    from app.main import get_available_slots_for_date as get_slots
                     slot_error = validate_slot(conversation.get("requested_date"), conversation.get("requested_time"))
                     if not slot_error:
                         try:
@@ -392,23 +391,8 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
                                 pass
                             conversation["state"] = "collect_datetime"
                             conversation["appointment_status"] = "collecting"
-                            # Buffer-expanded gerçek boş slotları kullan
                             req_t = normalize_time_string(conversation.get("requested_time")) or "o saat"
-                            req_d = normalize_date_string(conversation.get("requested_date"))
-                            alt_slots = []
-                            if req_d:
-                                try:
-                                    from app.main import is_slot_capacity_available as _cap_ok
-                                    raw_slots = get_slots(conn, req_d, conversation.get("service"))
-                                    alt_slots = [s for s in raw_slots if s != req_t and _cap_ok(conn, req_d, s, conversation.get("service"))][:4]
-                                except Exception:
-                                    pass
-                            if alt_slots:
-                                alt_text = ", ".join(alt_slots)
-                                reply_text = f"{req_t} dolu. Aynı gün boş: {alt_text}. Hangisi uygun olur?"
-                            else:
-                                reply_text = f"{req_t} dolu ve o gün boş slot kalmadı. Başka bir gün yazar mısınız?"
-                            # Eski requested_time'ı temizle ki yeni seçim kaydedilebilsin (tarih kalsın)
+                            reply_text = f"{req_t} dolu. Başka bir gün veya saat yazar mısınız?"
                             conversation.pop("requested_time", None)
                             decision_path.append("validation:slot_conflict_create")
             
