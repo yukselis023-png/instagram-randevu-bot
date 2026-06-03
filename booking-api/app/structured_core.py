@@ -251,10 +251,11 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
             if effective_time and not conversation.get("requested_time"):
                 conversation["requested_time"] = effective_time
             # Slot conflict durumunda kullanıcı yeni saat verdiyse eskiyi ezip yenisini yaz
+            # AMA sadece tarih DEĞİŞMEDİYSE - search_dates bugünü false döndürebilir
             if effective_time and conversation.get("requested_time") and effective_time != conversation.get("requested_time"):
                 conversation["requested_time"] = effective_time
                 conversation.pop("available_slots", None)
-            if effective_date and conversation.get("requested_date") and effective_date != conversation.get("requested_date"):
+            if effective_date and effective_date != normalize_date_string(datetime.datetime.now(TZ).date().isoformat()):
                 conversation["requested_date"] = effective_date
                 conversation.pop("available_slots", None)
             
@@ -356,8 +357,9 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
                             req_date = date_cls.fromisoformat(normalize_date_string(conversation.get("requested_date")))
                             req_time = time_cls.fromisoformat(normalize_time_string(conversation.get("requested_time")))
                             now = datetime.datetime.now(TZ)
+                            # Sadece BUGÜN için geçmiş saat kontrolü - yarınki randevularda bu kontrol atlanır
                             if req_date == now.date() and req_time <= now.time():
-                                slot_error = f"Geçmiş bir saat seçilemez. Şu an saat {now.strftime('%H:%M')}. Lütfen ileri bir saat yazın."
+                                slot_error = f"Bugün için geçmiş bir saat seçilemez. Şu an saat {now.strftime('%H:%M')}. Yarın veya ileri bir tarih için yazın."
                         except Exception:
                             pass
                     if slot_error:
