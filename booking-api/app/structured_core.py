@@ -394,25 +394,10 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
                             # Eski requested_time'ı temizle ki yeni seçim kaydedilebilsin (tarih kalsın)
                             conversation.pop("requested_time", None)
                             decision_path.append("validation:slot_conflict_create")
-            elif not llm_reply:
-                if not has_service:
-                    conversation["state"] = "collect_service"
-                if not has_service:
-                    conversation["state"] = "collect_service"
-                    reply_text = "Hangi hizmet için ön görüşme planlamak istersiniz?"
-                    decision_path.append("fsm:collect_service")
-                elif not has_name:
-                    conversation["state"] = "collect_name"
-                    reply_text = "Ön görüşme için adınızı ve soyadınızı alabilir miyim?"
-                    decision_path.append("fsm:collect_name")
-                elif not has_phone:
-                    conversation["state"] = "collect_phone"
-                    reply_text = "Teşekkürler. İletişim için telefon numaranızı paylaşır mısınız?"
-                    decision_path.append("fsm:collect_phone")
-                elif not has_date or not has_time:
-                    conversation["state"] = "collect_datetime"
-                    reply_text = "Uygun gün ve saati net yazar mısınız? (Örn: Yarın 14:00)"
-                    decision_path.append("fsm:collect_datetime")
+            
+            # LLM boş döndüyse ve FSM de reply vermediyse fallback
+            if not reply_text or not reply_text.strip():
+                reply_text = "Mesajınızı aldım, nasıl yardımcı olabilirim?"
 
             conversation["memory_state"] = memory
             update_conversation_memory_after_bot_reply(conversation, reply_text, "|".join(decision_path))
@@ -422,9 +407,6 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
             if crm_customer:
                 schedule_customer_automation_events(conn, int(crm_customer["id"]), crm_customer.get("sector", ""))
             
-            if not reply_text or not reply_text.strip():
-                reply_text = "Mesajınızı aldım, en kısa sürede dönüş yapacağım."
-                
             save_message_log(conn, payload.sender_id, "out", reply_text, {"type": "reply", "decision_path": decision_path})
             metrics["total_ms"] = elapsed_ms(request_started_at)
             
