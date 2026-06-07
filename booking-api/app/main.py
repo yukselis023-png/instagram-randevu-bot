@@ -1568,6 +1568,7 @@ def list_appointments(
     date_to: str | None = None,
     status: str | None = None,
     kind: str | None = None,
+    instagram_user_id: str | None = None,
 ) -> dict[str, Any]:
     conditions = ["TRUE"]
     params: list[Any] = []
@@ -1586,6 +1587,9 @@ def list_appointments(
         conditions.append("status = 'preconsultation'")
     elif kind == "appointment":
         conditions.append("status <> 'preconsultation'")
+    if instagram_user_id:
+        conditions.append("instagram_user_id = %s")
+        params.append(sanitize_text(instagram_user_id))
     where_sql = " AND ".join(conditions)
     with get_conn() as conn:
         ensure_testsprite_fixture_data(conn)
@@ -12253,7 +12257,11 @@ def apply_ai_first_decision_to_conversation(
         return
 
     if not conversation.get("booking_kind"):
-        conversation["booking_kind"] = "preconsultation"
+        lowered_msg = sanitize_text(message_text or "").lower()
+        if any(kw in lowered_msg for kw in PRECONSULTATION_INTENT_KEYWORDS):
+            conversation["booking_kind"] = "preconsultation"
+        else:
+            conversation["booking_kind"] = "appointment"
 
     missing = set(decision.get("missing_fields") or [])
     if not conversation.get("service"):

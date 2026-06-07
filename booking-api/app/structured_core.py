@@ -377,7 +377,19 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
                         try:
                             conversation["state"] = "completed"
                             conversation["appointment_status"] = "confirmed"
-                            conversation["booking_kind"] = conversation.get("booking_kind") or "preconsultation"
+                            existing_kind = normalize_booking_kind(conversation.get("booking_kind"))
+                            if existing_kind == "preconsultation":
+                                if any(kw in sanitize_text(message_text).lower() for kw in DIRECT_APPOINTMENT_KEYWORDS):
+                                    conversation["booking_kind"] = "appointment"
+                                    decision_path.append("booking_kind:overridden_to_appointment")
+                                else:
+                                    conversation["booking_kind"] = "preconsultation"
+                            elif existing_kind == "appointment":
+                                conversation["booking_kind"] = "appointment"
+                            else:
+                                inferred = infer_booking_kind(message_text, llm_data, conversation)
+                                conversation["booking_kind"] = inferred or "appointment"
+                                decision_path.append(f"booking_kind:inferred:{conversation['booking_kind']}")
                             created = create_appointment(conn, conversation, payload.instagram_username)
                             appointment_id = int(created[0] if isinstance(created, tuple) else created)
                             conversation["appointment_id"] = appointment_id
