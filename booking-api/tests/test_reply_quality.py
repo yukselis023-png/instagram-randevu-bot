@@ -201,17 +201,17 @@ class ReplyQualityTests(unittest.TestCase):
         self.assertEqual(main.detect_business_sector("Emlak ofisim icin otomasyon istiyorum", []), "real_estate")
         self.assertEqual(main.detect_business_sector("Arsa ilanlari icin takip lazim", []), "real_estate")
 
-    def test_model_routing_uses_8b_for_simple_replies(self):
+    def test_model_routing_uses_gemini_for_simple_replies(self):
         profile = main.get_ai_compose_profile("info:greeting", {})
 
-        self.assertEqual(profile["models"], ["llama-3.1-8b-instant"])
+        self.assertEqual(profile["models"], ["gemini-3-flash"])
 
-    def test_model_routing_uses_scout_then_8b_for_normal_replies(self):
+    def test_model_routing_uses_gemini_for_normal_replies(self):
         profile = main.get_ai_compose_profile("info:service_info", {})
 
         self.assertEqual(
             profile["models"],
-            ["meta-llama/llama-4-scout-17b-16e-instruct", "llama-3.1-8b-instant"],
+            ["gemini-3-flash"],
         )
 
     def test_price_replies_use_ai_compose_with_deterministic_numbers_guarded(self):
@@ -223,19 +223,15 @@ class ReplyQualityTests(unittest.TestCase):
             )
         )
 
-    def test_model_routing_uses_70b_then_scout_then_8b_for_quality_replies(self):
+    def test_model_routing_uses_gemini_for_quality_replies(self):
         profile = main.get_ai_compose_profile("info:service_advice", {})
 
         self.assertEqual(
             profile["models"],
-            [
-                "llama-3.3-70b-versatile",
-                "meta-llama/llama-4-scout-17b-16e-instruct",
-                "llama-3.1-8b-instant",
-            ],
+            ["gemini-3-flash"],
         )
 
-    def test_model_routing_uses_quality_chain_for_complex_collect_service(self):
+    def test_model_routing_uses_gemini_for_complex_collect_service(self):
         profile = main.get_ai_compose_profile(
             "collect_service",
             {"last_customer_message": "DM, randevu ve müşteri takibi birlikte karışıyor. Hangisi daha mantıklı?"},
@@ -243,11 +239,7 @@ class ReplyQualityTests(unittest.TestCase):
 
         self.assertEqual(
             profile["models"],
-            [
-                "llama-3.3-70b-versatile",
-                "meta-llama/llama-4-scout-17b-16e-instruct",
-                "llama-3.1-8b-instant",
-            ],
+            ["gemini-3-flash"],
         )
 
     def test_call_llm_content_falls_back_when_first_model_errors(self):
