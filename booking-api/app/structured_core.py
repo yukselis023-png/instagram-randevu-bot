@@ -190,12 +190,15 @@ def process_message_structured(payload: IncomingMessage, background_tasks: Backg
             system_prompt = LLM_SYSTEM_PROMPT + f"""
 
 BUGÜN: {_today}
-İŞLETME: {_business_name}
+İŞLETME ADI: {_business_name}
+İŞLETME TÜRÜ: {cfg.get('business_type', 'Hizmet İşletmesi')}
 BİLİNEN BAĞLAM: {json.dumps(known_context, ensure_ascii=False) if known_context else '{}'}
 EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
-İŞLETME BİLGİSİ:
+İŞLETME BİLGİSİ (servis kataloğu, fiyatlar, çalışma saatleri):
 {_business_context}
 {slot_context}
+
+SEN {_business_name} adlı işletmenin randevu asistanısın. Kendini {_business_name} olarak tanıt, ASLA başka bir işletme adı kullanma.
 """
             
             # LLM çağrısı
