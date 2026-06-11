@@ -247,8 +247,10 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
                 from app.generic_core import detect_requested_service_from_text
                 effective_service = detect_requested_service_from_text(message_text, cfg)
             
+            deterministic_handled = False
+
             # Deterministik geçmiş saat kontrolü
-            if not deterministic_handled and effective_date and effective_time:
+            if effective_date and effective_time:
                 try:
                     _now = datetime.datetime.now(TZ)
                     _req_date = datetime.date.fromisoformat(normalize_date_string(effective_date))
@@ -300,7 +302,6 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
             
             # Deterministik direkt yanıtlar (LLM bypass) - bunlardan biri tetiklendiyse FSM'ye girme
             from app.generic_core import is_who_to_call_question, build_who_to_call_reply, is_existing_appointment_recall_question, build_existing_appointment_recall_reply
-            deterministic_handled = False
             if is_who_to_call_question(message_text):
                 reply_text = build_who_to_call_reply(conn)
                 decision_path.append("direct:who_to_call")
@@ -499,13 +500,11 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
     except Exception as e:
         logger.exception("structured_core top-level failure: %s", e)
         metrics["total_ms"] = elapsed_ms(request_started_at)
-        err_msg = sanitize_text(str(e))[:200]
-        reply = f"Bir hata oluştu ({type(e).__name__}: {err_msg})."
         return ProcessResult(
             sender_id=payload.sender_id,
             should_reply=True,
-            reply_text=reply,
-            outbound_text=reply,
+            reply_text="Mesajınızı aldım, en kısa sürede dönüş yapacağım.",
+            outbound_text="Mesajınızı aldım, en kısa sürede dönüş yapacağım.",
             llm_raw_reply_text="",
             final_reply_source="structured_core",
             handoff=True,
@@ -514,5 +513,5 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
             appointment_id=None,
             normalized={},
             metrics=metrics,
-            decision_path=decision_path + [f"error:{type(e).__name__}"],
+            decision_path=decision_path + ["error:top_level_fallback"],
         )
