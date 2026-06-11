@@ -13047,6 +13047,9 @@ def create_appointment(conn: psycopg.Connection, conversation: dict[str, Any], u
                 )
             row = cur.fetchone()
 
+        # Commit the appointment INSERT/UPDATE immediately so it survives any subsequent failures
+        conn.commit()
+
         if is_live_crm_configured():
             live_crm_started_at = time_module.perf_counter()
             try:
