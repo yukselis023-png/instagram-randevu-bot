@@ -250,6 +250,7 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
             deterministic_handled = False
 
             # Deterministik geçmiş saat kontrolü
+            decision_path.append(f"dbg:ed={effective_date}_et={effective_time}")
             if effective_date and effective_time:
                 try:
                     _now = datetime.datetime.now(TZ)
