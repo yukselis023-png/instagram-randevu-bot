@@ -249,24 +249,29 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
             
             deterministic_handled = False
 
-            # Deterministik geçmiş saat kontrolü
-            decision_path.append(f"dbg:ed={effective_date}_et={effective_time}")
-            if effective_date and effective_time:
-                try:
-                    _now = datetime.datetime.now(TZ)
-                    _req_date = datetime.date.fromisoformat(normalize_date_string(effective_date))
-                    _req_time = datetime.time.fromisoformat(normalize_time_string(effective_time))
-                    if _req_date == _now.date() and _req_time <= _now.time():
-                        reply_text = f"Bugün için geçmiş bir saat seçilemez. Şu an saat {_now.strftime('%H:%M')}. Yarın veya ileri bir tarih için yazın."
-                        conversation["state"] = "collect_datetime"
-                        effective_date = None
-                        effective_time = None
-                        deterministic_handled = True
-                        decision_path.append("validation:past_time_rejected")
-                        # Log the actual reply for debugging
-                        decision_path.append(f"debug:past_reply={reply_text[:60].replace(' ','_')}")
-                except Exception:
-                    pass
+            # Deterministik geçmiş saat kontrolü - LLM'den bağımsız regex ile
+            _past_time_msg = None
+            try:
+                _pt_date = extract_date(message_text)
+                _pt_time = extract_time(message_text)
+                if _pt_date and _pt_time:
+                    _pt_date_norm = normalize_date_string(_pt_date)
+                    _pt_time_norm = normalize_time_string(_pt_time)
+                    if _pt_date_norm and _pt_time_norm:
+                        _pt_req_date = datetime.date.fromisoformat(_pt_date_norm)
+                        _pt_req_time = datetime.time.fromisoformat(_pt_time_norm)
+                        if _pt_req_date == datetime.datetime.now(TZ).date() and _pt_req_time <= datetime.datetime.now(TZ).time():
+                            _past_time_msg = f"Bugün için geçmiş bir saat seçilemez. Şu an saat {datetime.datetime.now(TZ).strftime('%H:%M')}. Yarın veya ileri bir tarih için yazın."
+            except Exception:
+                pass
+            
+            if _past_time_msg:
+                reply_text = _past_time_msg
+                conversation["state"] = "collect_datetime"
+                effective_date = None
+                effective_time = None
+                deterministic_handled = True
+                decision_path.append("validation:past_time_rejected")
             
             # 3. Basitleştirilmiş FSM
             has_name = bool(conversation.get("full_name") or conversation.get("lead_name") or effective_name)
@@ -483,9 +488,6 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
             
             save_message_log(conn, payload.sender_id, "out", reply_text, {"type": "reply", "decision_path": decision_path})
             metrics["total_ms"] = elapsed_ms(request_started_at)
-            
-            # Debug: log final reply_text decision path
-            decision_path.append(f"debug:final_reply={reply_text[:80].replace(' ','_')}")
             
             return ProcessResult(
                 sender_id=payload.sender_id,
