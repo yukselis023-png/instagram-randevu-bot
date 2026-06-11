@@ -262,6 +262,8 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
                         effective_time = None
                         deterministic_handled = True
                         decision_path.append("validation:past_time_rejected")
+                        # Log the actual reply for debugging
+                        decision_path.append(f"debug:past_reply={reply_text[:60].replace(' ','_')}")
                 except Exception:
                     pass
             
@@ -480,6 +482,9 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
             
             save_message_log(conn, payload.sender_id, "out", reply_text, {"type": "reply", "decision_path": decision_path})
             metrics["total_ms"] = elapsed_ms(request_started_at)
+            
+            # Debug: log final reply_text decision path
+            decision_path.append(f"debug:final_reply={reply_text[:80].replace(' ','_')}")
             
             return ProcessResult(
                 sender_id=payload.sender_id,
