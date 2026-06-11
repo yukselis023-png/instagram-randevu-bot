@@ -334,9 +334,13 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
             # LLM yanıtını reply_text'e ata (deterministic bir handler bunu ezmediyse)
             if not deterministic_handled:
                 reply_text = llm_reply if llm_reply else ""
-            # Post-process: LLM often hallucinates "DOEL Digital" identity for non-DOEL tenants
+            # Post-process: replace LLM hallucinated DOEL identity with actual tenant name
             if _business_name and "DOEL Digital" in reply_text and _business_name != "DOEL Digital":
+                before = reply_text
                 reply_text = reply_text.replace("DOEL Digital", _business_name)
+                reply_text = reply_text.replace(f" {_business_name}'iz", f" {_business_name}")
+                if before != reply_text:
+                    decision_path.append(f"tid:replaced_DOEL_with_{_business_name[:20].replace(' ','_')}")
             
             # İsim düzeltme tespiti - FSM'e girmeden önce kontrol et
             _is_name_correction = False
