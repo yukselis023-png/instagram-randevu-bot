@@ -25,7 +25,8 @@ HANDOFF_PATTERNS = [
     r"\b(?:gerçek|gercek|reel|canlı)\b.{0,25}\b(?:insan|kişi|kisi|yetkili)\b",
     r"\binsan(?:la|a)?\b.{0,40}\b(?:görüş(?:mek|tür)?|goruş(?:mek|tur)?|gorus(?:mek|tur)?|konuş(?:mak)?|konus(?:mak)?|destek)\b",
     r"\b(?:operatör|operator|müşteri hizmet|destek)\w{0,12}.{0,40}\b(?:bağla(?:r|n|m|abilir)?|bagla(?:r|m|abilir)?|ulaş|ulas|ara|görüş|gorus|konuş|konus)\w{0,6}\b",
-    r"\b\w+\b.{0,30}\b(?:ile görüşmek|ile gorusmek|bağlanmak|baglanmak|ulaşmak|ulasmak)\b.{0,20}\b(?:istiyorum|mümkün|mumkun|isterim|rica)\b",
+    r"\b(?:beni (?:bir )?yetkiliye yönlendir|beni (?:bir )?yetkiliye yonlendir)\b",
+    r"\b(?:berkay|\w+\s+bey|\w+\s+hanım)\b.{0,20}\b(?:ile görüşmek|ile gorusmek|bağlanmak|baglanmak|ulaşmak|ulasmak)\b.{0,20}\b(?:istiyorum|mümkün|mumkun|isterim|rica)\b",
 ]
 
 HANDOFF_RE = re.compile("|".join(HANDOFF_PATTERNS), re.IGNORECASE)
