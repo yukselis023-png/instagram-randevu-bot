@@ -1,7 +1,6 @@
 *.bak
 *.bak-*
 *.sqlite
-*.json
 *.png
 *.pyc
 __pycache__/
