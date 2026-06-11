@@ -146,7 +146,7 @@ def process_message_structured(payload: IncomingMessage, background_tasks: Backg
             conversation["instagram_user_id"] = payload.sender_id
             # Tenant resolution: use slug from payload or fallback to 'doel'
             _tenant_slug = conversation.get("tenant_slug") or (payload.raw_event or {}).get("tenant") or "doel"
-            decision_path.append(f"tid:slug={_tenant_slug[:15]}_re={str(payload.raw_event is not None)}_tenant={str((payload.raw_event or {}).get('tenant','?'))[:15]}")
+            decision_path.append(f"tid:re={json.dumps(payload.raw_event)[:80].replace(' ','_')}")
             _tenant = resolve_tenant(conn, _tenant_slug)
             conversation["_tenant"] = _tenant
             if not conversation.get("tenant_slug"):
