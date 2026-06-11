@@ -21,7 +21,8 @@ from app.main import (
     extract_name, extract_phone, extract_date, extract_time, create_appointment,
     build_confirmation_message, validate_slot, find_existing_appointment, suggest_alternatives,
     normalize_date_string, normalize_time_string, format_human_date, TZ,
-    collect_next_booking_slot_options, remember_booking_slot_options, normalize_booking_slot_option
+    collect_next_booking_slot_options, remember_booking_slot_options, normalize_booking_slot_option,
+    normalize_booking_kind, infer_booking_kind, DIRECT_APPOINTMENT_KEYWORDS
 )
 from app.action_policy import classify_user_action
 
@@ -387,7 +388,7 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
                             elif existing_kind == "appointment":
                                 conversation["booking_kind"] = "appointment"
                             else:
-                                inferred = infer_booking_kind(message_text, llm_data, conversation)
+                                inferred = infer_booking_kind(message_text, {}, conversation)
                                 conversation["booking_kind"] = inferred or "appointment"
                                 decision_path.append(f"booking_kind:inferred:{conversation['booking_kind']}")
                             created = create_appointment(conn, conversation, payload.instagram_username)
@@ -474,15 +475,11 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
     except Exception as e:
         logger.exception("structured_core top-level failure: %s", e)
         metrics["total_ms"] = elapsed_ms(request_started_at)
-        err_type = type(e).__name__
-        err_msg = sanitize_text(str(e))[:200]
-        # Return error details so we can see what went wrong
-        reply = f"Bir hata oluştu ({err_type}: {err_msg}). En kısa sürede dönüş yapacağım."
         return ProcessResult(
             sender_id=payload.sender_id,
             should_reply=True,
-            reply_text=reply,
-            outbound_text=reply,
+            reply_text="Mesajınızı aldım, en kısa sürede dönüş yapacağım.",
+            outbound_text="Mesajınızı aldım, en kısa sürede dönüş yapacağım.",
             llm_raw_reply_text="",
             final_reply_source="structured_core",
             handoff=True,
@@ -491,5 +488,5 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
             appointment_id=None,
             normalized={},
             metrics=metrics,
-            decision_path=decision_path + [f"error:{err_type}:{err_msg[:60]}"],
+            decision_path=decision_path + ["error:top_level_fallback"],
         )
