@@ -300,7 +300,9 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
                 memory["selected_service"] = effective_service
                 memory["service_interest"] = effective_service
             
-            reply_text = llm_reply if llm_reply else ""
+            # LLM yanıtını reply_text'e ata (deterministic bir handler bunu ezmediyse)
+            if not deterministic_handled:
+                reply_text = llm_reply if llm_reply else ""
             
             # İsim düzeltme tespiti - FSM'e girmeden önce kontrol et
             _is_name_correction = False
