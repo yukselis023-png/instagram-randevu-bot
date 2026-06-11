@@ -146,6 +146,7 @@ def process_message_structured(payload: IncomingMessage, background_tasks: Backg
             conversation["instagram_user_id"] = payload.sender_id
             # Tenant resolution: use slug from payload or fallback to 'doel'
             _tenant_slug = conversation.get("tenant_slug") or (payload.raw_event or {}).get("tenant") or "doel"
+            decision_path.append(f"tid:slug={_tenant_slug[:15]}_re={str(payload.raw_event is not None)}_tenant={str((payload.raw_event or {}).get('tenant','?'))[:15]}")
             _tenant = resolve_tenant(conn, _tenant_slug)
             conversation["_tenant"] = _tenant
             if not conversation.get("tenant_slug"):
@@ -154,7 +155,6 @@ def process_message_structured(payload: IncomingMessage, background_tasks: Backg
             _business_name = _tenant.get("brand_name") or cfg.get("business_name", "İşletme")
             _business_context = json.dumps(cfg, ensure_ascii=False, default=str)
             _today = datetime.datetime.now(TZ).date().strftime('%Y-%m-%d')
-            decision_path.append(f"tid:slug={_tenant_slug[:15]}_name={_business_name[:25].replace(' ','_')}")
             
             # 1. LLM'e yapısal istek gönder
             recent_history = get_recent_message_history(conn, payload.sender_id)
