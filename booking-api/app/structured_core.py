@@ -145,8 +145,16 @@ def process_message_structured(payload: IncomingMessage, background_tasks: Backg
             memory = ensure_conversation_memory(conversation)
             conversation["instagram_user_id"] = payload.sender_id
             # Tenant resolution: use slug from payload or fallback to 'doel'
-            _tenant_slug = conversation.get("tenant_slug") or (payload.raw_event or {}).get("tenant") or "doel"
-            decision_path.append(f"tid:re={json.dumps(payload.raw_event)[:80].replace(' ','_')}")
+            _tenant_slug = conversation.get("tenant_slug")
+            if not _tenant_slug:
+                # Try raw_event tenant, then instagram_username prefix convention (webchat_{slug}), then fallback
+                _re_tenant = (payload.raw_event or {}).get("tenant") if payload.raw_event else None
+                _ig_tenant = None
+                if payload.instagram_username and "_" in (payload.instagram_username or ""):
+                    _prefix = (payload.instagram_username or "").split("_")[0]
+                    if _prefix in ("webchat", "ig", "wa"):
+                        _ig_tenant = (payload.instagram_username or "").split("_", 1)[1] if "_" in (payload.instagram_username or "") else None
+                _tenant_slug = _re_tenant or _ig_tenant or "doel"
             _tenant = resolve_tenant(conn, _tenant_slug)
             conversation["_tenant"] = _tenant
             if not conversation.get("tenant_slug"):
