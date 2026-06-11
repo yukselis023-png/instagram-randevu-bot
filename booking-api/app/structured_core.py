@@ -499,11 +499,13 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
     except Exception as e:
         logger.exception("structured_core top-level failure: %s", e)
         metrics["total_ms"] = elapsed_ms(request_started_at)
+        err_msg = sanitize_text(str(e))[:200]
+        reply = f"Bir hata oluştu ({type(e).__name__}: {err_msg})."
         return ProcessResult(
             sender_id=payload.sender_id,
             should_reply=True,
-            reply_text="Mesajınızı aldım, en kısa sürede dönüş yapacağım.",
-            outbound_text="Mesajınızı aldım, en kısa sürede dönüş yapacağım.",
+            reply_text=reply,
+            outbound_text=reply,
             llm_raw_reply_text="",
             final_reply_source="structured_core",
             handoff=True,
@@ -512,5 +514,5 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
             appointment_id=None,
             normalized={},
             metrics=metrics,
-            decision_path=decision_path + ["error:top_level_fallback"],
+            decision_path=decision_path + [f"error:{type(e).__name__}"],
         )
