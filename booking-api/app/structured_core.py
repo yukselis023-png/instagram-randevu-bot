@@ -154,6 +154,7 @@ def process_message_structured(payload: IncomingMessage, background_tasks: Backg
             _business_name = _tenant.get("brand_name") or cfg.get("business_name", "İşletme")
             _business_context = json.dumps(cfg, ensure_ascii=False, default=str)
             _today = datetime.datetime.now(TZ).date().strftime('%Y-%m-%d')
+            decision_path.append(f"tid:slug={_tenant_slug[:15]}_name={_business_name[:25].replace(' ','_')}")
             
             # 1. LLM'e yapısal istek gönder
             recent_history = get_recent_message_history(conn, payload.sender_id)
@@ -334,13 +335,6 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
             # LLM yanıtını reply_text'e ata (deterministic bir handler bunu ezmediyse)
             if not deterministic_handled:
                 reply_text = llm_reply if llm_reply else ""
-            # Post-process: replace LLM hallucinated DOEL identity with actual tenant name
-            if _business_name and "DOEL Digital" in reply_text and _business_name != "DOEL Digital":
-                before = reply_text
-                reply_text = reply_text.replace("DOEL Digital", _business_name)
-                reply_text = reply_text.replace(f" {_business_name}'iz", f" {_business_name}")
-                if before != reply_text:
-                    decision_path.append(f"tid:replaced_DOEL_with_{_business_name[:20].replace(' ','_')}")
             
             # İsim düzeltme tespiti - FSM'e girmeden önce kontrol et
             _is_name_correction = False
@@ -528,6 +522,10 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
             
             save_message_log(conn, payload.sender_id, "out", reply_text, {"type": "reply", "decision_path": decision_path})
             metrics["total_ms"] = elapsed_ms(request_started_at)
+            
+            # Final post-process: replace any remaining "DOEL Digital" with actual tenant name for non-DOEL tenants
+            if _business_name and "DOEL Digital" in reply_text and _business_name != "DOEL Digital":
+                reply_text = reply_text.replace("DOEL Digital", _business_name)
             
             return ProcessResult(
                 sender_id=payload.sender_id,

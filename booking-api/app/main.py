@@ -14835,6 +14835,8 @@ def api_update_tenant_config(slug: str, body: dict[str, Any]):
             with conn.cursor() as cur:
                 cur.execute(f"UPDATE tenants SET {', '.join(updates)}, updated_at = NOW() WHERE slug = %s", params)
             conn.commit()
+        from app.tenant import _tenant_cache
+        _tenant_cache.pop(slug, None)
         return {"ok": True, "slug": slug}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
