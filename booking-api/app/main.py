@@ -105,8 +105,9 @@ _DEAD_TUNNELS = [
     "expenses-pgp-reynolds-allowance.trycloudflare.com",
     "valued-partnerships-world-regarding.trycloudflare.com",
     "expo-aluminium-volunteers-omaha.trycloudflare.com",
+    "vienna-saver-shower-ride.trycloudflare.com",
 ]
-_NEW_TUNNEL = "https://vienna-saver-shower-ride.trycloudflare.com/v1"
+_NEW_TUNNEL = "https://collect-gender-lite-reward.trycloudflare.com/v1"
 if _LLM_ENV_URL and not any(dead in _LLM_ENV_URL for dead in _DEAD_TUNNELS):
     LLM_BASE_URL = _LLM_ENV_URL
 else:
