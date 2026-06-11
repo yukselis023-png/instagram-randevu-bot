@@ -12291,13 +12291,14 @@ def get_or_create_conversation(conn: psycopg.Connection, sender_id: str, usernam
     with conn.cursor() as cur:
         cur.execute(
             """
-            INSERT INTO conversations (instagram_user_id, instagram_username)
-            VALUES (%s, %s)
+            INSERT INTO conversations (instagram_user_id, instagram_username, tenant_slug)
+            VALUES (%s, %s, %s)
             ON CONFLICT (instagram_user_id) DO UPDATE
-            SET instagram_username = COALESCE(conversations.instagram_username, EXCLUDED.instagram_username)
+            SET instagram_username = COALESCE(conversations.instagram_username, EXCLUDED.instagram_username),
+                tenant_slug = COALESCE(EXCLUDED.tenant_slug, conversations.tenant_slug)
             RETURNING *
             """,
-            (sender_id, username),
+            (sender_id, username, "doel"),
         )
         row = cur.fetchone()
         conn.commit()
@@ -12328,8 +12329,9 @@ def upsert_conversation(conn: psycopg.Connection, conversation: dict[str, Any]) 
                 llm_notes,
                 memory_state,
                 appointment_id,
+                tenant_slug,
                 updated_at
-            ) VALUES (%s, %s, %s, %s, %s, %s::date, %s::time, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, NOW())
+            ) VALUES (%s, %s, %s, %s, %s, %s::date, %s::time, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, NOW())
             ON CONFLICT (instagram_user_id) DO UPDATE SET
                 instagram_username = EXCLUDED.instagram_username,
                 full_name = EXCLUDED.full_name,
@@ -12346,6 +12348,7 @@ def upsert_conversation(conn: psycopg.Connection, conversation: dict[str, Any]) 
                 llm_notes = EXCLUDED.llm_notes,
                 memory_state = EXCLUDED.memory_state,
                 appointment_id = EXCLUDED.appointment_id,
+                tenant_slug = COALESCE(EXCLUDED.tenant_slug, conversations.tenant_slug),
                 updated_at = NOW()
             """,
             (
@@ -12365,6 +12368,7 @@ def upsert_conversation(conn: psycopg.Connection, conversation: dict[str, Any]) 
                 conversation.get("llm_notes"),
                 json.dumps(ensure_conversation_memory(conversation), ensure_ascii=False),
                 conversation.get("appointment_id"),
+                conversation.get("tenant_slug", "doel"),
             ),
         )
     conn.commit()
@@ -13003,6 +13007,7 @@ def create_appointment(conn: psycopg.Connection, conversation: dict[str, Any], u
                         status = %s,
                         source = 'instagram_dm',
                         notes = %s,
+                        tenant_slug = %s,
                         updated_at = NOW()
                     WHERE id = %s
                     RETURNING id
@@ -13015,6 +13020,7 @@ def create_appointment(conn: psycopg.Connection, conversation: dict[str, Any], u
                         conversation.get("service"),
                         resolved_status,
                         conversation.get("llm_notes"),
+                        conversation.get("tenant_slug", "doel"),
                         existing_slot["id"],
                     ),
                 )
@@ -13030,8 +13036,9 @@ def create_appointment(conn: psycopg.Connection, conversation: dict[str, Any], u
                         appointment_date,
                         appointment_time,
                         status,
-                        notes
-                    ) VALUES (%s, %s, %s, %s, %s, %s::date, %s::time, %s, %s)
+                        notes,
+                        tenant_slug
+                    ) VALUES (%s, %s, %s, %s, %s, %s::date, %s::time, %s, %s, %s)
                     RETURNING id
                     """,
                     (
@@ -13044,6 +13051,7 @@ def create_appointment(conn: psycopg.Connection, conversation: dict[str, Any], u
                         requested_time,
                         local_status,
                         conversation.get("llm_notes"),
+                        conversation.get("tenant_slug", "doel"),
                     ),
                 )
             row = cur.fetchone()
