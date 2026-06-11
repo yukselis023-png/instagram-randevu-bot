@@ -297,6 +297,15 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
                     decision_path.append("direct:appointment_recall")
                     deterministic_handled = True
             
+            # Handoff kontrolü - LLM'den bağımsız deterministik tespit
+            from app.handoff import is_handoff_request, build_handoff_reply
+            if not deterministic_handled and is_handoff_request(message_text):
+                reply_text = "Size yardımcı olması için sizi DOEL Digital ekibinden bir yetkiliye yönlendiriyorum. En kısa sürede size dönüş yapacaklar."
+                conversation["state"] = "human_handoff"
+                conversation["assigned_human"] = True
+                decision_path.append("direct:handoff")
+                deterministic_handled = True
+            
             # İsim/telefon/tarih/saat alanlarını her zaman güncelle (state'ten bağımsız)
             if effective_name:
                 if not conversation.get("full_name"):
