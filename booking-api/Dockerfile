@@ -6,13 +6,15 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 COPY requirements.txt ./
-# cachebuster: 331c7df ignored:empty removed + 428705c extract fix
+# dockerignore: ad8227d fix *.json exclusion
+# cachebuster: ad8227d
 RUN apt-get update \
     && apt-get install -y --no-install-recommends socat \
     && rm -rf /var/lib/apt/lists/* \
     && pip install --no-cache-dir -r requirements.txt
 
 COPY app /app/app
+# cachebuster: ad8227d rebuild with dockerignore fix
 COPY start.sh /app/start.sh
 RUN chmod +x /app/start.sh
 
