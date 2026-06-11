@@ -260,6 +260,7 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
                         conversation["state"] = "collect_datetime"
                         effective_date = None
                         effective_time = None
+                        deterministic_handled = True
                         decision_path.append("validation:past_time_rejected")
                 except Exception:
                     pass
