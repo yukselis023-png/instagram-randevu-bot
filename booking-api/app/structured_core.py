@@ -532,8 +532,12 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
             metrics["total_ms"] = elapsed_ms(request_started_at)
             
             # Final post-process: replace any remaining "DOEL Digital" with actual tenant name for non-DOEL tenants
+            decision_path.append(f"tid:pp_bn={_business_name[:25].replace(' ','_') if _business_name else 'NONE'}")
             if _business_name and "DOEL Digital" in reply_text and _business_name != "DOEL Digital":
                 reply_text = reply_text.replace("DOEL Digital", _business_name)
+                decision_path.append(f"tid:replaced")
+            else:
+                decision_path.append(f"tid:not_replaced")
             
             return ProcessResult(
                 sender_id=payload.sender_id,
