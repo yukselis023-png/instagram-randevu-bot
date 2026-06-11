@@ -71,6 +71,28 @@ def resolve_tenant(conn: Any, slug: str | None) -> dict[str, Any]:
     except Exception as exc:
         logger.warning("tenant_resolve_failed slug=%s error=%s", slug, exc)
 
+    # DB'de bulunamadıysa config JSON dosyasını dene
+    cfg_path = os.path.join(os.path.dirname(__file__), "config", f"{slug}.json")
+    try:
+        if os.path.exists(cfg_path):
+            with open(cfg_path, encoding="utf-8") as f:
+                config_data = json.load(f)
+            tenant = {
+                "id": 0,
+                "slug": slug,
+                "brand_name": config_data.get("business_name", slug.capitalize()),
+                "logo_url": "",
+                "colors": {"primary": "#1a1a2e", "secondary": "#e94560"},
+                "config": config_data,
+                "channels": ["instagram_dm", "whatsapp", "webchat"],
+                "actions": ["appointment", "call", "visit", "form"],
+                "created_at": "2026-01-01T00:00:00Z",
+            }
+            _tenant_cache[slug] = tenant
+            return tenant
+    except Exception as exc:
+        logger.warning("tenant_config_file_failed slug=%s error=%s", slug, exc)
+
     return dict(DEFAULT_TENANT)  # fallback
 
 def create_tenant(conn: Any, slug: str, brand_name: str, config: dict | None = None) -> dict[str, Any]:
