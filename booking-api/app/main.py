@@ -13522,12 +13522,15 @@ def live_crm_find_customer_preconsultation(conversation: dict[str, Any], headers
 def live_crm_upsert_preconsultation(conversation: dict[str, Any], headers: dict[str, str] | None = None, user_id: str | None = None, customer: dict[str, Any] | None = None) -> dict[str, Any] | None:
     headers = dict(headers or {})
     if not headers or not user_id:
+        auth_headers, auth_user_id = live_crm_auth_session()
         sr_headers = build_live_crm_service_role_headers()
         if sr_headers:
             headers = sr_headers
-            user_id = "00000000-0000-0000-0000-000000000000"
+            user_id = auth_user_id or "00000000-0000-0000-0000-000000000000"
+        elif auth_headers:
+            headers, user_id = auth_headers, auth_user_id
         else:
-            headers, user_id = live_crm_auth_session()
+            headers, user_id = None, None
     if not headers or not user_id:
         return None
 
