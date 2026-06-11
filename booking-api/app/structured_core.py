@@ -25,6 +25,7 @@ from app.main import (
     normalize_booking_kind, infer_booking_kind, DIRECT_APPOINTMENT_KEYWORDS
 )
 from app.action_policy import classify_user_action
+from app.tenant import resolve_tenant
 
 logger = logging.getLogger(__name__)
 
@@ -143,7 +144,16 @@ def process_message_structured(payload: IncomingMessage, background_tasks: Backg
             sanitize_conversation_state(conversation)
             memory = ensure_conversation_memory(conversation)
             conversation["instagram_user_id"] = payload.sender_id
-            cfg = get_config()
+            # Tenant resolution: use slug from payload or fallback to 'doel'
+            _tenant_slug = conversation.get("tenant_slug") or (payload.raw_event or {}).get("tenant") or "doel"
+            _tenant = resolve_tenant(conn, _tenant_slug)
+            conversation["_tenant"] = _tenant
+            if not conversation.get("tenant_slug"):
+                conversation["tenant_slug"] = _tenant_slug
+            cfg = _tenant.get("config", get_config())
+            _business_name = _tenant.get("brand_name") or cfg.get("business_name", "İşletme")
+            _business_context = json.dumps(cfg, ensure_ascii=False, default=str)
+            _today = datetime.datetime.now(TZ).date().strftime('%Y-%m-%d')
             
             # 1. LLM'e yapısal istek gönder
             recent_history = get_recent_message_history(conn, payload.sender_id)
@@ -177,17 +187,14 @@ def process_message_structured(payload: IncomingMessage, background_tasks: Backg
             if not conversation.get("requested_date") or not conversation.get("requested_time"): 
                 missing.append("datetime")
             
-            today = datetime.datetime.now(TZ).date().strftime('%Y-%m-%d')
-            business_context = json.dumps(cfg, ensure_ascii=False, default=str)
-            
             system_prompt = LLM_SYSTEM_PROMPT + f"""
 
-BUGÜN: {today}
-İŞLETME: {cfg.get('business_name', 'DOEL Digital')}
+BUGÜN: {_today}
+İŞLETME: {_business_name}
 BİLİNEN BAĞLAM: {json.dumps(known_context, ensure_ascii=False) if known_context else '{}'}
 EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
 İŞLETME BİLGİSİ:
-{business_context}
+{_business_context}
 {slot_context}
 """
             
