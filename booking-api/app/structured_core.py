@@ -247,6 +247,21 @@ EKSİK BİLGİLER: {', '.join(missing) if missing else 'YOK'}
                 from app.generic_core import detect_requested_service_from_text
                 effective_service = detect_requested_service_from_text(message_text, cfg)
             
+            # Deterministik geçmiş saat kontrolü
+            if not deterministic_handled and effective_date and effective_time:
+                try:
+                    _now = datetime.datetime.now(TZ)
+                    _req_date = datetime.date.fromisoformat(normalize_date_string(effective_date))
+                    _req_time = datetime.time.fromisoformat(normalize_time_string(effective_time))
+                    if _req_date == _now.date() and _req_time <= _now.time():
+                        reply_text = f"Bugün için geçmiş bir saat seçilemez. Şu an saat {_now.strftime('%H:%M')}. Yarın veya ileri bir tarih için yazın."
+                        conversation["state"] = "collect_datetime"
+                        effective_date = None
+                        effective_time = None
+                        decision_path.append("validation:past_time_rejected")
+                except Exception:
+                    pass
+            
             # 3. Basitleştirilmiş FSM
             has_name = bool(conversation.get("full_name") or conversation.get("lead_name") or effective_name)
             has_phone = bool(conversation.get("phone") or effective_phone)
