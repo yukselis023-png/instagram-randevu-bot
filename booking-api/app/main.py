@@ -9,6 +9,7 @@ import time as time_module
 from datetime import date, datetime, time, timedelta
 from typing import Any
 from collections import defaultdict
+from app.config.settings import get_config
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
