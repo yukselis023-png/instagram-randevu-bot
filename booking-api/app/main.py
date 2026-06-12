@@ -14796,6 +14796,13 @@ def api_create_tenant(body: dict[str, Any]):
     return {"ok": True, "tenant": tenant}
 
 
+def _parse_json_field(value: Any) -> Any:
+    """Parse a JSON string field, returning parsed value or original."""
+    if isinstance(value, str):
+        try: return json.loads(value)
+        except: return value
+    return value
+
 @app.get("/api/tenants")
 def api_list_tenants():
     """List all tenants."""
@@ -14809,9 +14816,10 @@ def api_list_tenants():
             "slug": r["slug"],
             "brand_name": r["brand_name"],
             "logo_url": r.get("logo_url", ""),
-            "colors": r.get("colors", {}),
-            "channels": r.get("channels", []),
-            "actions": r.get("actions", []),
+            "colors": _parse_json_field(r.get("colors", {})),
+            "channels": _parse_json_field(r.get("channels", [])),
+            "actions": _parse_json_field(r.get("actions", [])),
+            "created_at": str(r["created_at"]) if r.get("created_at") else "",
         } for r in rows]}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
