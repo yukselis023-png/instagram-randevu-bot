@@ -24,6 +24,7 @@ logger = logging.getLogger("instagram_poller")
 
 IG_LOGIN_USERNAME = os.getenv("IG_LOGIN_USERNAME", "").strip()
 IG_LOGIN_PASSWORD = os.getenv("IG_LOGIN_PASSWORD", "").strip()
+TENANT_SLUG = os.getenv("TENANT_SLUG", "doel").strip()
 BOOKING_API_BASE_URL = os.getenv("BOOKING_API_BASE_URL", "http://booking-api:8000").rstrip("/")
 N8N_PROCESS_WEBHOOK_URL = os.getenv("N8N_PROCESS_WEBHOOK_URL", "").strip()
 IG_POLL_INTERVAL_SECONDS = int(os.getenv("IG_POLL_INTERVAL_SECONDS", "3"))
@@ -628,9 +629,12 @@ def process_due_morning_reminders(cl: Client) -> None:
 
 def post_to_processing_backend(sender_id: str, username: str | None, message_text: str, raw_event: dict[str, Any]) -> dict[str, Any]:
     trace_id = str(raw_event.get("trace_id") or raw_event.get("message_id") or sender_id)
+    # Include tenant slug for multi-tenant routing
+    if raw_event and TENANT_SLUG != "doel":
+        raw_event["tenant"] = TENANT_SLUG
     payload = {
         "sender_id": sender_id,
-        "instagram_username": username,
+        "instagram_username": username or f"ig_{TENANT_SLUG}",
         "message_text": message_text,
         "raw_event": raw_event,
         "trace_id": trace_id,
