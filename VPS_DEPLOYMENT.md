@@ -202,3 +202,73 @@ docker run -d \
 | Custom domain | No (free tier) | Yes |
 | Multi-poller | Not possible | Multiple containers |
 | Cost | Free (limited) | ~$10-15/mo |
+
+## CI/CD (GitHub Actions)
+
+Create `.github/workflows/deploy.yml`:
+
+```yaml
+name: Deploy
+on:
+  push:
+    branches: [main]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run smoke tests
+        run: |
+          curl -sSf https://instagram-randevu-bot.onrender.com/health || true
+  deploy-render:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Render deploy
+        run: |
+          curl -X POST https://api.render.com/v1/services/srv-d7f6l8favr4c73927gb0/deploys \
+            -H "Authorization: Bearer ${{ secrets.RENDER_API_KEY }}" \
+            -H "Content-Type: application/json"
+  deploy-vercel:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy to Vercel
+        run: npx vercel --prod --token=${{ secrets.VERCEL_TOKEN }}
+        working-directory: doel-crm-recovered
+```
+
+## Monitoring
+
+```bash
+# Uptime check (cronjob every 5 minutes)
+*/5 * * * * curl -sSf https://api.yourapp.com/health > /dev/null 2>&1 || \
+  curl -s "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
+    -d "chat_id=$TELEGRAM_CHAT_ID&text=SITE_DOWN: $(date)"
+
+# LLM health check
+*/5 * * * * curl -s https://api.yourapp.com/api/llm-health | grep -q '"ok":true' || \
+  curl -s "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
+    -d "chat_id=$TELEGRAM_CHAT_ID&text=LLM_DOWN: $(date)"
+```
+
+## Backup
+
+```bash
+#!/bin/bash
+# /opt/backup/backup.sh — run daily via cron
+DATE=$(date +%Y%m%d)
+BACKUP_DIR="/opt/backup/$DATE"
+mkdir -p $BACKUP_DIR
+
+# PostgreSQL
+docker compose exec -T postgres pg_dump -U postgres instagram_booking > $BACKUP_DIR/db.sql
+gzip $BACKUP_DIR/db.sql
+
+# Upload to S3/Backblaze (optional)
+# rclone copy $BACKUP_DIR backblaze:instagram-bot-backups/
+
+# Keep last 30 days
+find /opt/backup -maxdepth 1 -type d -mtime +30 -exec rm -rf {} \;
+```
