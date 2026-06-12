@@ -17,5 +17,6 @@ COPY app /app/app
 # cachebuster: ad8227d rebuild with dockerignore fix
 COPY start.sh /app/start.sh
 RUN chmod +x /app/start.sh
+# noop: trigger rebuild after tenant api fix
 
 CMD ["/app/start.sh"]
