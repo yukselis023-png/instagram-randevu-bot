@@ -22,7 +22,8 @@ from app.main import (
     build_confirmation_message, validate_slot, find_existing_appointment, suggest_alternatives,
     normalize_date_string, normalize_time_string, format_human_date, TZ,
     collect_next_booking_slot_options, remember_booking_slot_options, normalize_booking_slot_option,
-    normalize_booking_kind, infer_booking_kind, DIRECT_APPOINTMENT_KEYWORDS
+    normalize_booking_kind, infer_booking_kind, DIRECT_APPOINTMENT_KEYWORDS,
+    fetch_live_crm_services_for_ai
 )
 from app.action_policy import classify_user_action
 from app.tenant import resolve_tenant
@@ -161,6 +162,25 @@ def process_message_structured(payload: IncomingMessage, background_tasks: Backg
                 conversation["tenant_slug"] = _tenant_slug
             cfg = _tenant.get("config", get_config())
             _business_name = _tenant.get("brand_name") or cfg.get("business_name", "İşletme")
+            # Live CRM servislerini çek ve statik kataloğa merge et
+            _live_services = fetch_live_crm_services_for_ai()
+            if _live_services:
+                _merged_catalog = list(cfg.get("service_catalog", []))
+                _existing_names = {s.get("display", "").lower().strip() for s in _merged_catalog}
+                for svc in _live_services:
+                    svc_name = (svc.get("display") or "").lower().strip()
+                    if svc_name and svc_name not in _existing_names:
+                        _merged_catalog.append({
+                            "slug": svc_name.replace(" ", "-"),
+                            "display": svc.get("display", svc_name),
+                            "price": svc.get("price") or "Bilgi alınabilir",
+                            "price_note": svc.get("price_note", ""),
+                            "keywords": svc.get("keywords", [svc_name]),
+                            "summary": svc.get("summary", ""),
+                            "source": "crm_live",
+                        })
+                        _existing_names.add(svc_name)
+                cfg = {**cfg, "service_catalog": _merged_catalog}
             _business_context = json.dumps(cfg, ensure_ascii=False, default=str)
             _today = datetime.datetime.now(TZ).date().strftime('%Y-%m-%d')
             
