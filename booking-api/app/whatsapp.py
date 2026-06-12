@@ -16,6 +16,7 @@ logger = logging.getLogger("whatsapp")
 WHATSAPP_TOKEN = os.getenv("WHATSAPP_TOKEN", "")       # Meta app token
 WHATSAPP_VERIFY = os.getenv("WHATSAPP_VERIFY", "doelai_verify")  # webhook verify token
 WHATSAPP_PHONE_ID = os.getenv("WHATSAPP_PHONE_ID", "")  # Business phone number ID
+WHATSAPP_APP_SECRET = os.getenv("META_APP_SECRET", os.getenv("FACEBOOK_APP_SECRET", ""))  # For signature verification
 WHATSAPP_API_VERSION = "v22.0"
 WHATSAPP_BASE = "https://graph.facebook.com"
 
@@ -26,6 +27,17 @@ def verify_webhook(mode: str | None, token: str | None, challenge: str | None) -
     if mode == "subscribe" and token == WHATSAPP_VERIFY:
         return 200, challenge
     return 403, None
+
+def verify_signature(raw_body: bytes, signature_header: str | None) -> bool:
+    """Verify X-Hub-Signature-256 against raw request body using Meta App Secret."""
+    if not signature_header or not WHATSAPP_APP_SECRET:
+        return True  # skip if not configured
+    expected = hmac.new(WHATSAPP_APP_SECRET.encode(), raw_body, hashlib.sha256).hexdigest()
+    prefix = "sha256="
+    if signature_header.startswith(prefix):
+        received = signature_header[len(prefix):]
+        return hmac.compare_digest(expected, received)
+    return False
 
 # ── Inbound message parser ─────────────────────────────────────────
 
@@ -39,6 +51,9 @@ def parse_whatsapp_inbound(body: dict[str, Any]) -> list[dict[str, Any]]:
             value = change.get("value", {})
             if value.get("messaging_product") != "whatsapp":
                 continue
+            # Phone number ID that received this message — used for tenant resolution
+            metadata = value.get("metadata", {})
+            recipient_phone_id = metadata.get("phone_number_id", "")
             for msg in value.get("messages", []):
                 normalized = {
                     "sender_id": f"wa:{msg.get('from', 'unknown')}",
@@ -53,8 +68,10 @@ def parse_whatsapp_inbound(body: dict[str, Any]) -> list[dict[str, Any]]:
                         "timestamp": msg.get("timestamp", ""),
                         "source": "whatsapp_webhook",
                         "platform": "whatsapp",
+                        "recipient_phone_id": recipient_phone_id,
                     },
                     "wa_profile": value.get("contacts", [{}])[0].get("profile", {}),
+                    "recipient_phone_id": recipient_phone_id,
                 }
                 messages.append(normalized)
     return messages
@@ -110,11 +127,36 @@ def handle_whatsapp_inbound(
     process_fn: Callable,
     background_tasks: Any,
 ) -> list[dict[str, Any]]:
-    """Process incoming WhatsApp webhook. Returns list of ProcessResults."""
+    """Process incoming WhatsApp webhook with per-tenant credential resolution."""
     messages = parse_whatsapp_inbound(body)
     results = []
+    
+    # Resolve tenant credentials from first message's recipient_phone_id
+    _tenant_wa_token = None
+    _tenant_wa_phone_id = None
+    if messages:
+        phone_id = messages[0].get("recipient_phone_id", "")
+        if phone_id:
+            try:
+                from app.tenant import resolve_tenant
+                from app.main import get_conn
+                with get_conn() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            "SELECT slug, channels FROM tenants WHERE channels->>'phone_number_id' = %s LIMIT 1",
+                            (phone_id,),
+                        )
+                        row = cur.fetchone()
+                        if row:
+                            channels = row.get("channels", {})
+                            if isinstance(channels, str):
+                                channels = json.loads(channels)
+                            _tenant_wa_token = channels.get("access_token") or channels.get("token")
+                            _tenant_wa_phone_id = channels.get("phone_number_id") or phone_id
+            except Exception:
+                logger.warning("whatsapp_tenant_resolve_failed phone_id=%s", phone_id)
+    
     for msg in messages:
-        # Wrap as IncomingMessage-like dict for process_fn
         class FakePayload:
             def __init__(self, d):
                 self.sender_id = d["sender_id"]
@@ -128,9 +170,8 @@ def handle_whatsapp_inbound(
         try:
             result = process_fn(payload, background_tasks)
             if result and hasattr(result, "reply_text") and result.should_reply:
-                # Extract WA number from sender_id (strip "wa:" prefix)
                 wa_number = msg["sender_id"].replace("wa:", "")
-                send_whatsapp_message(wa_number, result.reply_text)
+                send_whatsapp_message(wa_number, result.reply_text, token=_tenant_wa_token, phone_id=_tenant_wa_phone_id)
             results.append({
                 "sender": msg["sender_id"],
                 "processed": bool(result),
