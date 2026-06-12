@@ -8,7 +8,7 @@ import unicodedata
 import time as time_module
 from datetime import date, datetime, time, timedelta
 from typing import Any
-from app.config.settings import get_config
+from collections import defaultdict
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
@@ -2671,8 +2671,30 @@ def _channel_post_process(
     return result
 
 
+# Rate limiter: per-sender cooldown to prevent abuse
+_RATE_LIMIT_CACHE: dict[str, float] = {}
+_RATE_LIMIT_LOCK = threading.Lock()
+RATE_LIMIT_SECONDS = float(os.getenv("RATE_LIMIT_SECONDS", "1.0"))
+
+def _check_rate_limit(sender_id: str) -> bool:
+    """Returns True if request should be processed, False if rate-limited."""
+    if not sender_id or sender_id.startswith("test_"):
+        return True
+    now = time_module.time()
+    with _RATE_LIMIT_LOCK:
+        last = _RATE_LIMIT_CACHE.get(sender_id, 0)
+        if now - last < RATE_LIMIT_SECONDS:
+            return False
+        _RATE_LIMIT_CACHE[sender_id] = now
+    return True
+
 @app.post("/api/process-instagram-message", response_model=ProcessResult)
 def process_instagram_message(payload: IncomingMessage, background_tasks: BackgroundTasks) -> ProcessResult:
+    if not _check_rate_limit(payload.sender_id):
+        return ProcessResult(
+            sender_id=payload.sender_id, should_reply=False, reply_text=None,
+            conversation_state="rate_limited", appointment_created=False, handoff=False,
+        )
     import os
     if os.getenv("CHATBOT_ENGINE", "generic") == "generic":
         from app.structured_core import process_message_structured

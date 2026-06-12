@@ -1,0 +1,27 @@
+name: CI/CD
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  smoke-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Health check
+        run: curl -sSf --max-time 60 https://instagram-randevu-bot.onrender.com/health
+      - name: LLM check
+        run: curl -s --max-time 120 https://instagram-randevu-bot.onrender.com/api/llm-health | grep -q '"ok":true'
+
+  deploy-render:
+    needs: smoke-test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Trigger Render deploy
+        run: |
+          curl -X POST https://api.render.com/v1/services/srv-d7f6l8favr4c73927gb0/deploys \
+            -H "Authorization: Bearer ${{ secrets.RENDER_API_KEY }}" \
+            -H "Content-Type: application/json" \
+            --fail
